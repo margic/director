@@ -1,5 +1,12 @@
 import * as dotenv from 'dotenv';
-dotenv.config();
+import { app } from 'electron';
+import path from 'path';
+
+if (app.isPackaged) {
+  dotenv.config({ path: path.join(process.resourcesPath, '.env') });
+} else {
+  dotenv.config();
+}
 
 export const msalConfig = {
   auth: {

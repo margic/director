@@ -16,6 +16,7 @@ const createWindow = () => {
     width: 1280,
     height: 800,
     backgroundColor: '#090B10', // Brand background
+    icon: path.join(__dirname, '../icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
