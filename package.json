@@ -19,10 +19,16 @@
       "dist/**/*",
       "dist-electron/**/*",
       "package.json",
+      "icon.png",
       "!.env"
     ],
+    "extraResources": [
+      ".env"
+    ],
+    "icon": "icon.png",
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "icon.ico"
     },
     "linux": {
       "target": "AppImage"
