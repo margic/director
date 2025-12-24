@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@theme {
+  --font-rajdhani: 'Rajdhani', sans-serif;
+  --font-jetbrains: 'JetBrains Mono', monospace;
+
+  --color-border: hsl(225 9% 17%);
+  --color-input: hsl(217.2 32.6% 17.5%);
+  --color-ring: hsl(17 100% 56%);
+  --color-background: hsl(223 27% 5%);
+  --color-foreground: hsl(210 40% 98%);
+
+  --color-primary: hsl(17 100% 56%);
+  --color-primary-foreground: hsl(210 40% 98%);
+
+  --color-secondary: hsl(196 100% 44%);
+  --color-secondary-foreground: hsl(222 47% 11%);
+
+  --color-destructive: hsl(356 85% 57%);
+  --color-destructive-foreground: hsl(210 40% 98%);
+
+  --color-muted: hsl(217.2 32.6% 17.5%);
+  --color-muted-foreground: hsl(215 20.2% 65.1%);
+
+  --color-accent: hsl(217.2 32.6% 17.5%);
+  --color-accent-foreground: hsl(210 40% 98%);
+
+  --color-popover: hsl(220 15% 8%);
+  --color-popover-foreground: hsl(210 40% 98%);
+
+  --color-card: hsl(220 15% 8%);
+  --color-card-foreground: hsl(210 40% 98%);
+
+  --radius: 0.5rem;
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+  
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from { height: 0 }
+    to { height: var(--radix-accordion-content-height) }
+  }
+  @keyframes accordion-up {
+    from { height: var(--radix-accordion-content-height) }
+    to { height: 0 }
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

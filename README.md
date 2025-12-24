@@ -1,4 +1,4 @@
-# director
+# Sim RaceCenter Director
 Sim RaceCenter Director UI App
 
 ## License
