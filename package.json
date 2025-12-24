@@ -1,6 +1,6 @@
 {
   "name": "director",
-  "version": "1.0.0",
+  "version": "0.0.4",
   "description": "Sim RaceCenter Director UI App",
   "main": "dist-electron/main.js",
   "scripts": {
