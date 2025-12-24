@@ -6,7 +6,27 @@
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && tsc -p tsconfig.main.json && electron . --no-sandbox --disable-gpu\"",
     "build": "tsc -p tsconfig.main.json && vite build",
+    "dist": "npm run build && electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "build": {
+    "appId": "com.simracecenter.director",
+    "productName": "Sim RaceCenter Director",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json",
+      "!.env"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   },
   "repository": {
     "type": "git",
