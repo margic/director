@@ -1,17 +1,63 @@
-import { useState } from 'react'
-import { Activity, Gauge, Radio, Settings, User } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { Activity, Gauge, Radio, Settings, User, LogOut } from 'lucide-react'
 
 function App() {
   const [user, setUser] = useState<any>(null);
+  const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (activeMenu === 'sidebar' && sidebarRef.current && !sidebarRef.current.contains(event.target as Node)) {
+        setActiveMenu(null);
+      }
+      if (activeMenu === 'header' && headerRef.current && !headerRef.current.contains(event.target as Node)) {
+        setActiveMenu(null);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [activeMenu]);
+
+  useEffect(() => {
+    const checkLogin = async () => {
+      if (window.electronAPI) {
+        const account = await window.electronAPI.getAccount();
+        if (account) {
+          setUser(account);
+        }
+      }
+    };
+    checkLogin();
+  }, []);
 
   const handleLogin = async () => {
+    console.log('Login button clicked');
     try {
+      if (!window.electronAPI) {
+        console.error('Electron API not found');
+        return;
+      }
       const account = await window.electronAPI.login();
       if (account) {
         setUser(account);
       }
     } catch (error) {
       console.error('Login failed', error);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      if (window.electronAPI) {
+        await window.electronAPI.logout();
+        setUser(null);
+        setActiveMenu(null);
+      }
+    } catch (error) {
+      console.error('Logout failed', error);
     }
   };
 
@@ -35,10 +81,25 @@ function App() {
           </button>
         </nav>
 
-        <div className="mt-auto">
-          <button className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors">
+        <div className="mt-auto relative" ref={sidebarRef}>
+          <button 
+            onClick={() => user && setActiveMenu(activeMenu === 'sidebar' ? null : 'sidebar')}
+            className={`p-3 rounded-lg hover:bg-white/5 transition-colors ${activeMenu === 'sidebar' ? 'text-primary bg-white/5' : 'text-muted-foreground hover:text-primary'}`}
+          >
             <User className="w-6 h-6" />
           </button>
+          
+          {activeMenu === 'sidebar' && (
+            <div className="absolute left-full bottom-0 ml-2 w-48 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50">
+              <button
+                onClick={handleLogout}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 text-muted-foreground hover:text-destructive transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="font-medium">Log Out</span>
+              </button>
+            </div>
+          )}
         </div>
       </aside>
 
@@ -56,14 +117,31 @@ function App() {
           </div>
           
           {user && (
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                <p className="text-sm font-bold text-white leading-none">{user.name}</p>
-                <p className="text-xs text-muted-foreground">{user.username}</p>
-              </div>
-              <div className="w-8 h-8 rounded bg-secondary/20 border border-secondary/50 flex items-center justify-center text-secondary font-bold">
-                {user.name.charAt(0)}
-              </div>
+            <div className="relative" ref={headerRef}>
+              <button 
+                onClick={() => setActiveMenu(activeMenu === 'header' ? null : 'header')}
+                className="flex items-center gap-3 hover:bg-white/5 p-2 rounded-lg transition-colors"
+              >
+                <div className="text-right">
+                  <p className="text-sm font-bold text-white leading-none">{user.name}</p>
+                  <p className="text-xs text-muted-foreground">{user.username}</p>
+                </div>
+                <div className="w-8 h-8 rounded bg-secondary/20 border border-secondary/50 flex items-center justify-center text-secondary font-bold">
+                  {user.name.charAt(0)}
+                </div>
+              </button>
+
+              {activeMenu === 'header' && (
+                <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50">
+                  <button
+                    onClick={handleLogout}
+                    className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 text-muted-foreground hover:text-destructive transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    <span className="font-medium">Log Out</span>
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </header>
@@ -72,7 +150,7 @@ function App() {
         <div className="flex-1 p-8 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-secondary/5 via-background to-background">
           {!user ? (
             <div className="max-w-md w-full bg-card border border-border rounded-xl p-8 shadow-2xl relative overflow-hidden group">
-              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
+              <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
               
               <div className="relative z-10 text-center space-y-6">
                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-primary/20 group-hover:border-primary/50 transition-colors">
