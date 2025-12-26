@@ -13,8 +13,8 @@ let authService: AuthService;
 const createWindow = () => {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: 800,
+    height: 400,
     backgroundColor: '#090B10', // Brand background
     icon: path.join(__dirname, '../icon.png'),
     webPreferences: {
@@ -46,6 +46,15 @@ app.on('ready', () => {
       return await authService.login(mainWindow);
     }
     return null;
+  });
+
+  ipcMain.handle('auth:get-account', async () => {
+    return await authService.getAccount();
+  });
+
+  ipcMain.handle('auth:logout', async () => {
+    await authService.logout();
+    return true;
   });
 });
 

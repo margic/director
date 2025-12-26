@@ -15,14 +15,44 @@ export class AuthService {
     return authResponse?.account;
   }
 
+  async getAccount(): Promise<any> {
+    const tokenCache = this.clientApplication.getTokenCache();
+    const accounts = await tokenCache.getAllAccounts();
+
+    if (accounts.length > 0) {
+      const account = accounts[0];
+      try {
+        const response = await this.clientApplication.acquireTokenSilent({
+          account: account,
+          scopes: ["User.Read"],
+        });
+        this.account = response.account;
+        return this.account;
+      } catch (error) {
+        console.log('Silent token acquisition failed', error);
+        return null;
+      }
+    }
+    return null;
+  }
+
   async logout(): Promise<void> {
+    const tokenCache = this.clientApplication.getTokenCache();
+    const accounts = await tokenCache.getAllAccounts();
+    for (const account of accounts) {
+      await tokenCache.removeAccount(account);
+    }
     this.account = null;
-    // Clear cache if needed
   }
 
   private async getTokenInteractive(mainWindow: BrowserWindow): Promise<any> {
     const openBrowser = async (url: string) => {
-      await shell.openExternal(url);
+      console.log('Opening browser with URL:', url);
+      try {
+        await shell.openExternal(url);
+      } catch (error) {
+        console.error('Failed to open browser:', error);
+      }
     };
 
     const authResponse = await this.clientApplication.acquireTokenInteractive({

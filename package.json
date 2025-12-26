@@ -1,10 +1,10 @@
 {
   "name": "director",
-  "version": "0.0.4",
+  "version": "0.0.6",
   "description": "Sim RaceCenter Director UI App",
   "main": "dist-electron/main.js",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && tsc -p tsconfig.main.json && electron . --no-sandbox --disable-gpu\"",
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && tsc -p tsconfig.main.json && node run-electron.js\"",
     "build": "tsc -p tsconfig.main.json && vite build",
     "dist": "npm run build && electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1"
