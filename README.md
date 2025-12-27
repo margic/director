@@ -1,5 +1,9 @@
 # Sim RaceCenter Director
-Sim RaceCenter Director UI App
+
+The Sim RaceCenter Director App is the on-premise execution engine for Sim RaceCenter. It runs locally on your race center PC, acting as a secure bridge between the cloud-based Race Control and your local hardware and software environment (OBS, iRacing, etc.).
+
+**Website:** [https://www.simracecenter.com/](https://www.simracecenter.com/)  
+**YouTube:** [https://www.youtube.com/@simracecenter](https://www.youtube.com/@simracecenter)
 
 ## License
 
