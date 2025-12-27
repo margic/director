@@ -1,8 +1,7 @@
 <div align="center">
 
 <!-- Banner Image -->
-> **@[USER ACTION REQUIRED]:** Upload `banner-logo.png` to `/assets/images/` and link it here.
-<!-- <img src="assets/images/banner-logo.png" alt="Sim RaceCenter Director Banner" width="100%"> -->
+<img src="assets/images/banner-logo.png" alt="Sim RaceCenter Director Banner" width="100%">
 
 <br>
 
@@ -26,8 +25,7 @@
 
 Think of it as the **broadcast control room** for high-performance sim racing operations. This Electron-powered application runs locally on your race center PC, providing secure, real-time orchestration of streams, telemetry, and race events.
 
-> **@[USER ACTION REQUIRED]:** Upload `icon-logo.png` to `/assets/images/` and link it here.
-<!-- <img src="assets/images/icon-logo.png" alt="Director Icon" width="120" align="right"> -->
+<img src="assets/images/icon-logo.png" alt="Director Icon" width="120" align="right">
 
 ### **Core Capabilities**
 - 🔐 **Secure Cloud Bridge** — Azure AD authentication with local execution
@@ -185,8 +183,7 @@ Run the built executable from the `release/` directory after building.
 | 📊 Dashboard UI | ✅ Active | React-based control interface |
 | 🌐 Cross-Platform | ✅ Active | Windows + Linux support |
 
-> **@[USER ACTION REQUIRED]:** Upload `brand-lo.jpg` to `/assets/images/` and link it here.
-<!-- <img src="assets/images/brand-lo.jpg" alt="Brand Guide" width="600"> -->
+<img src="assets/images/brand-lo.png" alt="Brand Guide" width="600">
 
 ---
 
