@@ -145,7 +145,9 @@ export class TelemetryService {
     // Convert numeric severity to KnownSeverityLevel if needed
     let severityValue: KnownSeverityLevel;
     if (typeof severity === 'number') {
-      severityValue = NUMERIC_SEVERITY_MAP[severity] || KnownSeverityLevel.Information;
+      // Clamp severity to valid range [0-4]
+      const clampedSeverity = Math.max(0, Math.min(severity, NUMERIC_SEVERITY_MAP.length - 1));
+      severityValue = NUMERIC_SEVERITY_MAP[clampedSeverity];
     } else {
       severityValue = severity || KnownSeverityLevel.Information;
     }

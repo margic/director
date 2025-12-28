@@ -37,7 +37,7 @@ function App() {
           const profile = await window.electronAPI.getUserProfile();
           setUserProfile(profile);
           
-          // Track user session (only anonymous userId, no PII)
+          // Track user session (only anonymous userId for privacy - homeAccountId is not PII)
           clientTelemetry.trackEvent('UserSession.Authenticated', {
             userId: account.homeAccountId,
           });

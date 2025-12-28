@@ -103,7 +103,7 @@ exceptions
 | Event | When | Properties |
 |-------|------|------------|
 | `Auth.LoginAttempt` | User clicks login | - |
-| `Auth.LoginSuccess` | Login completes | userId, username |
+| `Auth.LoginSuccess` | Login completes | userId (anonymous) |
 | `Auth.Logout` | User logs out | - |
 
 ### Director Events
@@ -119,7 +119,7 @@ exceptions
 ### UI Events
 | Event | When | Properties |
 |-------|------|------------|
-| `UserSession.Authenticated` | User session established | userId, username |
+| `UserSession.Authenticated` | User session established | userId (anonymous) |
 | `PageView` | User navigates | pageName |
 | `UI.LoginButtonClicked` | Login button clicked | - |
 | `UI.DirectorToggleClicked` | Director toggle clicked | currentState |
