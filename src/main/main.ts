@@ -1,6 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { AuthService } from './auth-service';
+import { DirectorService } from './director-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -9,6 +10,7 @@ if (require('electron-squirrel-startup')) {
 
 let mainWindow: BrowserWindow | null = null;
 let authService: AuthService;
+let directorService: DirectorService;
 
 const createWindow = () => {
   // Create the browser window.
@@ -39,6 +41,7 @@ const createWindow = () => {
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
   authService = new AuthService();
+  directorService = new DirectorService(authService);
   createWindow();
 
   ipcMain.handle('auth:login', async () => {
@@ -55,6 +58,21 @@ app.on('ready', () => {
   ipcMain.handle('auth:logout', async () => {
     await authService.logout();
     return true;
+  });
+
+  // Director IPC Handlers
+  ipcMain.handle('director:start', async () => {
+    await directorService.start();
+    return directorService.getStatus();
+  });
+
+  ipcMain.handle('director:stop', async () => {
+    directorService.stop();
+    return directorService.getStatus();
+  });
+
+  ipcMain.handle('director:status', async () => {
+    return directorService.getStatus();
   });
 });
 

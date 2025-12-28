@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, Gauge, Radio, Settings, User, LogOut } from 'lucide-react'
+import { Activity, Gauge, Radio, Settings, User, LogOut, Play, Square } from 'lucide-react'
 
 function App() {
   const [user, setUser] = useState<any>(null);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
+  const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
   const sidebarRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
@@ -33,6 +34,21 @@ function App() {
     checkLogin();
   }, []);
 
+  useEffect(() => {
+    const pollStatus = async () => {
+      if (user && window.electronAPI?.directorStatus) {
+        const status = await window.electronAPI.directorStatus();
+        setDirectorStatus(status);
+      }
+    };
+    
+    if (user) {
+      pollStatus();
+      const interval = setInterval(pollStatus, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
   const handleLogin = async () => {
     console.log('Login button clicked');
     try {
@@ -46,6 +62,20 @@ function App() {
       }
     } catch (error) {
       console.error('Login failed', error);
+    }
+  };
+
+  const toggleDirector = async () => {
+    try {
+      if (directorStatus.isRunning) {
+        const status = await window.electronAPI.directorStop();
+        setDirectorStatus(status);
+      } else {
+        const status = await window.electronAPI.directorStart();
+        setDirectorStatus(status);
+      }
+    } catch (error) {
+      console.error('Failed to toggle director', error);
     }
   };
 
@@ -173,8 +203,51 @@ function App() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl">
+              {/* Director Control Card */}
+              <div className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group relative overflow-hidden">
+                <div className="flex justify-between items-start z-10">
+                  <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Loop</h3>
+                  <div className={`w-3 h-3 rounded-full ${directorStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                </div>
+                
+                <div className="z-10">
+                  <div className="text-2xl font-jetbrains font-bold text-white mb-1">
+                    {directorStatus.status}
+                  </div>
+                  <div className="text-xs text-muted-foreground font-rajdhani truncate">
+                    {directorStatus.sessionId ? `Session: ${directorStatus.sessionId}` : 'No Active Session'}
+                  </div>
+                </div>
+
+                <button 
+                  onClick={toggleDirector}
+                  className={`z-10 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
+                    directorStatus.isRunning 
+                      ? 'bg-destructive/20 text-destructive hover:bg-destructive/30' 
+                      : 'bg-primary/20 text-primary hover:bg-primary/30'
+                  }`}
+                >
+                  {directorStatus.isRunning ? (
+                    <>
+                      <Square className="w-4 h-4 fill-current" />
+                      <span>STOP LOOP</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-4 h-4 fill-current" />
+                      <span>START LOOP</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Background Pulse Effect */}
+                {directorStatus.isRunning && (
+                  <div className="absolute inset-0 bg-green-500/5 animate-pulse pointer-events-none" />
+                )}
+              </div>
+
               {/* Placeholder Cards */}
-              {[1, 2, 3].map((i) => (
+              {[2, 3].map((i) => (
                 <div key={i} className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group">
                   <div className="flex justify-between items-start">
                     <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Telemetry Module {i}</h3>
