@@ -24,6 +24,11 @@ export interface IElectronAPI {
   directorStop: () => Promise<any>;
   directorStatus: () => Promise<any>;
   directorListSessions: (centerId?: string, status?: string) => Promise<RaceSession[]>;
+  telemetry: {
+    trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => Promise<boolean>;
+    trackException: (error: { message: string; stack?: string; name: string }, properties?: { [key: string]: string }) => Promise<boolean>;
+    trackTrace: (message: string, severity?: string, properties?: { [key: string]: string }) => Promise<boolean>;
+  };
 }
 
 declare global {

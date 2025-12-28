@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Activity, Gauge, Radio, Settings, User, LogOut, Play, Square, Loader2 } from 'lucide-react'
 import { UserProfile, RaceSession } from './types'
+import { clientTelemetry } from './telemetry'
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -35,10 +36,19 @@ function App() {
           // Fetch user profile with centerId
           const profile = await window.electronAPI.getUserProfile();
           setUserProfile(profile);
+          
+          // Track user session
+          clientTelemetry.trackEvent('UserSession.Authenticated', {
+            userId: account.homeAccountId,
+            username: account.username,
+          });
         }
       }
     };
     checkLogin();
+
+    // Track page view on mount
+    clientTelemetry.trackPageView('MainDashboard');
   }, []);
 
   useEffect(() => {
@@ -87,17 +97,23 @@ function App() {
         console.error('Electron API not found');
         return;
       }
+      clientTelemetry.trackEvent('UI.LoginButtonClicked');
       const account = await window.electronAPI.login();
       if (account) {
         setUser(account);
       }
     } catch (error) {
       console.error('Login failed', error);
+      clientTelemetry.trackException(error as Error, { context: 'login' });
     }
   };
 
   const toggleDirector = async () => {
     try {
+      clientTelemetry.trackEvent('UI.DirectorToggleClicked', {
+        currentState: directorStatus.isRunning ? 'running' : 'stopped',
+      });
+      
       if (directorStatus.isRunning) {
         const status = await window.electronAPI.directorStop();
         setDirectorStatus(status);
@@ -107,18 +123,21 @@ function App() {
       }
     } catch (error) {
       console.error('Failed to toggle director', error);
+      clientTelemetry.trackException(error as Error, { context: 'toggleDirector' });
     }
   };
 
   const handleLogout = async () => {
     try {
       if (window.electronAPI) {
+        clientTelemetry.trackEvent('UI.LogoutClicked');
         await window.electronAPI.logout();
         setUser(null);
         setActiveMenu(null);
       }
     } catch (error) {
       console.error('Logout failed', error);
+      clientTelemetry.trackException(error as Error, { context: 'logout' });
     }
   };
 
