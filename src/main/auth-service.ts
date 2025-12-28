@@ -36,6 +36,26 @@ export class AuthService {
     return null;
   }
 
+  async getAccessToken(): Promise<string | null> {
+    const tokenCache = this.clientApplication.getTokenCache();
+    const accounts = await tokenCache.getAllAccounts();
+
+    if (accounts.length > 0) {
+      const account = accounts[0];
+      try {
+        const response = await this.clientApplication.acquireTokenSilent({
+          account: account,
+          scopes: ["User.Read"],
+        });
+        return response.accessToken;
+      } catch (error) {
+        console.log('Silent token acquisition failed', error);
+        return null;
+      }
+    }
+    return null;
+  }
+
   async logout(): Promise<void> {
     const tokenCache = this.clientApplication.getTokenCache();
     const accounts = await tokenCache.getAllAccounts();
