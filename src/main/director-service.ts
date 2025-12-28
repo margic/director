@@ -78,27 +78,33 @@ export class DirectorService {
       return [];
     }
 
-    // TODO: Replace with actual API call
-    // GET /api/director/v1/sessions?centerId={centerId}&status=ACTIVE
-    console.log(`Mock: Listing sessions for centerId=${filterCenterId}, status=${status || 'ACTIVE'}`);
-    
-    // Mock response with multiple sessions
-    return [
-      {
-        raceSessionId: 'mock-session-123',
-        name: 'Practice Session A',
-        status: 'ACTIVE',
+    try {
+      const params = new URLSearchParams({
         centerId: filterCenterId,
-        createdAt: new Date().toISOString()
-      },
-      {
-        raceSessionId: 'mock-session-456',
-        name: 'Qualifying B',
-        status: 'ACTIVE',
-        centerId: filterCenterId,
-        createdAt: new Date().toISOString()
+        status: status || 'ACTIVE'
+      });
+      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listSessions}?${params}`;
+      console.log('Fetching sessions from:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        console.error(`Failed to fetch sessions: ${response.status} ${response.statusText}`);
+        return [];
       }
-    ];
+
+      const sessions: RaceSession[] = await response.json();
+      console.log(`Found ${sessions.length} sessions`);
+      return sessions;
+    } catch (error) {
+      console.error('Error fetching sessions:', error);
+      return [];
+    }
   }
 
   private async loop() {
