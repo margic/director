@@ -2,6 +2,24 @@ import * as appInsights from 'applicationinsights';
 import { KnownSeverityLevel } from 'applicationinsights/out/src/declarations/generated';
 import { telemetryConfig } from './telemetry-config';
 
+// Severity mapping for IPC calls from renderer
+export const SEVERITY_MAP: { [key: string]: KnownSeverityLevel } = {
+  'Verbose': KnownSeverityLevel.Verbose,
+  'Information': KnownSeverityLevel.Information,
+  'Warning': KnownSeverityLevel.Warning,
+  'Error': KnownSeverityLevel.Error,
+  'Critical': KnownSeverityLevel.Critical,
+};
+
+// Numeric to enum mapping
+export const NUMERIC_SEVERITY_MAP: KnownSeverityLevel[] = [
+  KnownSeverityLevel.Verbose,      // 0
+  KnownSeverityLevel.Information,  // 1
+  KnownSeverityLevel.Warning,      // 2
+  KnownSeverityLevel.Error,        // 3
+  KnownSeverityLevel.Critical,     // 4
+];
+
 /**
  * TelemetryService provides centralized telemetry tracking for the Director application.
  * It integrates with Azure Application Insights to enable remote observability and
@@ -125,16 +143,9 @@ export class TelemetryService {
     if (!this.client) return;
     
     // Convert numeric severity to KnownSeverityLevel if needed
-    let severityValue: string;
+    let severityValue: KnownSeverityLevel;
     if (typeof severity === 'number') {
-      const severityMap = [
-        KnownSeverityLevel.Verbose,      // 0
-        KnownSeverityLevel.Information,  // 1
-        KnownSeverityLevel.Warning,      // 2
-        KnownSeverityLevel.Error,        // 3
-        KnownSeverityLevel.Critical,     // 4
-      ];
-      severityValue = severityMap[severity] || KnownSeverityLevel.Information;
+      severityValue = NUMERIC_SEVERITY_MAP[severity] || KnownSeverityLevel.Information;
     } else {
       severityValue = severity || KnownSeverityLevel.Information;
     }

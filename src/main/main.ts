@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { AuthService } from './auth-service';
 import { DirectorService } from './director-service';
-import { telemetryService } from './telemetry-service';
+import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -60,7 +60,6 @@ app.on('ready', () => {
         if (result) {
           telemetryService.trackEvent('Auth.LoginSuccess', {
             userId: result.homeAccountId,
-            username: result.username,
           });
         }
         return result;
@@ -146,15 +145,8 @@ app.on('ready', () => {
   });
 
   ipcMain.handle('telemetry:track-trace', async (_, message: string, severity?: string, properties?: { [key: string]: string }) => {
-    // Map severity string to Application Insights severity level
-    const severityMap: { [key: string]: number } = {
-      'Verbose': 0,
-      'Information': 1,
-      'Warning': 2,
-      'Error': 3,
-      'Critical': 4,
-    };
-    const severityLevel = severity ? severityMap[severity] : 1;
+    // Map severity string to KnownSeverityLevel using shared constant
+    const severityLevel = severity ? SEVERITY_MAP[severity] : undefined;
     telemetryService.trackTrace(message, severityLevel, properties);
     return true;
   });
