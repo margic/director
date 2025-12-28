@@ -1,6 +1,7 @@
 import { PublicClientApplication, CryptoProvider } from '@azure/msal-node';
 import { shell, BrowserWindow } from 'electron';
 import { msalConfig } from './auth-config';
+import { UserProfile } from './director-types';
 
 export class AuthService {
   private clientApplication: PublicClientApplication;
@@ -34,6 +35,23 @@ export class AuthService {
       }
     }
     return null;
+  }
+
+  async getUserProfile(): Promise<UserProfile | null> {
+    const account = await this.getAccount();
+    if (!account) return null;
+
+    // TODO: Replace with actual API call to GET /api/auth/user
+    // For now, return a mock profile with centerId
+    const profile: UserProfile = {
+      userId: account.homeAccountId,
+      displayName: account.name,
+      username: account.username,
+      centerId: 'center-123', // Mock centerId - should come from API
+      roles: ['director']
+    };
+
+    return profile;
   }
 
   async getAccessToken(): Promise<string | null> {

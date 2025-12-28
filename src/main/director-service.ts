@@ -1,6 +1,6 @@
 import { AuthService } from './auth-service';
 import { 
-  ActiveSessionResponse, 
+  RaceSession,
   GetNextSequenceResponse, 
   DirectorStatus 
 } from './director-types';
@@ -26,18 +26,20 @@ export class DirectorService {
     console.log('Starting Director Service...');
     this.isRunning = true;
     
-    // 1. Discover Session
-    const session = await this.discoverSession();
-    if (!session) {
-      console.log('No active session found. Director will not start loop.');
+    // 1. Discover Sessions
+    const sessions = await this.listSessions();
+    if (!sessions || sessions.length === 0) {
+      console.log('No active sessions found. Director will not start loop.');
       this.isRunning = false;
       return;
     }
 
+    // 2. Auto-select session (for now, pick the first one)
+    const session = sessions[0];
     this.currentRaceSessionId = session.raceSessionId;
     console.log(`Joined session: ${session.name} (${session.raceSessionId})`);
 
-    // 2. Start Loop
+    // 3. Start Loop
     this.loop();
   }
 
@@ -59,6 +61,45 @@ export class DirectorService {
     };
   }
 
+  async listSessions(centerId?: string, status?: string): Promise<RaceSession[]> {
+    const token = await this.authService.getAccessToken();
+    if (!token) {
+      console.warn('No access token available for session discovery');
+      return [];
+    }
+
+    // Get user profile to obtain centerId if not provided
+    const profile = await this.authService.getUserProfile();
+    const filterCenterId = centerId || profile?.centerId;
+
+    if (!filterCenterId) {
+      console.warn('No centerId available for session discovery');
+      return [];
+    }
+
+    // TODO: Replace with actual API call
+    // GET /api/director/v1/sessions?centerId={centerId}&status=ACTIVE
+    console.log(`Mock: Listing sessions for centerId=${filterCenterId}, status=${status || 'ACTIVE'}`);
+    
+    // Mock response with multiple sessions
+    return [
+      {
+        raceSessionId: 'mock-session-123',
+        name: 'Practice Session A',
+        status: 'ACTIVE',
+        centerId: filterCenterId,
+        createdAt: new Date().toISOString()
+      },
+      {
+        raceSessionId: 'mock-session-456',
+        name: 'Qualifying B',
+        status: 'ACTIVE',
+        centerId: filterCenterId,
+        createdAt: new Date().toISOString()
+      }
+    ];
+  }
+
   private async loop() {
     if (!this.isRunning || !this.currentRaceSessionId) return;
 
@@ -75,25 +116,6 @@ export class DirectorService {
         this.loopInterval = setTimeout(() => this.loop(), this.POLL_INTERVAL_MS);
       }
     }
-  }
-
-  private async discoverSession(): Promise<ActiveSessionResponse | null> {
-    const token = await this.authService.getAccessToken();
-    if (!token) {
-      console.warn('No access token available for session discovery');
-      return null;
-    }
-
-    // TODO: Replace with actual API call
-    // GET /api/director/v1/sessions/active
-    console.log('Mock: Discovering session with token', token.substring(0, 10) + '...');
-    
-    // Mock response
-    return {
-      raceSessionId: 'mock-session-123',
-      name: 'Mock Practice Session',
-      status: 'ACTIVE'
-    };
   }
 
   private async fetchAndExecuteNextSequence() {
