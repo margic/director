@@ -12,4 +12,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   directorStatus: () => ipcRenderer.invoke('director:status'),
   directorListSessions: (centerId?: string, status?: string) => 
     ipcRenderer.invoke('director:list-sessions', centerId, status),
+  
+  // Telemetry API
+  telemetry: {
+    trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) =>
+      ipcRenderer.invoke('telemetry:track-event', name, properties, measurements),
+    trackException: (error: { message: string; stack?: string; name: string }, properties?: { [key: string]: string }) =>
+      ipcRenderer.invoke('telemetry:track-exception', error, properties),
+    trackTrace: (message: string, severity?: string, properties?: { [key: string]: string }) =>
+      ipcRenderer.invoke('telemetry:track-trace', message, severity, properties),
+  },
 });

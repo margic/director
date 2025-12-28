@@ -6,6 +6,7 @@ import {
 } from './director-types';
 import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
+import { telemetryService } from './telemetry-service';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -63,6 +64,7 @@ export class DirectorService {
   }
 
   async listSessions(centerId?: string, status?: string): Promise<RaceSession[]> {
+    const startTime = Date.now();
     const token = await this.authService.getAccessToken();
     if (!token) {
       console.warn('No access token available for session discovery');
@@ -93,6 +95,23 @@ export class DirectorService {
         },
       });
 
+      const duration = Date.now() - startTime;
+      const success = response.ok;
+
+      // Track API dependency
+      telemetryService.trackDependency(
+        'RaceControl API',
+        `GET ${apiConfig.endpoints.listSessions}`,
+        duration,
+        success,
+        response.status,
+        'HTTP',
+        {
+          centerId: filterCenterId,
+          status: status || 'ACTIVE',
+        }
+      );
+
       if (!response.ok) {
         console.error(`Failed to fetch sessions: ${response.status} ${response.statusText}`);
         return [];
@@ -100,9 +119,27 @@ export class DirectorService {
 
       const sessions: RaceSession[] = await response.json();
       console.log(`Found ${sessions.length} sessions`);
+      
+      telemetryService.trackMetric('Sessions.Count', sessions.length, {
+        centerId: filterCenterId,
+      });
+
       return sessions;
     } catch (error) {
       console.error('Error fetching sessions:', error);
+      const duration = Date.now() - startTime;
+      telemetryService.trackDependency(
+        'RaceControl API',
+        `GET ${apiConfig.endpoints.listSessions}`,
+        duration,
+        false,
+        0,
+        'HTTP',
+        {
+          error: (error as Error).message,
+        }
+      );
+      telemetryService.trackException(error as Error, { operation: 'listSessions' });
       return [];
     }
   }
@@ -126,6 +163,7 @@ export class DirectorService {
   }
 
   private async fetchAndExecuteNextSequence() {
+    const startTime = Date.now();
     const token = await this.authService.getAccessToken();
     if (!token) {
       console.warn('No access token available for fetching sequence');
@@ -148,11 +186,38 @@ export class DirectorService {
         },
       });
 
+      const duration = Date.now() - startTime;
+
       if (response.status === 204) {
         // No new sequence available
         console.log('No new sequence available (204)');
+        telemetryService.trackDependency(
+          'RaceControl API',
+          `GET nextSequence`,
+          duration,
+          true,
+          204,
+          'HTTP',
+          {
+            sessionId: this.currentRaceSessionId,
+            result: 'no-sequence',
+          }
+        );
         return;
       }
+
+      const success = response.ok;
+      telemetryService.trackDependency(
+        'RaceControl API',
+        `GET nextSequence`,
+        duration,
+        success,
+        response.status,
+        'HTTP',
+        {
+          sessionId: this.currentRaceSessionId,
+        }
+      );
 
       if (!response.ok) {
         console.error(`Failed to fetch next sequence: ${response.status} ${response.statusText}`);
@@ -162,12 +227,40 @@ export class DirectorService {
       const sequence: GetNextSequenceResponse = await response.json();
       console.log('Received sequence:', sequence.sequenceId);
 
+      telemetryService.trackEvent('Sequence.Received', {
+        sequenceId: sequence.sequenceId,
+        sessionId: this.currentRaceSessionId,
+        commandCount: sequence.commands.length.toString(),
+        priority: sequence.priority || 'NORMAL',
+      });
+
       await this.executor.execute({
         id: sequence.sequenceId,
         commands: sequence.commands
       });
+
+      telemetryService.trackEvent('Sequence.Executed', {
+        sequenceId: sequence.sequenceId,
+        sessionId: this.currentRaceSessionId,
+      });
     } catch (error) {
       console.error('Error fetching/executing sequence:', error);
+      const duration = Date.now() - startTime;
+      telemetryService.trackDependency(
+        'RaceControl API',
+        `GET nextSequence`,
+        duration,
+        false,
+        0,
+        'HTTP',
+        {
+          error: (error as Error).message,
+        }
+      );
+      telemetryService.trackException(error as Error, {
+        operation: 'fetchAndExecuteNextSequence',
+        sessionId: this.currentRaceSessionId || 'unknown',
+      });
     }
   }
 }

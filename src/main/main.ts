@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { AuthService } from './auth-service';
 import { DirectorService } from './director-service';
+import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -40,13 +41,32 @@ const createWindow = () => {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
+  // Initialize telemetry first
+  telemetryService.initialize();
+  telemetryService.trackEvent('Application.Started', {
+    platform: process.platform,
+    version: app.getVersion(),
+  });
+
   authService = new AuthService();
   directorService = new DirectorService(authService);
   createWindow();
 
   ipcMain.handle('auth:login', async () => {
     if (mainWindow) {
-      return await authService.login(mainWindow);
+      try {
+        telemetryService.trackEvent('Auth.LoginAttempt');
+        const result = await authService.login(mainWindow);
+        if (result) {
+          telemetryService.trackEvent('Auth.LoginSuccess', {
+            userId: result.homeAccountId,
+          });
+        }
+        return result;
+      } catch (error) {
+        telemetryService.trackException(error as Error, { operation: 'login' });
+        throw error;
+      }
     }
     return null;
   });
@@ -60,19 +80,46 @@ app.on('ready', () => {
   });
 
   ipcMain.handle('auth:logout', async () => {
-    await authService.logout();
-    return true;
+    try {
+      telemetryService.trackEvent('Auth.Logout');
+      await authService.logout();
+      return true;
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'logout' });
+      throw error;
+    }
   });
 
   // Director IPC Handlers
   ipcMain.handle('director:start', async () => {
-    await directorService.start();
-    return directorService.getStatus();
+    try {
+      telemetryService.trackEvent('Director.StartRequested');
+      await directorService.start();
+      const status = directorService.getStatus();
+      telemetryService.trackEvent('Director.Started', {
+        sessionId: status.sessionId || 'none',
+        status: status.status,
+      });
+      return status;
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'director.start' });
+      throw error;
+    }
   });
 
   ipcMain.handle('director:stop', async () => {
-    directorService.stop();
-    return directorService.getStatus();
+    try {
+      telemetryService.trackEvent('Director.StopRequested');
+      directorService.stop();
+      const status = directorService.getStatus();
+      telemetryService.trackEvent('Director.Stopped', {
+        status: status.status,
+      });
+      return status;
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'director.stop' });
+      throw error;
+    }
   });
 
   ipcMain.handle('director:status', async () => {
@@ -82,13 +129,36 @@ app.on('ready', () => {
   ipcMain.handle('director:list-sessions', async (_, centerId?: string, status?: string) => {
     return await directorService.listSessions(centerId, status);
   });
+
+  // Telemetry IPC Handlers
+  ipcMain.handle('telemetry:track-event', async (_, name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => {
+    telemetryService.trackEvent(name, properties, measurements);
+    return true;
+  });
+
+  ipcMain.handle('telemetry:track-exception', async (_, error: { message: string; stack?: string; name: string }, properties?: { [key: string]: string }) => {
+    const err = new Error(error.message);
+    err.name = error.name;
+    err.stack = error.stack;
+    telemetryService.trackException(err, properties);
+    return true;
+  });
+
+  ipcMain.handle('telemetry:track-trace', async (_, message: string, severity?: string, properties?: { [key: string]: string }) => {
+    // Map severity string to KnownSeverityLevel using shared constant
+    const severityLevel = severity ? SEVERITY_MAP[severity] : undefined;
+    telemetryService.trackTrace(message, severityLevel, properties);
+    return true;
+  });
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits
 // explicitly with Cmd + Q.
-app.on('window-all-closed', () => {
+app.on('window-all-closed', async () => {
   if (process.platform !== 'darwin') {
+    telemetryService.trackEvent('Application.Quit');
+    await telemetryService.flush();
     app.quit();
   }
 });
