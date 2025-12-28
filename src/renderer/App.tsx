@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, Gauge, Radio, Settings, User, LogOut, Play, Square } from 'lucide-react'
+import { Activity, Gauge, Radio, Settings, User, LogOut, Play, Square, Loader2 } from 'lucide-react'
+import { UserProfile, RaceSession } from './types'
 
 function App() {
   const [user, setUser] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [sessions, setSessions] = useState<RaceSession[]>([]);
+  const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
   const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -28,6 +32,9 @@ function App() {
         const account = await window.electronAPI.getAccount();
         if (account) {
           setUser(account);
+          // Fetch user profile with centerId
+          const profile = await window.electronAPI.getUserProfile();
+          setUserProfile(profile);
         }
       }
     };
@@ -48,6 +55,30 @@ function App() {
       return () => clearInterval(interval);
     }
   }, [user]);
+
+  // Poll for available sessions
+  useEffect(() => {
+    const fetchSessions = async () => {
+      if (userProfile?.centerId && window.electronAPI?.directorListSessions) {
+        setLoadingSessions(true);
+        try {
+          const sessionList = await window.electronAPI.directorListSessions(userProfile.centerId, 'ACTIVE');
+          setSessions(sessionList);
+        } catch (error) {
+          console.error('Failed to fetch sessions:', error);
+        } finally {
+          setLoadingSessions(false);
+        }
+      }
+    };
+
+    if (userProfile) {
+      fetchSessions();
+      // Poll every 10 seconds for session updates
+      const interval = setInterval(fetchSessions, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [userProfile]);
 
   const handleLogin = async () => {
     console.log('Login button clicked');
@@ -155,6 +186,9 @@ function App() {
                 <div className="text-right">
                   <p className="text-sm font-bold text-white leading-none">{user.name}</p>
                   <p className="text-xs text-muted-foreground">{user.username}</p>
+                  {userProfile?.centerId && (
+                    <p className="text-xs text-primary">Center: {userProfile.centerId}</p>
+                  )}
                 </div>
                 <div className="w-8 h-8 rounded bg-secondary/20 border border-secondary/50 flex items-center justify-center text-secondary font-bold">
                   {user.name.charAt(0)}
@@ -202,43 +236,96 @@ function App() {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl">
-              {/* Director Control Card */}
-              <div className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group relative overflow-hidden">
-                <div className="flex justify-between items-start z-10">
-                  <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Loop</h3>
-                  <div className={`w-3 h-3 rounded-full ${directorStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+            <div className="w-full max-w-6xl space-y-6">
+              {/* Sessions List */}
+              <div className="bg-card border border-border rounded-xl p-6">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-white text-lg font-bold uppercase tracking-wider">
+                    Available Sessions
+                    {userProfile?.centerId && (
+                      <span className="text-primary text-sm ml-2">({userProfile.centerId})</span>
+                    )}
+                  </h3>
+                  {loadingSessions && (
+                    <Loader2 className="w-5 h-5 text-primary animate-spin" />
+                  )}
                 </div>
                 
-                <div className="z-10">
-                  <div className="text-2xl font-jetbrains font-bold text-white mb-1">
-                    {directorStatus.status}
+                {sessions.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-muted-foreground">
+                      {loadingSessions ? 'Loading sessions...' : 'No active sessions found. Waiting for session...'}
+                    </p>
                   </div>
-                  <div className="text-xs text-muted-foreground font-rajdhani truncate">
-                    {directorStatus.sessionId ? `Session: ${directorStatus.sessionId}` : 'No Active Session'}
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {sessions.map((session) => (
+                      <div 
+                        key={session.raceSessionId}
+                        className="bg-background border border-border rounded-lg p-4 hover:border-primary/50 transition-colors"
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <h4 className="text-white font-bold">{session.name}</h4>
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                            session.status === 'ACTIVE' 
+                              ? 'bg-green-500/10 text-green-500 border border-green-500/20'
+                              : 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20'
+                          }`}>
+                            {session.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mb-3">
+                          ID: {session.raceSessionId}
+                        </p>
+                        {session.createdAt && (
+                          <p className="text-xs text-muted-foreground">
+                            Created: {new Date(session.createdAt).toLocaleString()}
+                          </p>
+                        )}
+                      </div>
+                    ))}
                   </div>
-                </div>
+                )}
+              </div>
 
-                <button 
-                  onClick={toggleDirector}
-                  className={`z-10 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
-                    directorStatus.isRunning 
-                      ? 'bg-destructive/20 text-destructive hover:bg-destructive/30' 
-                      : 'bg-primary/20 text-primary hover:bg-primary/30'
-                  }`}
-                >
-                  {directorStatus.isRunning ? (
-                    <>
-                      <Square className="w-4 h-4 fill-current" />
-                      <span>STOP LOOP</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4 fill-current" />
-                      <span>START LOOP</span>
-                    </>
-                  )}
-                </button>
+              {/* Control Cards Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {/* Director Control Card */}
+                <div className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group relative overflow-hidden">
+                  <div className="flex justify-between items-start z-10">
+                    <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Loop</h3>
+                    <div className={`w-3 h-3 rounded-full ${directorStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                  </div>
+                  
+                  <div className="z-10">
+                    <div className="text-2xl font-jetbrains font-bold text-white mb-1">
+                      {directorStatus.status}
+                    </div>
+                    <div className="text-xs text-muted-foreground font-rajdhani truncate">
+                      {directorStatus.sessionId ? `Session: ${directorStatus.sessionId}` : 'No Active Session'}
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={toggleDirector}
+                    className={`z-10 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
+                      directorStatus.isRunning 
+                        ? 'bg-destructive/20 text-destructive hover:bg-destructive/30' 
+                        : 'bg-primary/20 text-primary hover:bg-primary/30'
+                    }`}
+                  >
+                    {directorStatus.isRunning ? (
+                      <>
+                        <Square className="w-4 h-4 fill-current" />
+                        <span>STOP LOOP</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-current" />
+                        <span>START LOOP</span>
+                      </>
+                    )}
+                  </button>
 
                 {/* Background Pulse Effect */}
                 {directorStatus.isRunning && (
@@ -261,6 +348,7 @@ function App() {
                   </div>
                 </div>
               ))}
+            </div>
             </div>
           )}
         </div>

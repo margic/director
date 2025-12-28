@@ -49,6 +49,23 @@ export interface DirectorSequence {
 
 // --- API Responses ---
 
+export interface UserProfile {
+  userId: string;
+  displayName: string;
+  username?: string;
+  centerId?: string;
+  roles?: string[];
+}
+
+export interface RaceSession {
+  raceSessionId: string;
+  name: string;
+  status: 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELED';
+  centerId: string;
+  createdAt?: string;
+  scheduledStartTime?: string;
+}
+
 export interface ActiveSessionResponse {
   raceSessionId: string;
   name: string;
