@@ -55,6 +55,10 @@ app.on('ready', () => {
     return await authService.getAccount();
   });
 
+  ipcMain.handle('auth:get-user-profile', async () => {
+    return await authService.getUserProfile();
+  });
+
   ipcMain.handle('auth:logout', async () => {
     await authService.logout();
     return true;
@@ -73,6 +77,10 @@ app.on('ready', () => {
 
   ipcMain.handle('director:status', async () => {
     return directorService.getStatus();
+  });
+
+  ipcMain.handle('director:list-sessions', async (_, centerId?: string, status?: string) => {
+    return await directorService.listSessions(centerId, status);
   });
 });
 
