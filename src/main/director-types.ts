@@ -72,8 +72,11 @@ export interface ActiveSessionResponse {
   status: 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELED';
 }
 
+export type SequencePriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+
 export interface GetNextSequenceResponse {
   sequenceId: string;
   createdAt: string;
+  priority?: SequencePriority;
   commands: DirectorCommand[];
 }
