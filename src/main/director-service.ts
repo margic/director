@@ -5,6 +5,7 @@ import {
   DirectorStatus 
 } from './director-types';
 import { SequenceExecutor } from './sequence-executor';
+import { apiConfig } from './auth-config';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -27,7 +28,7 @@ export class DirectorService {
     this.isRunning = true;
     
     // 1. Discover Session
-    const session = await this.discoverSession();
+    const session = await this.getActiveSession();
     if (!session) {
       console.log('No active session found. Director will not start loop.');
       this.isRunning = false;
@@ -77,61 +78,88 @@ export class DirectorService {
     }
   }
 
-  private async discoverSession(): Promise<ActiveSessionResponse | null> {
+  private async getActiveSession(): Promise<ActiveSessionResponse | null> {
     const token = await this.authService.getAccessToken();
     if (!token) {
       console.warn('No access token available for session discovery');
       return null;
     }
 
-    // TODO: Replace with actual API call
-    // GET /api/director/v1/sessions/active
-    console.log('Mock: Discovering session with token', token.substring(0, 10) + '...');
-    
-    // Mock response
-    return {
-      raceSessionId: 'mock-session-123',
-      name: 'Mock Practice Session',
-      status: 'ACTIVE'
-    };
+    try {
+      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.activeSession}`;
+      console.log('Fetching active session from:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.status === 404) {
+        console.log('No active session found (404)');
+        return null;
+      }
+
+      if (!response.ok) {
+        console.error(`Failed to fetch active session: ${response.status} ${response.statusText}`);
+        return null;
+      }
+
+      const data: ActiveSessionResponse = await response.json();
+      console.log('Active session found:', data);
+      return data;
+    } catch (error) {
+      console.error('Error fetching active session:', error);
+      return null;
+    }
   }
 
   private async fetchAndExecuteNextSequence() {
     const token = await this.authService.getAccessToken();
-    if (!token) return;
+    if (!token) {
+      console.warn('No access token available for fetching sequence');
+      return;
+    }
 
-    // TODO: Replace with actual API call
-    // GET /api/director/v1/sessions/{raceSessionId}/sequences/next
-    
-    // Mock: Randomly return a sequence occasionally
-    if (Math.random() > 0.7) {
-      console.log('Mock: Found new sequence');
-      const mockSequence: GetNextSequenceResponse = {
-        sequenceId: crypto.randomUUID(),
-        createdAt: new Date().toISOString(),
-        commands: [
-          {
-            id: crypto.randomUUID(),
-            type: 'LOG',
-            payload: { message: 'Starting sequence', level: 'INFO' }
-          },
-          {
-            id: crypto.randomUUID(),
-            type: 'WAIT',
-            payload: { durationMs: 2000 }
-          },
-          {
-            id: crypto.randomUUID(),
-            type: 'LOG',
-            payload: { message: 'Sequence complete', level: 'INFO' }
-          }
-        ]
-      };
+    if (!this.currentRaceSessionId) {
+      console.warn('No active race session ID');
+      return;
+    }
+
+    try {
+      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}`;
+      console.log('Fetching next sequence from:', url);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.status === 204) {
+        // No new sequence available
+        console.log('No new sequence available (204)');
+        return;
+      }
+
+      if (!response.ok) {
+        console.error(`Failed to fetch next sequence: ${response.status} ${response.statusText}`);
+        return;
+      }
+
+      const sequence: GetNextSequenceResponse = await response.json();
+      console.log('Received sequence:', sequence.sequenceId);
 
       await this.executor.execute({
-        id: mockSequence.sequenceId,
-        commands: mockSequence.commands
+        id: sequence.sequenceId,
+        commands: sequence.commands
       });
+    } catch (error) {
+      console.error('Error fetching/executing sequence:', error);
     }
   }
 }

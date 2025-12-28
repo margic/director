@@ -27,3 +27,11 @@ export const msalConfig = {
     },
   },
 };
+
+export const apiConfig = {
+  baseUrl: process.env.VITE_API_BASE_URL || 'https://dev-api.simracecenter.com',
+  endpoints: {
+    activeSession: '/api/director/v1/sessions/active',
+    nextSequence: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/sequences/next`,
+  },
+};
