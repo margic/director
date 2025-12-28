@@ -42,7 +42,7 @@ export class TelemetryService {
         // Set common properties for all telemetry
         this.client.commonProperties = {
           application: 'SimRaceCenter-Director',
-          version: require('../../package.json').version || 'unknown',
+          version: telemetryConfig.applicationVersion,
           environment: process.env.NODE_ENV || 'production',
         };
 
@@ -124,10 +124,20 @@ export class TelemetryService {
   trackTrace(message: string, severity?: KnownSeverityLevel | number, properties?: { [key: string]: string }): void {
     if (!this.client) return;
     
-    // Convert severity enum to string if needed
-    const severityValue = typeof severity === 'number' 
-      ? Object.values(KnownSeverityLevel)[severity] 
-      : severity || KnownSeverityLevel.Information;
+    // Convert numeric severity to KnownSeverityLevel if needed
+    let severityValue: string;
+    if (typeof severity === 'number') {
+      const severityMap = [
+        KnownSeverityLevel.Verbose,      // 0
+        KnownSeverityLevel.Information,  // 1
+        KnownSeverityLevel.Warning,      // 2
+        KnownSeverityLevel.Error,        // 3
+        KnownSeverityLevel.Critical,     // 4
+      ];
+      severityValue = severityMap[severity] || KnownSeverityLevel.Information;
+    } else {
+      severityValue = severity || KnownSeverityLevel.Information;
+    }
     
     this.client.trackTrace({
       message,
@@ -142,15 +152,12 @@ export class TelemetryService {
   async flush(): Promise<void> {
     if (!this.client) return;
     
-    return new Promise((resolve) => {
-      // The flush method doesn't take a callback parameter in newer versions
-      // Use a timeout to ensure telemetry is sent
-      this.client!.flush();
-      setTimeout(() => {
-        console.log('Telemetry flushed');
-        resolve();
-      }, 2000);
-    });
+    try {
+      await this.client.flush();
+      console.log('Telemetry flushed');
+    } catch (error) {
+      console.error('Failed to flush telemetry:', error);
+    }
   }
 
   /**
