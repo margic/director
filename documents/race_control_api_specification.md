@@ -50,21 +50,15 @@ For the initial implementation, using the user's Object ID (`oid`) from the toke
 
 ## API Endpoints
 
-### 1. Discover Active Session
+### 0. Get User Profile
 
-**Purpose**: Determines if the Director (identified by the authenticated user) is assigned to an active race session. This is called once when the Director service starts.
+**Purpose**: Retrieves the authenticated user's profile, including their assigned `centerId`. This is required for session discovery.
 
 #### Request
 
 ```http
-GET /api/director/v1/sessions/active
+GET /api/auth/user
 ```
-
-#### Query Parameters
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `directorId` | string | No | Optional Director identifier (if not extracted from token) |
 
 #### Request Headers
 
@@ -74,15 +68,13 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...
 
 #### Response (200 OK)
 
-**Description**: An active session is found for this Director.
-
 ```json
 {
-  "raceSessionId": "550e8400-e29b-41d4-a716-446655440000",
-  "name": "Practice Session A",
-  "status": "ACTIVE",
-  "createdAt": "2025-12-28T10:00:00Z",
-  "scheduledStartTime": "2025-12-28T14:00:00Z"
+  "userId": "oid-from-token",
+  "displayName": "John Doe",
+  "username": "john.doe@example.com",
+  "centerId": "center-123",
+  "roles": ["director"]
 }
 ```
 
@@ -90,23 +82,72 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `raceSessionId` | string (UUID) | Unique identifier for the race session |
-| `name` | string | Human-readable name of the session |
-| `status` | enum | Session status: `PLANNED`, `ACTIVE`, `COMPLETED`, `CANCELED` |
-| `createdAt` | string (ISO 8601) | Timestamp when the session was created |
-| `scheduledStartTime` | string (ISO 8601) | Optional scheduled start time for the session |
+| `userId` | string | Unique user identifier (OID) |
+| `displayName` | string | User's display name |
+| `username` | string | User's email or username |
+| `centerId` | string | The Center ID this user belongs to |
+| `roles` | array | List of assigned roles |
 
-#### Response (404 Not Found)
+---
 
-**Description**: No active session is assigned to this Director.
+### 1. List Active Sessions
+
+**Purpose**: Retrieves a list of active race sessions available for the Director, filtered by their assigned Center. This replaces the previous 1:1 assignment model with a discovery model.
+
+#### Request
+
+```http
+GET /api/director/v1/sessions
+```
+
+#### Query Parameters
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `centerId` | string | Yes | The Center ID to filter sessions by (obtained from User Profile) |
+| `status` | enum | No | Filter by status (default: `ACTIVE`). Values: `PLANNED`, `ACTIVE`, `COMPLETED`, `CANCELED` |
+
+#### Request Headers
+
+```http
+Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGc...
+```
+
+#### Response (200 OK)
+
+**Description**: A list of sessions matching the criteria.
 
 ```json
-{
-  "error": "NO_ACTIVE_SESSION",
-  "message": "No active race session found for this Director",
-  "timestamp": "2025-12-28T10:00:00Z"
-}
+[
+  {
+    "raceSessionId": "550e8400-e29b-41d4-a716-446655440000",
+    "name": "Practice Session A",
+    "status": "ACTIVE",
+    "centerId": "center-123",
+    "createdAt": "2025-12-28T10:00:00Z",
+    "scheduledStartTime": "2025-12-28T14:00:00Z"
+  },
+  {
+    "raceSessionId": "660f9500-f3ac-52e5-b827-557766551111",
+    "name": "Qualifying B",
+    "status": "ACTIVE",
+    "centerId": "center-123",
+    "createdAt": "2025-12-28T11:00:00Z",
+    "scheduledStartTime": "2025-12-28T15:00:00Z"
+  }
+]
 ```
+
+**Response Fields (Array of Objects)**:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `raceSessionId` | string (UUID) | Unique identifier for the race session |
+| `name` | string | Human-readable name of the session |
+| `status` | enum | Session status |
+| `centerId` | string | The Center ID this session belongs to |
+| `createdAt` | string (ISO 8601) | Timestamp when the session was created |
+| `scheduledStartTime` | string (ISO 8601) | Optional scheduled start time |
 
 #### Response (401 Unauthorized)
 
@@ -385,8 +426,23 @@ interface RaceSession {
   raceSessionId: string;           // UUID
   name: string;                    // Human-readable name
   status: 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELED';
+  centerId: string;                // Center ID
   createdAt: string;               // ISO 8601 timestamp
   scheduledStartTime?: string;     // Optional ISO 8601 timestamp
+}
+```
+
+### UserProfile
+
+Represents the authenticated user's profile.
+
+```typescript
+interface UserProfile {
+  userId: string;
+  displayName: string;
+  username?: string;
+  centerId?: string;
+  roles?: string[];
 }
 ```
 
@@ -484,8 +540,13 @@ Suggested tables for implementation:
 ### 1. Director Starts
 
 ```
-Director → GET /api/director/v1/sessions/active
-← 200 OK { raceSessionId: "550e8400...", name: "Practice A", status: "ACTIVE" }
+Director → GET /api/auth/user
+← 200 OK { userId: "...", centerId: "center-123", ... }
+
+Director → GET /api/director/v1/sessions?centerId=center-123&status=ACTIVE
+← 200 OK [
+  { raceSessionId: "550e8400...", name: "Practice A", status: "ACTIVE", centerId: "center-123" }
+]
 ```
 
 ### 2. Director Begins Polling
