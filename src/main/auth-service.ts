@@ -1,6 +1,6 @@
 import { PublicClientApplication, CryptoProvider } from '@azure/msal-node';
 import { shell, BrowserWindow } from 'electron';
-import { msalConfig } from './auth-config';
+import { msalConfig, apiConfig } from './auth-config';
 import { UserProfile } from './director-types';
 
 export class AuthService {
@@ -38,20 +38,27 @@ export class AuthService {
   }
 
   async getUserProfile(): Promise<UserProfile | null> {
-    const account = await this.getAccount();
-    if (!account) return null;
+    const token = await this.getAccessToken();
+    if (!token) return null;
 
-    // TODO: Replace with actual API call to GET /api/auth/user
-    // For now, return a mock profile with centerId
-    const profile: UserProfile = {
-      userId: account.homeAccountId,
-      displayName: account.name,
-      username: account.username,
-      centerId: 'center-123', // Mock centerId - should come from API
-      roles: ['director']
-    };
+    try {
+      const response = await fetch(`${apiConfig.baseUrl}${apiConfig.endpoints.userProfile}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
-    return profile;
+      if (!response.ok) {
+        console.error('Failed to fetch user profile:', response.status, response.statusText);
+        return null;
+      }
+
+      const profile: UserProfile = await response.json();
+      return profile;
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+      return null;
+    }
   }
 
   async getAccessToken(): Promise<string | null> {

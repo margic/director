@@ -16,6 +16,35 @@ The application serves as a bridge and management tool for the simulator environ
 - **Icons**: Lucide React (preferred) or FontAwesome (if specific racing icons are needed)
 - **Animations**: `tailwindcss-animate` for subtle, cinematic entries
 
+## Race Control API
+The application interacts with the Race Control API to fetch user profiles, discover sessions, and execute sequences.
+
+**OFFICIAL SPECIFICATION POLICY:**
+The official source of truth for the API is the OpenAPI specification located at:
+`https://api.simracecenter.com/api/openapi.yaml`
+
+*   **Code to the Spec:** Always implement against the official OpenAPI spec, even if manual tests suggest otherwise.
+*   **Discrepancies:** If the API behaves differently than the spec, do not change the code to match the behavior. Instead, raise an issue with the Race Control team at:
+    `https://github.com/margic/racecontrol/issues`
+
+**Documentation:**
+- **OpenAPI Spec:** [https://api.simracecenter.com/api/openapi.yaml](https://api.simracecenter.com/api/openapi.yaml)
+- **API Docs:** [https://api.simracecenter.com/api/docs](https://api.simracecenter.com/api/docs)
+
+**Key Endpoints (Production):**
+- Base URL: `https://api.simracecenter.com`
+- User Profile: `GET /api/auth/user`
+- List Sessions: `GET /api/director/v1/sessions` (Query: `centerId`, `status`)
+- Next Sequence: `GET /api/director/v1/sessions/{raceSessionId}/sequences/next`
+
+**Data Models:**
+- **RaceSession**: `{ raceSessionId, name, status, centerId, ... }`
+- **UserProfile**: `{ userId, displayName, centerId, ... }`
+- **DirectorSequence**: `{ sequenceId, commands: [ { type: 'WAIT'|'LOG', payload: {...} } ] }`
+
+**Authentication:**
+- All requests require `Authorization: Bearer <token>` (MSAL / Entra ID).
+
 ## Brand Identity & Aesthetic
 * **Core Themes:** High-tech, Motorsport, Dark Mode, Telemetry-focused.
 * **Visual Style:** "Control Room" aesthetic. Deep dark backgrounds with neon-bright data accents.

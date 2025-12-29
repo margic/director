@@ -40,7 +40,7 @@ export class TelemetryService {
 
     try {
       // Configure Application Insights
-      appInsights.setup(telemetryConfig.instrumentationKey)
+      appInsights.setup(telemetryConfig.connectionString)
         .setAutoCollectRequests(true)
         .setAutoCollectPerformance(true, true)
         .setAutoCollectExceptions(true)

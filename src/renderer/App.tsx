@@ -68,10 +68,11 @@ function App() {
   // Poll for available sessions
   useEffect(() => {
     const fetchSessions = async () => {
-      if (userProfile?.centerId && window.electronAPI?.directorListSessions) {
+      const centerId = userProfile?.centerId || userProfile?.center?.id;
+      if (centerId && window.electronAPI?.directorListSessions) {
         setLoadingSessions(true);
         try {
-          const sessionList = await window.electronAPI.directorListSessions(userProfile.centerId, 'ACTIVE');
+          const sessionList = await window.electronAPI.directorListSessions(centerId, 'ACTIVE');
           setSessions(sessionList);
         } catch (error) {
           console.error('Failed to fetch sessions:', error);
@@ -204,8 +205,8 @@ function App() {
                 <div className="text-right">
                   <p className="text-sm font-bold text-white leading-none">{user.name}</p>
                   <p className="text-xs text-muted-foreground">{user.username}</p>
-                  {userProfile?.centerId && (
-                    <p className="text-xs text-primary">Center: {userProfile.centerId}</p>
+                  {(userProfile?.centerId || userProfile?.center?.id) && (
+                    <p className="text-xs text-primary">Center: {userProfile.center?.name || userProfile.centerId || userProfile.center?.id}</p>
                   )}
                 </div>
                 <div className="w-8 h-8 rounded bg-secondary/20 border border-secondary/50 flex items-center justify-center text-secondary font-bold">
@@ -260,8 +261,8 @@ function App() {
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-white text-lg font-bold uppercase tracking-wider">
                     Available Sessions
-                    {userProfile?.centerId && (
-                      <span className="text-primary text-sm ml-2">({userProfile.centerId})</span>
+                    {(userProfile?.centerId || userProfile?.center?.id) && (
+                      <span className="text-primary text-sm ml-2">({userProfile.center?.name || userProfile.centerId || userProfile.center?.id})</span>
                     )}
                   </h3>
                   {loadingSessions && (
