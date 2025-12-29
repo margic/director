@@ -175,8 +175,9 @@ export class DirectorService {
       return;
     }
 
+    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}`;
+
     try {
-      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}`;
       console.log('Fetching next sequence from:', url);
       
       const response = await fetch(url, {
@@ -193,7 +194,7 @@ export class DirectorService {
         console.log('No new sequence available (204)');
         telemetryService.trackDependency(
           'RaceControl API',
-          `GET nextSequence`,
+          url,
           duration,
           true,
           204,
@@ -209,7 +210,7 @@ export class DirectorService {
       const success = response.ok;
       telemetryService.trackDependency(
         'RaceControl API',
-        `GET nextSequence`,
+        url,
         duration,
         success,
         response.status,
@@ -248,7 +249,7 @@ export class DirectorService {
       const duration = Date.now() - startTime;
       telemetryService.trackDependency(
         'RaceControl API',
-        `GET nextSequence`,
+        url,
         duration,
         false,
         0,
