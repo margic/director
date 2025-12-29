@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.main.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "electron": ["mocks/electron.ts"]
+    },
+    "typeRoots": ["./node_modules/@types", "./mocks"]
+  },
+  "include": [
+    "src/**/*",
+    "scripts/**/*",
+    "mocks/**/*"
+  ]
+}

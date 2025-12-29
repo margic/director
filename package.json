@@ -7,7 +7,8 @@
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && tsc -p tsconfig.main.json && node run-electron.js\"",
     "build": "tsc -p tsconfig.main.json && vite build",
     "dist": "npm run build && electron-builder",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "test:director-loop": "ts-node --transpile-only -P tsconfig.test.json -r tsconfig-paths/register scripts/test-director-loop.ts"
   },
   "build": {
     "appId": "com.simracecenter.director",
@@ -69,6 +70,7 @@
     "electron-builder": "^26.0.12",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
+    "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",
     "wait-on": "^9.0.3"
