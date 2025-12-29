@@ -1,9 +1,33 @@
+export interface CenterSettings {
+  theme?: string;
+  locale?: string;
+  timezone?: string;
+  features?: {
+    autoDirector?: boolean;
+    replayEnabled?: boolean;
+    [key: string]: any;
+  };
+  branding?: {
+    logoUrl?: string;
+    primaryColor?: string;
+    [key: string]: any;
+  };
+  [key: string]: any;
+}
+
+export interface Center {
+  id: string;
+  name: string;
+  settings?: CenterSettings;
+}
+
 export interface UserProfile {
   userId: string;
   displayName: string;
   username?: string;
   centerId?: string;
   roles?: string[];
+  center?: Center;
 }
 
 export interface RaceSession {

@@ -73,7 +73,7 @@ export class DirectorService {
 
     // Get user profile to obtain centerId if not provided
     const profile = await this.authService.getUserProfile();
-    const filterCenterId = centerId || profile?.centerId;
+    const filterCenterId = centerId || profile?.centerId || profile?.center?.id;
 
     if (!filterCenterId) {
       console.warn('No centerId available for session discovery');
@@ -101,7 +101,7 @@ export class DirectorService {
       // Track API dependency
       telemetryService.trackDependency(
         'RaceControl API',
-        `GET ${apiConfig.endpoints.listSessions}`,
+        url,
         duration,
         success,
         response.status,
@@ -130,7 +130,7 @@ export class DirectorService {
       const duration = Date.now() - startTime;
       telemetryService.trackDependency(
         'RaceControl API',
-        `GET ${apiConfig.endpoints.listSessions}`,
+        `${apiConfig.baseUrl}${apiConfig.endpoints.listSessions}`,
         duration,
         false,
         0,

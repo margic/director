@@ -34,6 +34,10 @@ Think of it as the **broadcast control room** for high-performance sim racing op
 - ⚡ **High-Performance Architecture** — TypeScript + Electron + React
 - 🌐 **Cross-Platform** — Windows, Linux AppImage support
 
+### **API Documentation**
+- [OpenAPI Specification](https://api.simracecenter.com/api/openapi.yaml)
+- [API Documentation](https://api.simracecenter.com/api/docs)
+
 ---
 
 ## 🛠️ PIT CREW SETUP
