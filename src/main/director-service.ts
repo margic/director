@@ -226,7 +226,7 @@ export class DirectorService {
       }
 
       const sequence: GetNextSequenceResponse = await response.json();
-      console.log('Received sequence:', sequence.sequenceId);
+      console.log('Received sequence:', JSON.stringify(sequence, null, 2));
 
       telemetryService.trackEvent('Sequence.Received', {
         sequenceId: sequence.sequenceId,
