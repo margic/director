@@ -2,7 +2,8 @@ import { AuthService } from './auth-service';
 import { 
   RaceSession,
   GetNextSequenceResponse, 
-  DirectorStatus 
+  DirectorStatus,
+  DirectorState
 } from './director-types';
 import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
@@ -11,8 +12,13 @@ import { telemetryService } from './telemetry-service';
 export class DirectorService {
   private isRunning: boolean = false;
   private status: DirectorStatus = 'IDLE';
+  private currentSequenceId: string | null = null;
+  private totalCommands: number = 0;
+  private processedCommands: number = 0;
+  private lastError: string | undefined;
   private loopInterval: NodeJS.Timeout | null = null;
   private readonly POLL_INTERVAL_MS = 5000; // 5 seconds
+  private readonly BUSY_INTERVAL_MS = 100; // 100ms (rapid fire)
   private authService: AuthService;
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
@@ -55,11 +61,15 @@ export class DirectorService {
     this.status = 'IDLE';
   }
 
-  getStatus() {
+  getStatus(): DirectorState {
     return {
       isRunning: this.isRunning,
       status: this.status,
-      sessionId: this.currentRaceSessionId
+      sessionId: this.currentRaceSessionId,
+      currentSequenceId: this.currentSequenceId,
+      totalCommands: this.totalCommands,
+      processedCommands: this.processedCommands,
+      lastError: this.lastError
     };
   }
 
@@ -147,9 +157,11 @@ export class DirectorService {
   private async loop() {
     if (!this.isRunning || !this.currentRaceSessionId) return;
 
+    let sequenceResult: number | false = false;
+
     try {
       this.status = 'BUSY';
-      await this.fetchAndExecuteNextSequence();
+      sequenceResult = await this.fetchAndExecuteNextSequence();
     } catch (error) {
       console.error('Error in director loop:', error);
       this.status = 'ERROR';
@@ -157,22 +169,29 @@ export class DirectorService {
       // Schedule next iteration
       if (this.isRunning) {
         this.status = 'IDLE';
-        this.loopInterval = setTimeout(() => this.loop(), this.POLL_INTERVAL_MS);
+        let interval = this.POLL_INTERVAL_MS;
+
+        if (sequenceResult !== false) {
+          // If we executed a sequence, use its duration if provided, otherwise default busy interval
+          interval = sequenceResult > 0 ? sequenceResult : this.BUSY_INTERVAL_MS;
+        }
+
+        this.loopInterval = setTimeout(() => this.loop(), interval);
       }
     }
   }
 
-  private async fetchAndExecuteNextSequence() {
+  private async fetchAndExecuteNextSequence(): Promise<number | false> {
     const startTime = Date.now();
     const token = await this.authService.getAccessToken();
     if (!token) {
       console.warn('No access token available for fetching sequence');
-      return;
+      return false;
     }
 
     if (!this.currentRaceSessionId) {
       console.warn('No active race session ID');
-      return;
+      return false;
     }
 
     const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}`;
@@ -204,7 +223,7 @@ export class DirectorService {
             result: 'no-sequence',
           }
         );
-        return;
+        return false;
       }
 
       const success = response.ok;
@@ -222,11 +241,15 @@ export class DirectorService {
 
       if (!response.ok) {
         console.error(`Failed to fetch next sequence: ${response.status} ${response.statusText}`);
-        return;
+        return false;
       }
 
       const sequence: GetNextSequenceResponse = await response.json();
       console.log('Received sequence:', JSON.stringify(sequence, null, 2));
+
+      this.currentSequenceId = sequence.sequenceId;
+      this.totalCommands = sequence.commands.length;
+      this.processedCommands = 0;
 
       telemetryService.trackEvent('Sequence.Received', {
         sequenceId: sequence.sequenceId,
@@ -238,12 +261,21 @@ export class DirectorService {
       await this.executor.execute({
         id: sequence.sequenceId,
         commands: sequence.commands
+      }, (completed, total) => {
+        this.processedCommands = completed;
+        this.totalCommands = total;
       });
+
+      this.currentSequenceId = null;
+      this.totalCommands = 0;
+      this.processedCommands = 0;
 
       telemetryService.trackEvent('Sequence.Executed', {
         sequenceId: sequence.sequenceId,
         sessionId: this.currentRaceSessionId,
       });
+
+      return sequence.totalDurationMs ?? 0;
     } catch (error) {
       console.error('Error fetching/executing sequence:', error);
       const duration = Date.now() - startTime;
@@ -262,6 +294,7 @@ export class DirectorService {
         operation: 'fetchAndExecuteNextSequence',
         sessionId: this.currentRaceSessionId || 'unknown',
       });
+      return false;
     }
   }
 }

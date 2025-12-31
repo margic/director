@@ -52,14 +52,6 @@ app.on('ready', () => {
   directorService = new DirectorService(authService);
   createWindow();
 
-  // Auto-start director in dev mode for debugging
-  if (!app.isPackaged) {
-    setTimeout(() => {
-      console.log('Auto-starting Director Service for debugging...');
-      directorService.start().catch(err => console.error('Failed to auto-start director:', err));
-    }, 5000);
-  }
-
   ipcMain.handle('auth:login', async () => {
     if (mainWindow) {
       try {
