@@ -3,7 +3,7 @@
  * Based on documents/feature_director_loop.md
  */
 
-export type CommandType = 'WAIT' | 'LOG';
+export type CommandType = 'WAIT' | 'LOG' | 'SWITCH_CAMERA' | 'SWITCH_OBS_SCENE' | 'DRIVER_TTS' | 'VIEWER_CHAT';
 
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR';
 
@@ -30,6 +30,29 @@ export interface LogCommandPayload {
   level: LogLevel;
 }
 
+export interface SwitchCameraCommandPayload {
+  carNumber: string;
+  cameraGroup: string;
+  cameraNumber?: number;
+}
+
+export interface SwitchObsSceneCommandPayload {
+  sceneName: string;
+  transition?: string;
+  duration?: number;
+}
+
+export interface DriverTtsCommandPayload {
+  text: string;
+  voiceId?: string;
+  channelId?: string;
+}
+
+export interface ViewerChatCommandPayload {
+  platform: 'YOUTUBE' | 'TWITCH';
+  message: string;
+}
+
 // --- Commands ---
 
 export interface BaseCommand {
@@ -47,7 +70,33 @@ export interface LogCommand extends BaseCommand {
   payload: LogCommandPayload;
 }
 
-export type DirectorCommand = WaitCommand | LogCommand;
+export interface SwitchCameraCommand extends BaseCommand {
+  type: 'SWITCH_CAMERA';
+  payload: SwitchCameraCommandPayload;
+}
+
+export interface SwitchObsSceneCommand extends BaseCommand {
+  type: 'SWITCH_OBS_SCENE';
+  payload: SwitchObsSceneCommandPayload;
+}
+
+export interface DriverTtsCommand extends BaseCommand {
+  type: 'DRIVER_TTS';
+  payload: DriverTtsCommandPayload;
+}
+
+export interface ViewerChatCommand extends BaseCommand {
+  type: 'VIEWER_CHAT';
+  payload: ViewerChatCommandPayload;
+}
+
+export type DirectorCommand = 
+  | WaitCommand 
+  | LogCommand 
+  | SwitchCameraCommand 
+  | SwitchObsSceneCommand 
+  | DriverTtsCommand 
+  | ViewerChatCommand;
 
 // --- Sequences ---
 

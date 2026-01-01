@@ -312,7 +312,7 @@ function App() {
                 {/* Director Control Card */}
                 <div className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group relative overflow-hidden">
                   <div className="flex justify-between items-start z-10">
-                    <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Loop</h3>
+                    <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Control</h3>
                     <div className={`w-3 h-3 rounded-full ${directorStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                   </div>
                   
@@ -336,12 +336,12 @@ function App() {
                     {directorStatus.isRunning ? (
                       <>
                         <Square className="w-4 h-4 fill-current" />
-                        <span>STOP LOOP</span>
+                        <span>STOP</span>
                       </>
                     ) : (
                       <>
                         <Play className="w-4 h-4 fill-current" />
-                        <span>START LOOP</span>
+                        <span>START</span>
                       </>
                     )}
                   </button>
