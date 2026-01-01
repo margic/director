@@ -3,6 +3,7 @@ import path from 'path';
 import { AuthService } from './auth-service';
 import { DirectorService } from './director-service';
 import { telemetryService, SEVERITY_MAP } from './telemetry-service';
+import { IracingService } from './iracing-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -12,6 +13,7 @@ if (require('electron-squirrel-startup')) {
 let mainWindow: BrowserWindow | null = null;
 let authService: AuthService;
 let directorService: DirectorService;
+let iracingService: IracingService;
 
 const createWindow = () => {
   // Create the browser window.
@@ -49,7 +51,9 @@ app.on('ready', () => {
   });
 
   authService = new AuthService();
-  directorService = new DirectorService(authService);
+  iracingService = new IracingService();
+  iracingService.start();
+  directorService = new DirectorService(authService, iracingService);
   createWindow();
 
   ipcMain.handle('auth:login', async () => {
@@ -88,6 +92,15 @@ app.on('ready', () => {
       telemetryService.trackException(error as Error, { operation: 'logout' });
       throw error;
     }
+  });
+
+  // iRacing IPC Handlers
+  ipcMain.handle('iracing:get-status', () => {
+    return { connected: iracingService.isConnected() };
+  });
+
+  ipcMain.handle('iracing:send-command', (event, cmd, var1, var2, var3) => {
+    iracingService.broadcastMessage(cmd, var1, var2, var3);
   });
 
   // Director IPC Handlers

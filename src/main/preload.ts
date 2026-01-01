@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   directorListSessions: (centerId?: string, status?: string) => 
     ipcRenderer.invoke('director:list-sessions', centerId, status),
   
+  // iRacing API
+  iracingGetStatus: () => ipcRenderer.invoke('iracing:get-status'),
+  iracingSendCommand: (cmd: number, var1: number, var2: number, var3?: number) => 
+    ipcRenderer.invoke('iracing:send-command', cmd, var1, var2, var3),
+  
   // Telemetry API
   telemetry: {
     trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) =>

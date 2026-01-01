@@ -53,6 +53,7 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "electron-squirrel-startup": "^1.0.1",
+    "koffi": "^2.15.0",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
