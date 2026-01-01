@@ -29,7 +29,57 @@ const mockSequence: GetNextSequenceResponse = {
       id: "cmd-1",
       type: "LOG",
       payload: {
-        message: "Test Log Command",
+        message: "Starting Test Sequence",
+        level: "INFO"
+      }
+    },
+    {
+      id: "cmd-2",
+      type: "SWITCH_CAMERA",
+      payload: {
+        carNumber: "63",
+        cameraGroup: "TV1",
+        cameraNumber: 1
+      }
+    },
+    {
+      id: "cmd-3",
+      type: "SWITCH_OBS_SCENE",
+      payload: {
+        sceneName: "Driver 63 Onboard",
+        transition: "Fade",
+        duration: 500
+      }
+    },
+    {
+      id: "cmd-4",
+      type: "DRIVER_TTS",
+      payload: {
+        text: "Driver 63, you are on air.",
+        voiceId: "default",
+        channelId: "race-control"
+      }
+    },
+    {
+      id: "cmd-5",
+      type: "VIEWER_CHAT",
+      payload: {
+        platform: "YOUTUBE",
+        message: "Watch Driver 63 battle for the lead!"
+      }
+    },
+    {
+      id: "cmd-6",
+      type: "WAIT",
+      payload: {
+        durationMs: 500
+      }
+    },
+    {
+      id: "cmd-7",
+      type: "LOG",
+      payload: {
+        message: "Sequence Completed",
         level: "INFO"
       }
     }

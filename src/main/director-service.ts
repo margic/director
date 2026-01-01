@@ -3,8 +3,11 @@ import {
   RaceSession,
   GetNextSequenceResponse, 
   DirectorStatus,
-  DirectorState
+  DirectorState,
+  DirectorCommand,
+  DirectorSequence
 } from './director-types';
+import { randomUUID } from 'crypto';
 import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
@@ -181,6 +184,50 @@ export class DirectorService {
     }
   }
 
+  private mapApiCommandToDirectorCommand(apiCommand: any): DirectorCommand {
+    const type = apiCommand.commandType || apiCommand.type;
+    
+    // Default payload to empty object or existing payload
+    let payload: any = apiCommand.payload || {};
+
+    // Map specific command structures
+    if (type === 'SWITCH_CAMERA' && apiCommand.target) {
+      payload = {
+        carNumber: apiCommand.target.carNumber?.toString(),
+        cameraGroup: apiCommand.target.cameraGroup,
+        cameraNumber: apiCommand.target.cameraNumber,
+      };
+    } else if (type === 'SWITCH_OBS_SCENE') {
+        if (apiCommand.target) {
+             payload = {
+                 sceneName: apiCommand.target.sceneName,
+                 transition: apiCommand.target.transition,
+                 duration: apiCommand.target.duration
+             };
+        }
+    } else if (type === 'WAIT') {
+        if (apiCommand.durationMs !== undefined) {
+            payload = { durationMs: apiCommand.durationMs };
+        }
+    } else if (type === 'LOG') {
+        if (apiCommand.message) {
+            payload = { 
+                message: apiCommand.message,
+                level: apiCommand.level || 'INFO'
+            };
+        }
+    }
+    
+    // Ensure ID exists
+    const id = apiCommand.id || randomUUID();
+
+    return {
+      id,
+      type,
+      payload
+    } as DirectorCommand;
+  }
+
   private async fetchAndExecuteNextSequence(): Promise<number | false> {
     const startTime = Date.now();
     const token = await this.authService.getAccessToken();
@@ -244,23 +291,28 @@ export class DirectorService {
         return false;
       }
 
-      const sequence: GetNextSequenceResponse = await response.json();
-      console.log('Received sequence:', JSON.stringify(sequence, null, 2));
+      const sequenceData: any = await response.json();
+      console.log('Received sequence:', JSON.stringify(sequenceData, null, 2));
 
-      this.currentSequenceId = sequence.sequenceId;
-      this.totalCommands = sequence.commands.length;
+      const commands: DirectorCommand[] = (sequenceData.commands || []).map((cmd: any) => 
+        this.mapApiCommandToDirectorCommand(cmd)
+      );
+
+      this.currentSequenceId = sequenceData.sequenceId;
+      this.totalCommands = commands.length;
       this.processedCommands = 0;
 
       telemetryService.trackEvent('Sequence.Received', {
-        sequenceId: sequence.sequenceId,
+        sequenceId: sequenceData.sequenceId,
         sessionId: this.currentRaceSessionId,
-        commandCount: sequence.commands.length.toString(),
-        priority: sequence.priority || 'NORMAL',
+        commandCount: commands.length.toString(),
+        priority: sequenceData.priority || 'NORMAL',
       });
 
       await this.executor.execute({
-        id: sequence.sequenceId,
-        commands: sequence.commands
+        id: sequenceData.sequenceId,
+        commands: commands,
+        metadata: sequenceData.metadata
       }, (completed, total) => {
         this.processedCommands = completed;
         this.totalCommands = total;
@@ -271,11 +323,11 @@ export class DirectorService {
       this.processedCommands = 0;
 
       telemetryService.trackEvent('Sequence.Executed', {
-        sequenceId: sequence.sequenceId,
+        sequenceId: sequenceData.sequenceId,
         sessionId: this.currentRaceSessionId,
       });
 
-      return sequence.totalDurationMs ?? 0;
+      return sequenceData.totalDurationMs ?? 0;
     } catch (error) {
       console.error('Error fetching/executing sequence:', error);
       const duration = Date.now() - startTime;
