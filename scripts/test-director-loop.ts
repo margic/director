@@ -23,6 +23,7 @@ const mockSequence: GetNextSequenceResponse = {
   sequenceId: "seq-1",
   createdAt: new Date().toISOString(),
   priority: "NORMAL",
+  totalDurationMs: 2000,
   commands: [
     {
       id: "cmd-1",
@@ -49,11 +50,22 @@ global.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
   }
 
   if (url.includes('/sequences/next')) {
-    return {
-      ok: true,
-      status: 200,
-      json: async () => mockSequence
-    } as Response;
+    // Alternate between returning a sequence and no content
+    const shouldReturnSequence = Math.random() > 0.5;
+    
+    if (shouldReturnSequence) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => mockSequence
+      } as Response;
+    } else {
+      return {
+        ok: true,
+        status: 204,
+        json: async () => null
+      } as Response;
+    }
   }
 
   return {

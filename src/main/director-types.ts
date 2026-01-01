@@ -9,6 +9,16 @@ export type LogLevel = 'INFO' | 'WARN' | 'ERROR';
 
 export type DirectorStatus = 'IDLE' | 'BUSY' | 'ERROR';
 
+export interface DirectorState {
+  isRunning: boolean;
+  status: DirectorStatus;
+  sessionId: string | null;
+  currentSequenceId?: string | null;
+  totalCommands?: number;
+  processedCommands?: number;
+  lastError?: string;
+}
+
 // --- Command Payloads ---
 
 export interface WaitCommandPayload {
@@ -103,4 +113,5 @@ export interface GetNextSequenceResponse {
   createdAt: string;
   priority?: SequencePriority;
   commands: DirectorCommand[];
+  totalDurationMs?: number;
 }

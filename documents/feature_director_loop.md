@@ -3,6 +3,26 @@
 ## Overview
 This feature implements the core 'Director Loop' which fetches sequences from the server and executes them locally.
 
+## Loop Timing & Adaptive Polling
+
+The Director Loop employs an **adaptive polling strategy** to balance responsiveness with network efficiency.
+
+### 1. Execution Blocking
+The loop is **synchronous with respect to execution**. It must strictly wait for the current sequence to fully complete (including all `WAIT` commands) before attempting to fetch the next sequence. This ensures that commands are executed in the exact order they are received and that the local state is consistent.
+
+### 2. Adaptive Intervals
+The polling interval changes based on the result of the previous fetch:
+
+*   **Idle State (No Content)**:
+    *   Condition: API returns `204 No Content`.
+    *   Action: Wait for `POLL_INTERVAL_MS` (default: **5000ms**) before the next fetch.
+    *   Reason: Reduces unnecessary network traffic when the queue is empty.
+
+*   **Busy State (Sequence Executed)**:
+    *   Condition: API returns `200 OK` and a sequence is executed.
+    *   Action: If `totalDurationMs` is provided in the response, wait for that duration. Otherwise, wait for `BUSY_INTERVAL_MS` (default: **100ms**).
+    *   Reason: Allows the server to control the pacing of the director loop.
+
 ## API Specification
 
 ### Authentication
@@ -52,6 +72,7 @@ All endpoints require Entra ID authentication. The Electron client (Main Process
   "sequenceId": "string (uuid)",
   "createdAt": "string (ISO8601)",
   "priority": "LOW | NORMAL | HIGH | URGENT",
+  "totalDurationMs": 14629,
   "commands": [
     {
       "id": "string (uuid)",
