@@ -19,7 +19,7 @@ const createWindow = () => {
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 800,
-    height: 400,
+    height: 600,
     backgroundColor: '#090B10', // Brand background
     icon: path.join(__dirname, '../icon.png'),
     webPreferences: {

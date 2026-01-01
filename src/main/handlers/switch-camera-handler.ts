@@ -6,18 +6,17 @@ export class SwitchCameraHandler implements CommandHandler<SwitchCameraCommand> 
   constructor(private iracingService: IracingService) {}
 
   async execute(command: SwitchCameraCommand): Promise<void> {
-    const { carNumber, cameraGroup, cameraNumber } = command.payload;
-    console.log(`Switching camera to Car ${carNumber} - Group: ${cameraGroup}${cameraNumber ? ` - Cam: ${cameraNumber}` : ''}`);
+    const { carNumber, cameraGroupNumber, cameraGroupName } = command.payload;
+    console.log(`Switching camera to Car ${carNumber} - Group: ${cameraGroupName || cameraGroupNumber}`);
     
     const carNum = parseInt(String(carNumber), 10);
-    const groupNum = parseInt(String(cameraGroup), 10);
-    const camNum = cameraNumber ? parseInt(String(cameraNumber), 10) : 0;
+    const groupNum = parseInt(String(cameraGroupNumber), 10);
 
     if (isNaN(carNum) || isNaN(groupNum)) {
         console.error('Invalid camera switch parameters', command.payload);
         return;
     }
 
-    this.iracingService.broadcastMessage(IRSDK_CAM_SWITCHNUM, carNum, groupNum, camNum);
+    this.iracingService.broadcastMessage(IRSDK_CAM_SWITCHNUM, carNum, groupNum, 0);
   }
 }

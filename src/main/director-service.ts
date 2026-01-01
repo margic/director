@@ -195,8 +195,8 @@ export class DirectorService {
     if (type === 'SWITCH_CAMERA' && apiCommand.target) {
       payload = {
         carNumber: apiCommand.target.carNumber?.toString(),
-        cameraGroup: apiCommand.target.cameraGroup,
-        cameraNumber: apiCommand.target.cameraNumber,
+        cameraGroupNumber: apiCommand.target.cameraGroupNumber,
+        cameraGroupName: apiCommand.target.cameraGroupName,
       };
     } else if (type === 'SWITCH_OBS_SCENE') {
         if (apiCommand.target) {

@@ -32,8 +32,8 @@ export interface LogCommandPayload {
 
 export interface SwitchCameraCommandPayload {
   carNumber: string;
-  cameraGroup: string;
-  cameraNumber?: number;
+  cameraGroupNumber: number;
+  cameraGroupName?: string;
 }
 
 export interface SwitchObsSceneCommandPayload {
