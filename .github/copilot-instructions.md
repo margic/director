@@ -79,6 +79,23 @@ Do not use generic Tailwind colors (e.g., `bg-blue-500`). Use the semantic brand
 * **Borders:** Most cards should have a thin, subtle border (`border-border`).
 * **Glows:** Use subtle colored shadows or gradients to create a "Cinematic" feel on active elements (e.g., an orange glow behind the "Start Engine" button).
 
+## UI Architecture & Navigation Patterns
+The application follows a **Module-Based Dashboard Architecture**.
+
+### 1. The Dashboard (Hub)
+- The default view (`/`) acts as a central hub.
+- It contains **Preview Modules** (Widgets) for each active integration (e.g., iRacing Status, OBS Preview).
+- **Interaction**: Clicking a Preview Module navigates to that integration's Detail Page.
+
+### 2. Sidebar Navigation
+- Persistent navigation on the left.
+- Contains icons for the Dashboard and all major Integrations.
+- **Behavior**: Allows direct access to Detail Pages from anywhere.
+
+### 3. Detail Pages
+- Dedicated full-screen views for specific integrations (e.g., `/iracing`, `/obs`).
+- Contains detailed controls, configuration, and status for that specific system.
+
 ## Component Guidelines
 
 ### Buttons
