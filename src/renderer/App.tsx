@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, Gauge, Radio, Settings, User, LogOut, Play, Square, Loader2 } from 'lucide-react'
+import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2 } from 'lucide-react'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 
@@ -150,13 +150,16 @@ function App() {
         </div>
         
         <nav className="flex flex-col gap-6 w-full items-center">
-          <button className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors">
-            <Gauge className="w-6 h-6" />
+          <button 
+            className="p-3 rounded-lg bg-white/5 text-primary transition-colors"
+            title="Dashboard"
+          >
+            <LayoutDashboard className="w-6 h-6" />
           </button>
-          <button className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors">
-            <Radio className="w-6 h-6" />
-          </button>
-          <button className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors">
+          <button 
+            className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors"
+            title="Settings"
+          >
             <Settings className="w-6 h-6" />
           </button>
         </nav>
@@ -351,22 +354,6 @@ function App() {
                   <div className="absolute inset-0 bg-green-500/5 animate-pulse pointer-events-none" />
                 )}
               </div>
-
-              {/* Placeholder Cards */}
-              {[2, 3].map((i) => (
-                <div key={i} className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group">
-                  <div className="flex justify-between items-start">
-                    <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Telemetry Module {i}</h3>
-                    <Activity className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-                  </div>
-                  <div className="text-4xl font-jetbrains font-bold text-white">
-                    --.-- <span className="text-sm text-muted-foreground font-rajdhani">UNIT</span>
-                  </div>
-                  <div className="w-full bg-secondary/10 h-1 rounded-full overflow-hidden">
-                    <div className="w-0 h-full bg-secondary group-hover:w-2/3 transition-all duration-1000" />
-                  </div>
-                </div>
-              ))}
             </div>
             </div>
           )}
