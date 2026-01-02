@@ -32,8 +32,8 @@ export interface LogCommandPayload {
 
 export interface SwitchCameraCommandPayload {
   carNumber: string;
-  cameraGroup: string;
-  cameraNumber?: number;
+  cameraGroupNumber: number;
+  cameraGroupName?: string;
 }
 
 export interface SwitchObsSceneCommandPayload {
@@ -108,6 +108,13 @@ export interface DirectorSequence {
 
 // --- API Responses ---
 
+export interface CameraConfig {
+  id: string;
+  name: string;
+  groupNumber: number;
+  cameraNumber?: number;
+}
+
 export interface CenterSettings {
   theme?: string;
   locale?: string;
@@ -122,6 +129,7 @@ export interface CenterSettings {
     primaryColor?: string;
     [key: string]: any;
   };
+  cameras?: CameraConfig[];
   [key: string]: any;
 }
 
@@ -147,6 +155,8 @@ export interface RaceSession {
   centerId: string;
   createdAt?: string;
   scheduledStartTime?: string;
+  settings?: CenterSettings;
+  [key: string]: any;
 }
 
 export interface ActiveSessionResponse {

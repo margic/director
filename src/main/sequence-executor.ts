@@ -6,18 +6,19 @@ import { SwitchCameraHandler } from './handlers/switch-camera-handler';
 import { SwitchObsSceneHandler } from './handlers/switch-obs-scene-handler';
 import { DriverTtsHandler } from './handlers/driver-tts-handler';
 import { ViewerChatHandler } from './handlers/viewer-chat-handler';
+import { IracingService } from './iracing-service';
 
 export class CommandHandlerRegistry {
   private handlers: Map<CommandType, CommandHandler<any>> = new Map();
 
-  constructor() {
+  constructor(private iracingService: IracingService) {
     this.registerDefaults();
   }
 
   private registerDefaults() {
     this.register('WAIT', new WaitHandler());
     this.register('LOG', new LogHandler());
-    this.register('SWITCH_CAMERA', new SwitchCameraHandler());
+    this.register('SWITCH_CAMERA', new SwitchCameraHandler(this.iracingService));
     this.register('SWITCH_OBS_SCENE', new SwitchObsSceneHandler());
     this.register('DRIVER_TTS', new DriverTtsHandler());
     this.register('VIEWER_CHAT', new ViewerChatHandler());
@@ -35,8 +36,8 @@ export class CommandHandlerRegistry {
 export class SequenceExecutor {
   private registry: CommandHandlerRegistry;
 
-  constructor() {
-    this.registry = new CommandHandlerRegistry();
+  constructor(iracingService: IracingService) {
+    this.registry = new CommandHandlerRegistry(iracingService);
   }
 
   async execute(sequence: DirectorSequence, onProgress?: (completed: number, total: number) => void): Promise<void> {

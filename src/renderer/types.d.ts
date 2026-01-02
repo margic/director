@@ -1,3 +1,10 @@
+export interface CameraConfig {
+  id: string;
+  name: string;
+  groupNumber: number;
+  cameraNumber?: number;
+}
+
 export interface CenterSettings {
   theme?: string;
   locale?: string;
@@ -12,6 +19,7 @@ export interface CenterSettings {
     primaryColor?: string;
     [key: string]: any;
   };
+  cameras?: CameraConfig[];
   [key: string]: any;
 }
 
@@ -37,6 +45,8 @@ export interface RaceSession {
   centerId: string;
   createdAt?: string;
   scheduledStartTime?: string;
+  settings?: CenterSettings;
+  [key: string]: any;
 }
 
 export interface IElectronAPI {
@@ -47,8 +57,8 @@ export interface IElectronAPI {
   directorStart: () => Promise<any>;
   directorStop: () => Promise<any>;
   directorStatus: () => Promise<any>;
-  directorListSessions: (centerId?: string, status?: string) => Promise<RaceSession[]>;
-  telemetry: {
+  directorListSessions: (centerId?: string, status?: string) => Promise<RaceSession[]>;  iracingGetStatus: () => Promise<{ connected: boolean }>;
+  iracingSendCommand: (cmd: number, var1: number, var2: number, var3?: number) => Promise<void>;  telemetry: {
     trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => Promise<boolean>;
     trackException: (error: { message: string; stack?: string; name: string }, properties?: { [key: string]: string }) => Promise<boolean>;
     trackTrace: (message: string, severity?: string, properties?: { [key: string]: string }) => Promise<boolean>;

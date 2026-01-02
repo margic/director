@@ -1,7 +1,52 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2 } from 'lucide-react'
+import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2, Car, ArrowLeft, Database } from 'lucide-react'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
+import { IracingPage } from './pages/IracingPage'
+
+const JsonViewer = ({ data }: { data: any }) => {
+  if (data === null || data === undefined) return <span className="text-muted-foreground italic">null</span>;
+  
+  if (Array.isArray(data)) {
+    if (data.length === 0) return <span className="text-muted-foreground italic">[]</span>;
+    return (
+      <div className="flex flex-col gap-2 mt-2">
+        {data.map((item, index) => (
+          <div key={index} className="pl-4 border-l-2 border-border/30">
+            <div className="text-xs text-muted-foreground mb-1 font-mono">Item {index}</div>
+            <JsonViewer data={item} />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (typeof data === 'object') {
+    return (
+      <div className="space-y-1">
+        {Object.entries(data).map(([key, value]) => (
+          <div key={key} className="group">
+            <div className="flex gap-2 py-1">
+              <span className="font-mono text-secondary text-sm min-w-[150px] shrink-0">{key}:</span>
+              <div className="flex-1 font-mono text-sm text-foreground/90 break-all">
+                {typeof value === 'object' && value !== null ? (
+                  <div className="mt-1 pl-2 border-l border-border/30">
+                    <JsonViewer data={value} />
+                  </div>
+                ) : (
+                  String(value)
+                )}
+              </div>
+            </div>
+            <div className="h-px bg-border/20 group-last:hidden" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return <span>{String(data)}</span>;
+};
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -10,6 +55,9 @@ function App() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
   const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
+  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'session-details'>('dashboard');
+  const [selectedSession, setSelectedSession] = useState<RaceSession | null>(null);
+  const [iracingConnected, setIracingConnected] = useState(false);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
@@ -55,6 +103,10 @@ function App() {
       if (user && window.electronAPI?.directorStatus) {
         const status = await window.electronAPI.directorStatus();
         setDirectorStatus(status);
+      }
+      if (user && window.electronAPI?.iracingGetStatus) {
+        const status = await window.electronAPI.iracingGetStatus();
+        setIracingConnected(status.connected);
       }
     };
     
@@ -141,6 +193,11 @@ function App() {
     }
   };
 
+  const handleSessionClick = (session: RaceSession) => {
+    setSelectedSession(session);
+    setCurrentView('session-details');
+  };
+
   return (
     <div className="flex h-screen w-full bg-background text-foreground font-rajdhani overflow-hidden">
       {/* Sidebar */}
@@ -151,10 +208,18 @@ function App() {
         
         <nav className="flex flex-col gap-6 w-full items-center">
           <button 
-            className="p-3 rounded-lg bg-white/5 text-primary transition-colors"
+            onClick={() => setCurrentView('dashboard')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'dashboard' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
             title="Dashboard"
           >
             <LayoutDashboard className="w-6 h-6" />
+          </button>
+          <button 
+            onClick={() => setCurrentView('iracing')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'iracing' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="iRacing"
+          >
+            <Car className="w-6 h-6" />
           </button>
           <button 
             className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors"
@@ -257,6 +322,46 @@ function App() {
                 </button>
               </div>
             </div>
+          ) : currentView === 'iracing' ? (
+            <div className="w-full max-w-6xl h-full">
+              <IracingPage cameras={selectedSession?.settings?.cameras} />
+            </div>
+          ) : currentView === 'session-details' && selectedSession ? (
+            <div className="w-full max-w-6xl space-y-6">
+              <div className="flex items-center gap-4 mb-6">
+                <button 
+                  onClick={() => setCurrentView('dashboard')}
+                  className="p-2 rounded-full bg-card border border-border hover:border-primary text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <ArrowLeft className="w-6 h-6" />
+                </button>
+                <h2 className="text-3xl font-bold uppercase tracking-wider text-white">
+                  Session Details: <span className="text-primary">{selectedSession.name}</span>
+                </h2>
+              </div>
+
+              <div className="bg-card border border-border rounded-xl p-6 shadow-lg overflow-hidden">
+                <div className="flex items-center justify-between mb-6">
+                   <h3 className="text-xl font-bold uppercase tracking-wider text-white flex items-center gap-2">
+                    <Database className="w-5 h-5 text-secondary" />
+                    Session Data
+                  </h3>
+                </div>
+                <div className="space-y-1 max-h-[60vh] overflow-y-auto pr-2">
+                   <JsonViewer data={selectedSession} />
+                </div>
+              </div>
+
+              <div className="flex justify-end">
+                <button 
+                  onClick={() => setCurrentView('iracing')}
+                  className="bg-primary hover:bg-primary/90 text-white font-bold py-3 px-6 rounded-lg uppercase tracking-wider transition-all flex items-center gap-2"
+                >
+                  <Car className="w-5 h-5" />
+                  <span>Open iRacing Controls</span>
+                </button>
+              </div>
+            </div>
           ) : (
             <div className="w-full max-w-6xl space-y-6">
               {/* Sessions List */}
@@ -284,10 +389,11 @@ function App() {
                     {sessions.map((session) => (
                       <div 
                         key={session.raceSessionId}
-                        className="bg-background border border-border rounded-lg p-4 hover:border-primary/50 transition-colors"
+                        onClick={() => handleSessionClick(session)}
+                        className="bg-background border border-border rounded-lg p-4 hover:border-primary/50 transition-colors cursor-pointer group"
                       >
                         <div className="flex justify-between items-start mb-2">
-                          <h4 className="text-white font-bold">{session.name}</h4>
+                          <h4 className="text-white font-bold group-hover:text-primary transition-colors">{session.name}</h4>
                           <span className={`px-2 py-0.5 rounded text-xs font-bold ${
                             session.status === 'ACTIVE' 
                               ? 'bg-green-500/10 text-green-500 border border-green-500/20'
@@ -353,6 +459,30 @@ function App() {
                 {directorStatus.isRunning && (
                   <div className="absolute inset-0 bg-green-500/5 animate-pulse pointer-events-none" />
                 )}
+              </div>
+
+              {/* iRacing Status Card */}
+              <div 
+                onClick={() => setCurrentView('iracing')}
+                className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
+              >
+                <div className="flex justify-between items-start">
+                  <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">iRacing Status</h3>
+                  <Car className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                </div>
+                
+                <div>
+                  <div className={`text-2xl font-jetbrains font-bold mb-1 ${iracingConnected ? 'text-green-500' : 'text-white'}`}>
+                    {iracingConnected ? 'CONNECTED' : 'NOT FOUND'}
+                  </div>
+                  <div className="text-xs text-muted-foreground font-rajdhani">
+                    {iracingConnected ? 'Simulator Running' : 'Waiting for Simulator...'}
+                  </div>
+                </div>
+                
+                <div className="w-full py-3 rounded-lg bg-secondary/10 text-secondary font-bold flex items-center justify-center gap-2 group-hover:bg-secondary/20 transition-colors">
+                  <span>OPEN CONTROLS</span>
+                </div>
               </div>
             </div>
             </div>

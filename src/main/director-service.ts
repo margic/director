@@ -11,6 +11,7 @@ import { randomUUID } from 'crypto';
 import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
+import { IracingService } from './iracing-service';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -26,9 +27,9 @@ export class DirectorService {
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
 
-  constructor(authService: AuthService) {
+  constructor(authService: AuthService, iracingService: IracingService) {
     this.authService = authService;
-    this.executor = new SequenceExecutor();
+    this.executor = new SequenceExecutor(iracingService);
   }
 
   async start() {
@@ -194,8 +195,8 @@ export class DirectorService {
     if (type === 'SWITCH_CAMERA' && apiCommand.target) {
       payload = {
         carNumber: apiCommand.target.carNumber?.toString(),
-        cameraGroup: apiCommand.target.cameraGroup,
-        cameraNumber: apiCommand.target.cameraNumber,
+        cameraGroupNumber: apiCommand.target.cameraGroupNumber,
+        cameraGroupName: apiCommand.target.cameraGroupName,
       };
     } else if (type === 'SWITCH_OBS_SCENE') {
         if (apiCommand.target) {
