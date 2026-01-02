@@ -67,10 +67,11 @@ This feature follows the standard "Module-Based Dashboard" pattern:
 
 ## Configuration
 - **Environment Variables**:
-    - `OBS_WS_URL`: The WebSocket URL (e.g., `ws://localhost:4455`).
     - `OBS_WS_PASSWORD`: The password for the OBS WebSocket server.
+- **Session Configuration**:
+    - `obsHost`: Provided in the `RaceSession` object from the API.
 - **Updates**:
-    - Add these keys to `.env.example`.
+    - Add `OBS_WS_PASSWORD` to `.env.example`.
 
 ## Validation Logic
 The core value of this feature is ensuring the broadcast is "ready" before it starts.

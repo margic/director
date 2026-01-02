@@ -28,8 +28,11 @@ export class DirectorService {
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
 
-  constructor(authService: AuthService, iracingService: IracingService, obsService: ObsService) {
-    this.authService = authService;
+  constructor(
+    private authService: AuthService, 
+    private iracingService: IracingService, 
+    private obsService: ObsService
+  ) {
     this.executor = new SequenceExecutor(iracingService, obsService);
   }
 
@@ -51,6 +54,14 @@ export class DirectorService {
     const session = sessions[0];
     this.currentRaceSessionId = session.raceSessionId;
     console.log(`Joined session: ${session.name} (${session.raceSessionId})`);
+
+    // Configure OBS if host is provided
+    if (session.obsHost) {
+      console.log(`Configuring OBS connection for session: ${session.obsHost}`);
+      // If we are already connected to a different host, we might need to reconnect.
+      // For now, we'll just call connect which handles the logic.
+      this.obsService.connect(session.obsHost, session.obsPassword);
+    }
 
     // 3. Start Loop
     this.loop();

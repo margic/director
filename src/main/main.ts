@@ -53,11 +53,11 @@ app.on('ready', () => {
   });
 
   authService = new AuthService();
-  obsService = new ObsService();
-  obsService.start();
-  directorService = new DirectorService(authService, iracingService, obs
+  iracingService = new IracingService();
   iracingService.start();
-  directorService = new DirectorService(authService, iracingService);
+  obsService = new ObsService();
+  // obsService.start(); // Don't start OBS until we have session info
+  directorService = new DirectorService(authService, iracingService, obsService);
   createWindow();
 
   ipcMain.handle('auth:login', async () => {

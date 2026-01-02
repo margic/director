@@ -156,6 +156,8 @@ export interface RaceSession {
   createdAt?: string;
   scheduledStartTime?: string;
   settings?: CenterSettings;
+  obsHost?: string;
+  obsPassword?: string;
   [key: string]: any;
 }
 

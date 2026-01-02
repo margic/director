@@ -31,8 +31,8 @@ export class ObsService {
         });
     }
 
-    public start() {
-        this.connect();
+    public start(host?: string, password?: string) {
+        this.connect(host, password);
     }
 
     public stop() {
@@ -43,21 +43,51 @@ export class ObsService {
         this.obs.disconnect();
     }
 
-    private async connect() {
-        if (this.connected) return;
+    public async connect(host?: string, password?: string) {
+        // If already connected to the same host, do nothing
+        // For now, we just check if connected. 
+        // TODO: Handle switching hosts if already connected to a different one.
+        if (this.connected) {
+             // If a new host is provided and it's different, we might want to reconnect.
+             // For simplicity, if we are connected, we assume it's fine unless explicitly stopped.
+             // But if the session changes, we might need to force reconnect.
+             // Let's assume for now we disconnect if we want to change hosts.
+             return;
+        }
 
-        const url = process.env.OBS_WS_URL || 'ws://localhost:4455';
-        const password = process.env.OBS_WS_PASSWORD || '';
+        const url = host;
+        const pass = password || process.env.OBS_WS_PASSWORD || '';
+
+        if (!url) {
+            console.log('ObsService: No host provided. Waiting for configuration.');
+            return;
+        }
 
         try {
-            await this.obs.connect(url, password);
+            console.log(`ObsService: Connecting to ${url}...`);
+            await this.obs.connect(url, pass);
         } catch (error) {
             console.error('ObsService: Failed to connect', error);
-            this.startReconnect();
+            this.startReconnect(url, pass);
         }
     }
 
-    private startReconnect() {
+    private startReconnect(url?: string, password?: string) {
+        if (this.reconnectInterval) return;
+
+        console.log('ObsService: Starting reconnect loop');
+        this.reconnectInterval = setInterval(() => {
+            if (!this.connected) {
+                // Pass the same credentials to reconnect
+                this.connect(url, password);
+            } else {
+                if (this.reconnectInterval) {
+                    clearInterval(this.reconnectInterval);
+                    this.reconnectInterval = null;
+                }
+            }
+        }, 5000); // Retry every 5 seconds
+    }
         if (this.reconnectInterval) return;
 
         console.log('ObsService: Starting reconnect loop');
