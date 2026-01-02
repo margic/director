@@ -57,8 +57,13 @@ export interface IElectronAPI {
   directorStart: () => Promise<any>;
   directorStop: () => Promise<any>;
   directorStatus: () => Promise<any>;
-  directorListSessions: (centerId?: string, status?: string) => Promise<RaceSession[]>;  iracingGetStatus: () => Promise<{ connected: boolean }>;
-  iracingSendCommand: (cmd: number, var1: number, var2: number, var3?: number) => Promise<void>;  telemetry: {
+  directorListSessions: (centerId?: string, status?: string) => Promise<RaceSession[]>;
+  iracingGetStatus: () => Promise<{ connected: boolean }>;
+  iracingSendCommand: (cmd: number, var1: number, var2: number, var3?: number) => Promise<void>;
+  obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[] }>;
+  obsGetScenes: () => Promise<string[]>;
+  obsSetScene: (sceneName: string) => Promise<void>;
+  telemetry: {
     trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => Promise<boolean>;
     trackException: (error: { message: string; stack?: string; name: string }, properties?: { [key: string]: string }) => Promise<boolean>;
     trackTrace: (message: string, severity?: string, properties?: { [key: string]: string }) => Promise<boolean>;

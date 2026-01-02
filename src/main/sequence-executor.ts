@@ -7,11 +7,12 @@ import { SwitchObsSceneHandler } from './handlers/switch-obs-scene-handler';
 import { DriverTtsHandler } from './handlers/driver-tts-handler';
 import { ViewerChatHandler } from './handlers/viewer-chat-handler';
 import { IracingService } from './iracing-service';
+import { ObsService } from './obs-service';
 
 export class CommandHandlerRegistry {
   private handlers: Map<CommandType, CommandHandler<any>> = new Map();
 
-  constructor(private iracingService: IracingService) {
+  constructor(private iracingService: IracingService, private obsService: ObsService) {
     this.registerDefaults();
   }
 
@@ -19,7 +20,7 @@ export class CommandHandlerRegistry {
     this.register('WAIT', new WaitHandler());
     this.register('LOG', new LogHandler());
     this.register('SWITCH_CAMERA', new SwitchCameraHandler(this.iracingService));
-    this.register('SWITCH_OBS_SCENE', new SwitchObsSceneHandler());
+    this.register('SWITCH_OBS_SCENE', new SwitchObsSceneHandler(this.obsService));
     this.register('DRIVER_TTS', new DriverTtsHandler());
     this.register('VIEWER_CHAT', new ViewerChatHandler());
   }
@@ -35,8 +36,8 @@ export class CommandHandlerRegistry {
 
 export class SequenceExecutor {
   private registry: CommandHandlerRegistry;
-
-  constructor(iracingService: IracingService) {
+, obsService: ObsService) {
+    this.registry = new CommandHandlerRegistry(iracingService, obs
     this.registry = new CommandHandlerRegistry(iracingService);
   }
 

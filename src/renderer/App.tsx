@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2, Car, ArrowLeft, Database } from 'lucide-react'
+import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2, Car, ArrowLeft, Database, Aperture } from 'lucide-react'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 import { IracingPage } from './pages/IracingPage'
+import { ObsPage } from './pages/ObsPage'
 
 const JsonViewer = ({ data }: { data: any }) => {
   if (data === null || data === undefined) return <span className="text-muted-foreground italic">null</span>;
@@ -55,9 +56,11 @@ function App() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
   const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
-  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'session-details'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'session-details'>('dashboard');
   const [selectedSession, setSelectedSession] = useState<RaceSession | null>(null);
   const [iracingConnected, setIracingConnected] = useState(false);
+  const [obsConnected, setObsConnected] = useState(false);
+  const [obsMissingScenes, setObsMissingScenes] = useState<string[]>([]);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
@@ -106,6 +109,11 @@ function App() {
       }
       if (user && window.electronAPI?.iracingGetStatus) {
         const status = await window.electronAPI.iracingGetStatus();
+      if (user && window.electronAPI?.obsGetStatus) {
+        const status = await window.electronAPI.obsGetStatus();
+        setObsConnected(status.connected);
+        setObsMissingScenes(status.missingScenes);
+      }
         setIracingConnected(status.connected);
       }
     };
@@ -217,6 +225,13 @@ function App() {
           <button 
             onClick={() => setCurrentView('iracing')}
             className={`p-3 rounded-lg transition-colors ${currentView === 'iracing' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            onClick={() => setCurrentView('obs')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'obs' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="OBS"
+          >
+            <Aperture className="w-6 h-6" />
+          </button>
+          <button 
             title="iRacing"
           >
             <Car className="w-6 h-6" />
@@ -319,7 +334,11 @@ function App() {
                 >
                   <span>Initialize Session</span>
                   <Activity className="w-4 h-4" />
-                </button>
+                </button>obs' ? (
+            <div className="w-full max-w-6xl h-full">
+              <ObsPage />
+            </div>
+          ) : currentView === '
               </div>
             </div>
           ) : currentView === 'iracing' ? (
@@ -480,6 +499,32 @@ function App() {
                   </div>
                 </div>
                 
+
+              {/* OBS Status Card */}
+              <div 
+                onClick={() => setCurrentView('obs')}
+                className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
+              >
+                <div className="flex justify-between items-start">
+                  <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">OBS Status</h3>
+                  <Aperture className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                </div>
+                
+                <div>
+                  <div className={`text-2xl font-jetbrains font-bold mb-1 ${obsConnected ? (obsMissingScenes.length > 0 ? 'text-yellow-500' : 'text-green-500') : 'text-white'}`}>
+                    {obsConnected ? 'CONNECTED' : 'DISCONNECTED'}
+                  </div>
+                  <div className="text-xs text-muted-foreground font-rajdhani">
+                    {obsConnected 
+                      ? (obsMissingScenes.length > 0 ? `${obsMissingScenes.length} Scenes Missing` : 'Ready to Broadcast') 
+                      : 'Waiting for OBS...'}
+                  </div>
+                </div>
+                
+                <div className="w-full py-3 rounded-lg bg-secondary/10 text-secondary font-bold flex items-center justify-center gap-2 group-hover:bg-secondary/20 transition-colors">
+                  <span>OPEN CONTROLS</span>
+                </div>
+              </div>
                 <div className="w-full py-3 rounded-lg bg-secondary/10 text-secondary font-bold flex items-center justify-center gap-2 group-hover:bg-secondary/20 transition-colors">
                   <span>OPEN CONTROLS</span>
                 </div>

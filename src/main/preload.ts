@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   iracingSendCommand: (cmd: number, var1: number, var2: number, var3?: number) => 
     ipcRenderer.invoke('iracing:send-command', cmd, var1, var2, var3),
   
+  // OBS API
+  obsGetStatus: () => ipcRenderer.invoke('obs:get-status'),
+  obsGetScenes: () => ipcRenderer.invoke('obs:get-scenes'),
+  obsSetScene: (sceneName: string) => ipcRenderer.invoke('obs:set-scene', sceneName),
+  
   // Telemetry API
   telemetry: {
     trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) =>

@@ -4,6 +4,7 @@ import { AuthService } from './auth-service';
 import { DirectorService } from './director-service';
 import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 import { IracingService } from './iracing-service';
+import { ObsService } from './obs-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -14,6 +15,7 @@ let mainWindow: BrowserWindow | null = null;
 let authService: AuthService;
 let directorService: DirectorService;
 let iracingService: IracingService;
+let obsService: ObsService;
 
 const createWindow = () => {
   // Create the browser window.
@@ -51,7 +53,9 @@ app.on('ready', () => {
   });
 
   authService = new AuthService();
-  iracingService = new IracingService();
+  obsService = new ObsService();
+  obsService.start();
+  directorService = new DirectorService(authService, iracingService, obs
   iracingService.start();
   directorService = new DirectorService(authService, iracingService);
   createWindow();
@@ -96,6 +100,19 @@ app.on('ready', () => {
 
   // iRacing IPC Handlers
   ipcMain.handle('iracing:get-status', () => {
+
+  // OBS IPC Handlers
+  ipcMain.handle('obs:get-status', () => {
+    return obsService.getStatus();
+  });
+
+  ipcMain.handle('obs:get-scenes', async () => {
+    return await obsService.getScenes();
+  });
+
+  ipcMain.handle('obs:set-scene', async (event, sceneName) => {
+    return await obsService.switchScene(sceneName);
+  });
     return { connected: iracingService.isConnected() };
   });
 

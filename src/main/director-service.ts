@@ -12,6 +12,7 @@ import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
 import { IracingService } from './iracing-service';
+import { ObsService } from './obs-service';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -27,9 +28,9 @@ export class DirectorService {
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
 
-  constructor(authService: AuthService, iracingService: IracingService) {
+  constructor(authService: AuthService, iracingService: IracingService, obsService: ObsService) {
     this.authService = authService;
-    this.executor = new SequenceExecutor(iracingService);
+    this.executor = new SequenceExecutor(iracingService, obsService);
   }
 
   async start() {
