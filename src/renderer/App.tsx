@@ -132,7 +132,7 @@ function App() {
       if (centerId && window.electronAPI?.directorListSessions) {
         setLoadingSessions(true);
         try {
-          const sessionList = await window.electronAPI.directorListSessions(centerId, 'ACTIVE');
+          const sessionList = await window.electronAPI.directorListSessions(centerId);
           setSessions(sessionList);
         } catch (error) {
           console.error('Failed to fetch sessions:', error);

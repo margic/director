@@ -88,20 +88,6 @@ export class ObsService {
             }
         }, 5000); // Retry every 5 seconds
     }
-        if (this.reconnectInterval) return;
-
-        console.log('ObsService: Starting reconnect loop');
-        this.reconnectInterval = setInterval(() => {
-            if (!this.connected) {
-                this.connect();
-            } else {
-                if (this.reconnectInterval) {
-                    clearInterval(this.reconnectInterval);
-                    this.reconnectInterval = null;
-                }
-            }
-        }, 5000); // Retry every 5 seconds
-    }
 
     private async fetchScenes() {
         if (!this.connected) return;

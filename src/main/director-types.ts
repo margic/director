@@ -151,20 +151,22 @@ export interface UserProfile {
 export interface RaceSession {
   raceSessionId: string;
   name: string;
-  status: 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELED';
   centerId: string;
   createdAt?: string;
-  scheduledStartTime?: string;
+  scheduledStart?: string;
   settings?: CenterSettings;
   obsHost?: string;
   obsPassword?: string;
+  simulator?: string;
+  directorSceneId?: string;
+  drivers?: any[];
+  iracing?: any;
   [key: string]: any;
 }
 
 export interface ActiveSessionResponse {
   raceSessionId: string;
   name: string;
-  status: 'PLANNED' | 'ACTIVE' | 'COMPLETED' | 'CANCELED';
 }
 
 export type SequencePriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';

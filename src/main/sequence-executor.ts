@@ -36,9 +36,9 @@ export class CommandHandlerRegistry {
 
 export class SequenceExecutor {
   private registry: CommandHandlerRegistry;
-, obsService: ObsService) {
-    this.registry = new CommandHandlerRegistry(iracingService, obs
-    this.registry = new CommandHandlerRegistry(iracingService);
+
+  constructor(iracingService: IracingService, obsService: ObsService) {
+    this.registry = new CommandHandlerRegistry(iracingService, obsService);
   }
 
   async execute(sequence: DirectorSequence, onProgress?: (completed: number, total: number) => void): Promise<void> {

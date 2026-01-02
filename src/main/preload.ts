@@ -10,8 +10,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   directorStart: () => ipcRenderer.invoke('director:start'),
   directorStop: () => ipcRenderer.invoke('director:stop'),
   directorStatus: () => ipcRenderer.invoke('director:status'),
-  directorListSessions: (centerId?: string, status?: string) => 
-    ipcRenderer.invoke('director:list-sessions', centerId, status),
+  directorListSessions: (centerId?: string) => 
+    ipcRenderer.invoke('director:list-sessions', centerId),
   
   // iRacing API
   iracingGetStatus: () => ipcRenderer.invoke('iracing:get-status'),

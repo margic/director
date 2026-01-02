@@ -100,6 +100,12 @@ app.on('ready', () => {
 
   // iRacing IPC Handlers
   ipcMain.handle('iracing:get-status', () => {
+    return { connected: iracingService.isConnected() };
+  });
+
+  ipcMain.handle('iracing:send-command', (event, cmd, var1, var2, var3) => {
+    iracingService.broadcastMessage(cmd, var1, var2, var3);
+  });
 
   // OBS IPC Handlers
   ipcMain.handle('obs:get-status', () => {
@@ -112,12 +118,6 @@ app.on('ready', () => {
 
   ipcMain.handle('obs:set-scene', async (event, sceneName) => {
     return await obsService.switchScene(sceneName);
-  });
-    return { connected: iracingService.isConnected() };
-  });
-
-  ipcMain.handle('iracing:send-command', (event, cmd, var1, var2, var3) => {
-    iracingService.broadcastMessage(cmd, var1, var2, var3);
   });
 
   // Director IPC Handlers
@@ -156,8 +156,8 @@ app.on('ready', () => {
     return directorService.getStatus();
   });
 
-  ipcMain.handle('director:list-sessions', async (_, centerId?: string, status?: string) => {
-    return await directorService.listSessions(centerId, status);
+  ipcMain.handle('director:list-sessions', async (_, centerId?: string) => {
+    return await directorService.listSessions(centerId);
   });
 
   // Telemetry IPC Handlers
