@@ -8,6 +8,8 @@ export class ObsService {
     private reconnectInterval: NodeJS.Timeout | null = null;
     private missingScenes: string[] = [];
     private availableScenes: string[] = [];
+    private currentHost: string | undefined;
+    private currentPassword: string | undefined;
 
     constructor() {
         this.obs = new OBSWebSocket();
@@ -16,7 +18,6 @@ export class ObsService {
             this.connected = true;
             console.log('ObsService: Connected to OBS');
             telemetryService.trackEvent('OBS.Connected');
-            this.fetchScenes();
         });
 
         this.obs.on('ConnectionClosed', (error) => {
@@ -28,6 +29,7 @@ export class ObsService {
 
         this.obs.on('Identified', () => {
             console.log('ObsService: Identified');
+            this.fetchScenes();
         });
     }
 
@@ -55,8 +57,11 @@ export class ObsService {
              return;
         }
 
-        const url = host;
-        const pass = password || process.env.OBS_WS_PASSWORD || '';
+        if (host) this.currentHost = host;
+        if (password) this.currentPassword = password;
+
+        const url = this.currentHost;
+        const pass = this.currentPassword || process.env.OBS_WS_PASSWORD || '';
 
         if (!url) {
             console.log('ObsService: No host provided. Waiting for configuration.');

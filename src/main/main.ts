@@ -56,7 +56,7 @@ app.on('ready', () => {
   iracingService = new IracingService();
   iracingService.start();
   obsService = new ObsService();
-  // obsService.start(); // Don't start OBS until we have session info
+  obsService.start('ws://localhost:4455');
   directorService = new DirectorService(authService, iracingService, obsService);
   createWindow();
 
