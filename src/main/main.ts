@@ -4,6 +4,7 @@ import { AuthService } from './auth-service';
 import { DirectorService } from './director-service';
 import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 import { IracingService } from './iracing-service';
+import { ObsService } from './obs-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -14,6 +15,7 @@ let mainWindow: BrowserWindow | null = null;
 let authService: AuthService;
 let directorService: DirectorService;
 let iracingService: IracingService;
+let obsService: ObsService;
 
 const createWindow = () => {
   // Create the browser window.
@@ -53,7 +55,9 @@ app.on('ready', () => {
   authService = new AuthService();
   iracingService = new IracingService();
   iracingService.start();
-  directorService = new DirectorService(authService, iracingService);
+  obsService = new ObsService();
+  obsService.start('ws://localhost:4455');
+  directorService = new DirectorService(authService, iracingService, obsService);
   createWindow();
 
   ipcMain.handle('auth:login', async () => {
@@ -103,6 +107,19 @@ app.on('ready', () => {
     iracingService.broadcastMessage(cmd, var1, var2, var3);
   });
 
+  // OBS IPC Handlers
+  ipcMain.handle('obs:get-status', () => {
+    return obsService.getStatus();
+  });
+
+  ipcMain.handle('obs:get-scenes', async () => {
+    return await obsService.getScenes();
+  });
+
+  ipcMain.handle('obs:set-scene', async (event, sceneName) => {
+    return await obsService.switchScene(sceneName);
+  });
+
   // Director IPC Handlers
   ipcMain.handle('director:start', async () => {
     try {
@@ -139,8 +156,8 @@ app.on('ready', () => {
     return directorService.getStatus();
   });
 
-  ipcMain.handle('director:list-sessions', async (_, centerId?: string, status?: string) => {
-    return await directorService.listSessions(centerId, status);
+  ipcMain.handle('director:list-sessions', async (_, centerId?: string) => {
+    return await directorService.listSessions(centerId);
   });
 
   // Telemetry IPC Handlers

@@ -10,13 +10,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   directorStart: () => ipcRenderer.invoke('director:start'),
   directorStop: () => ipcRenderer.invoke('director:stop'),
   directorStatus: () => ipcRenderer.invoke('director:status'),
-  directorListSessions: (centerId?: string, status?: string) => 
-    ipcRenderer.invoke('director:list-sessions', centerId, status),
+  directorListSessions: (centerId?: string) => 
+    ipcRenderer.invoke('director:list-sessions', centerId),
   
   // iRacing API
   iracingGetStatus: () => ipcRenderer.invoke('iracing:get-status'),
   iracingSendCommand: (cmd: number, var1: number, var2: number, var3?: number) => 
     ipcRenderer.invoke('iracing:send-command', cmd, var1, var2, var3),
+  
+  // OBS API
+  obsGetStatus: () => ipcRenderer.invoke('obs:get-status'),
+  obsGetScenes: () => ipcRenderer.invoke('obs:get-scenes'),
+  obsSetScene: (sceneName: string) => ipcRenderer.invoke('obs:set-scene', sceneName),
   
   // Telemetry API
   telemetry: {

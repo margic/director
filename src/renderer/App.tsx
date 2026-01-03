@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2, Car, ArrowLeft, Database } from 'lucide-react'
+import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2, Car, ArrowLeft, Database, Aperture } from 'lucide-react'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 import { IracingPage } from './pages/IracingPage'
+import { ObsPage } from './pages/ObsPage'
 
 const JsonViewer = ({ data }: { data: any }) => {
   if (data === null || data === undefined) return <span className="text-muted-foreground italic">null</span>;
@@ -55,9 +56,11 @@ function App() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
   const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
-  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'session-details'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'session-details'>('dashboard');
   const [selectedSession, setSelectedSession] = useState<RaceSession | null>(null);
   const [iracingConnected, setIracingConnected] = useState(false);
+  const [obsConnected, setObsConnected] = useState(false);
+  const [obsMissingScenes, setObsMissingScenes] = useState<string[]>([]);
   const sidebarRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
@@ -106,6 +109,11 @@ function App() {
       }
       if (user && window.electronAPI?.iracingGetStatus) {
         const status = await window.electronAPI.iracingGetStatus();
+      if (user && window.electronAPI?.obsGetStatus) {
+        const status = await window.electronAPI.obsGetStatus();
+        setObsConnected(status.connected);
+        setObsMissingScenes(status.missingScenes);
+      }
         setIracingConnected(status.connected);
       }
     };
@@ -124,7 +132,7 @@ function App() {
       if (centerId && window.electronAPI?.directorListSessions) {
         setLoadingSessions(true);
         try {
-          const sessionList = await window.electronAPI.directorListSessions(centerId, 'ACTIVE');
+          const sessionList = await window.electronAPI.directorListSessions(centerId);
           setSessions(sessionList);
         } catch (error) {
           console.error('Failed to fetch sessions:', error);
@@ -222,6 +230,13 @@ function App() {
             <Car className="w-6 h-6" />
           </button>
           <button 
+            onClick={() => setCurrentView('obs')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'obs' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="OBS"
+          >
+            <Aperture className="w-6 h-6" />
+          </button>
+          <button 
             className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors"
             title="Settings"
           >
@@ -315,12 +330,16 @@ function App() {
 
                 <button 
                   onClick={handleLogin}
-                  className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-4 px-6 rounded-lg uppercase tracking-wider transition-all hover:shadow-[0_0_20px_rgba(255,95,31,0.3)] flex items-center justify-center gap-2"
+                  className="w-full bg-primary hover:bg-primary/90 text-black font-bold py-4 px-6 rounded-lg uppercase tracking-wider transition-all hover:shadow-[0_0_20px_rgba(255,95,31,0.3)] flex items-center justify-center gap-2"
                 >
                   <span>Initialize Session</span>
                   <Activity className="w-4 h-4" />
                 </button>
               </div>
+            </div>
+          ) : currentView === 'obs' ? (
+            <div className="w-full max-w-6xl h-full">
+              <ObsPage />
             </div>
           ) : currentView === 'iracing' ? (
             <div className="w-full max-w-6xl h-full">
@@ -420,8 +439,11 @@ function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {/* Director Control Card */}
                 <div className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group relative overflow-hidden">
-                  <div className="flex justify-between items-start z-10">
-                    <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Control</h3>
+                  <div className="flex justify-between items-center z-10">
+                    <div className="flex items-center gap-2">
+                      <Activity className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                      <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Control</h3>
+                    </div>
                     <div className={`w-3 h-3 rounded-full ${directorStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                   </div>
                   
@@ -438,8 +460,8 @@ function App() {
                     onClick={toggleDirector}
                     className={`z-10 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
                       directorStatus.isRunning 
-                        ? 'bg-destructive/20 text-destructive hover:bg-destructive/30' 
-                        : 'bg-primary/20 text-primary hover:bg-primary/30'
+                        ? 'bg-destructive text-white hover:bg-destructive/90 shadow-[0_0_20px_rgba(239,51,64,0.4)]' 
+                        : 'bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)]'
                     }`}
                   >
                     {directorStatus.isRunning ? (
@@ -466,21 +488,53 @@ function App() {
                 onClick={() => setCurrentView('iracing')}
                 className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
               >
-                <div className="flex justify-between items-start">
-                  <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">iRacing Status</h3>
-                  <Car className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <Car className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">iRacing Status</h3>
+                  </div>
+                  <div className={`w-3 h-3 rounded-full ${iracingConnected ? 'bg-green-500' : 'bg-red-500'}`} />
                 </div>
                 
                 <div>
-                  <div className={`text-2xl font-jetbrains font-bold mb-1 ${iracingConnected ? 'text-green-500' : 'text-white'}`}>
+                  <div className="text-2xl font-jetbrains font-bold mb-1 text-white">
                     {iracingConnected ? 'CONNECTED' : 'NOT FOUND'}
                   </div>
                   <div className="text-xs text-muted-foreground font-rajdhani">
                     {iracingConnected ? 'Simulator Running' : 'Waiting for Simulator...'}
                   </div>
                 </div>
+
+                <div className="w-full py-3 rounded-lg bg-secondary text-white font-bold flex items-center justify-center gap-2 hover:bg-secondary/90 transition-colors shadow-[0_0_15px_rgba(0,163,224,0.3)]">
+                  <span>OPEN CONTROLS</span>
+                </div>
+              </div>
+
+              {/* OBS Status Card */}
+              <div 
+                onClick={() => setCurrentView('obs')}
+                className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <Aperture className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">OBS Status</h3>
+                  </div>
+                  <div className={`w-3 h-3 rounded-full ${obsConnected ? (obsMissingScenes.length > 0 ? 'bg-yellow-500' : 'bg-green-500') : 'bg-red-500'}`} />
+                </div>
                 
-                <div className="w-full py-3 rounded-lg bg-secondary/10 text-secondary font-bold flex items-center justify-center gap-2 group-hover:bg-secondary/20 transition-colors">
+                <div>
+                  <div className="text-2xl font-jetbrains font-bold mb-1 text-white">
+                    {obsConnected ? 'CONNECTED' : 'DISCONNECTED'}
+                  </div>
+                  <div className="text-xs text-muted-foreground font-rajdhani">
+                    {obsConnected 
+                      ? (obsMissingScenes.length > 0 ? `${obsMissingScenes.length} Scenes Missing` : 'Ready to Broadcast') 
+                      : 'Waiting for OBS...'}
+                  </div>
+                </div>
+                
+                <div className="w-full py-3 rounded-lg bg-secondary text-white font-bold flex items-center justify-center gap-2 hover:bg-secondary/90 transition-colors shadow-[0_0_15px_rgba(0,163,224,0.3)]">
                   <span>OPEN CONTROLS</span>
                 </div>
               </div>

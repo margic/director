@@ -12,6 +12,7 @@ import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
 import { IracingService } from './iracing-service';
+import { ObsService } from './obs-service';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -23,13 +24,15 @@ export class DirectorService {
   private loopInterval: NodeJS.Timeout | null = null;
   private readonly POLL_INTERVAL_MS = 5000; // 5 seconds
   private readonly BUSY_INTERVAL_MS = 100; // 100ms (rapid fire)
-  private authService: AuthService;
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
 
-  constructor(authService: AuthService, iracingService: IracingService) {
-    this.authService = authService;
-    this.executor = new SequenceExecutor(iracingService);
+  constructor(
+    private authService: AuthService, 
+    private iracingService: IracingService, 
+    private obsService: ObsService
+  ) {
+    this.executor = new SequenceExecutor(iracingService, obsService);
   }
 
   async start() {
@@ -50,6 +53,14 @@ export class DirectorService {
     const session = sessions[0];
     this.currentRaceSessionId = session.raceSessionId;
     console.log(`Joined session: ${session.name} (${session.raceSessionId})`);
+
+    // Configure OBS if host is provided
+    if (session.obsHost) {
+      console.log(`Configuring OBS connection for session: ${session.obsHost}`);
+      // If we are already connected to a different host, we might need to reconnect.
+      // For now, we'll just call connect which handles the logic.
+      this.obsService.connect(session.obsHost, session.obsPassword);
+    }
 
     // 3. Start Loop
     this.loop();
@@ -77,7 +88,7 @@ export class DirectorService {
     };
   }
 
-  async listSessions(centerId?: string, status?: string): Promise<RaceSession[]> {
+  async listSessions(centerId?: string): Promise<RaceSession[]> {
     const startTime = Date.now();
     const token = await this.authService.getAccessToken();
     if (!token) {
@@ -96,8 +107,7 @@ export class DirectorService {
 
     try {
       const params = new URLSearchParams({
-        centerId: filterCenterId,
-        status: status || 'ACTIVE'
+        centerId: filterCenterId
       });
       const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listSessions}?${params}`;
       console.log('Fetching sessions from:', url);
@@ -121,8 +131,7 @@ export class DirectorService {
         response.status,
         'HTTP',
         {
-          centerId: filterCenterId,
-          status: status || 'ACTIVE',
+          centerId: filterCenterId
         }
       );
 
