@@ -20,8 +20,8 @@ let obsService: ObsService;
 const createWindow = () => {
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: 1024,
+    height: 640,
     backgroundColor: '#090B10', // Brand background
     icon: path.join(__dirname, '../icon.png'),
     webPreferences: {

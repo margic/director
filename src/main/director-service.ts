@@ -26,6 +26,11 @@ export class DirectorService {
   private readonly BUSY_INTERVAL_MS = 100; // 100ms (rapid fire)
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
+  private currentSequence: DirectorSequence | null = null;
+  private sequenceStartedAt: number | null = null;
+  private currentCommand: DirectorCommand | null = null;
+  private lastCommand: DirectorCommand | null = null;
+  private recentSequences: DirectorSequence[] = [];
 
   constructor(
     private authService: AuthService, 
@@ -74,6 +79,13 @@ export class DirectorService {
       this.loopInterval = null;
     }
     this.status = 'IDLE';
+    this.currentSequenceId = null;
+    this.currentSequence = null;
+    this.sequenceStartedAt = null;
+    this.currentCommand = null;
+    this.lastCommand = null;
+    this.totalCommands = 0;
+    this.processedCommands = 0;
   }
 
   getStatus(): DirectorState {
@@ -84,7 +96,12 @@ export class DirectorService {
       currentSequenceId: this.currentSequenceId,
       totalCommands: this.totalCommands,
       processedCommands: this.processedCommands,
-      lastError: this.lastError
+      lastError: this.lastError,
+      currentSequence: this.currentSequence,
+      sequenceStartedAt: this.sequenceStartedAt,
+      currentCommand: this.currentCommand,
+      lastCommand: this.lastCommand,
+      recentSequences: this.recentSequences
     };
   }
 
@@ -234,11 +251,20 @@ export class DirectorService {
     return {
       id,
       type,
-      payload
+      payload,
+      offsetMs: apiCommand.offsetMs,
+      durationMs: apiCommand.durationMs
     } as DirectorCommand;
   }
 
   private async fetchAndExecuteNextSequence(): Promise<number | false> {
+    // Clear state from previous run
+    this.currentSequenceId = null;
+    this.currentSequence = null;
+    this.currentCommand = null;
+    this.totalCommands = 0;
+    this.processedCommands = 0;
+
     const startTime = Date.now();
     const token = await this.authService.getAccessToken();
     if (!token) {
@@ -311,6 +337,20 @@ export class DirectorService {
       this.currentSequenceId = sequenceData.sequenceId;
       this.totalCommands = commands.length;
       this.processedCommands = 0;
+      
+      const sequence: DirectorSequence = {
+        id: sequenceData.sequenceId,
+        commands: commands,
+        durationMs: sequenceData.totalDurationMs,
+        metadata: sequenceData.metadata
+      };
+      
+      this.currentSequence = sequence;
+      this.sequenceStartedAt = Date.now();
+      this.recentSequences.unshift(sequence);
+      if (this.recentSequences.length > 5) {
+        this.recentSequences.pop();
+      }
 
       telemetryService.trackEvent('Sequence.Received', {
         sequenceId: sequenceData.sequenceId,
@@ -319,18 +359,14 @@ export class DirectorService {
         priority: sequenceData.priority || 'NORMAL',
       });
 
-      await this.executor.execute({
-        id: sequenceData.sequenceId,
-        commands: commands,
-        metadata: sequenceData.metadata
-      }, (completed, total) => {
+      await this.executor.execute(sequence, (completed, total, currentCommand) => {
         this.processedCommands = completed;
         this.totalCommands = total;
+        this.currentCommand = currentCommand || null;
+        if (currentCommand) {
+          this.lastCommand = currentCommand;
+        }
       });
-
-      this.currentSequenceId = null;
-      this.totalCommands = 0;
-      this.processedCommands = 0;
 
       telemetryService.trackEvent('Sequence.Executed', {
         sequenceId: sequenceData.sequenceId,

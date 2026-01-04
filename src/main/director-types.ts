@@ -17,6 +17,11 @@ export interface DirectorState {
   totalCommands?: number;
   processedCommands?: number;
   lastError?: string;
+  currentSequence?: DirectorSequence | null;
+  sequenceStartedAt?: number | null;
+  currentCommand?: DirectorCommand | null;
+  lastCommand?: DirectorCommand | null;
+  recentSequences?: DirectorSequence[];
 }
 
 // --- Command Payloads ---
@@ -58,6 +63,8 @@ export interface ViewerChatCommandPayload {
 export interface BaseCommand {
   id: string;
   type: CommandType;
+  offsetMs?: number;
+  durationMs?: number;
 }
 
 export interface WaitCommand extends BaseCommand {
@@ -103,6 +110,7 @@ export type DirectorCommand =
 export interface DirectorSequence {
   id: string;
   commands: DirectorCommand[];
+  durationMs?: number;
   metadata?: Record<string, unknown>;
 }
 

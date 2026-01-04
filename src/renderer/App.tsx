@@ -4,50 +4,8 @@ import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 import { IracingPage } from './pages/IracingPage'
 import { ObsPage } from './pages/ObsPage'
-
-const JsonViewer = ({ data }: { data: any }) => {
-  if (data === null || data === undefined) return <span className="text-muted-foreground italic">null</span>;
-  
-  if (Array.isArray(data)) {
-    if (data.length === 0) return <span className="text-muted-foreground italic">[]</span>;
-    return (
-      <div className="flex flex-col gap-2 mt-2">
-        {data.map((item, index) => (
-          <div key={index} className="pl-4 border-l-2 border-border/30">
-            <div className="text-xs text-muted-foreground mb-1 font-mono">Item {index}</div>
-            <JsonViewer data={item} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (typeof data === 'object') {
-    return (
-      <div className="space-y-1">
-        {Object.entries(data).map(([key, value]) => (
-          <div key={key} className="group">
-            <div className="flex gap-2 py-1">
-              <span className="font-mono text-secondary text-sm min-w-[150px] shrink-0">{key}:</span>
-              <div className="flex-1 font-mono text-sm text-foreground/90 break-all">
-                {typeof value === 'object' && value !== null ? (
-                  <div className="mt-1 pl-2 border-l border-border/30">
-                    <JsonViewer data={value} />
-                  </div>
-                ) : (
-                  String(value)
-                )}
-              </div>
-            </div>
-            <div className="h-px bg-border/20 group-last:hidden" />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  return <span>{String(data)}</span>;
-};
+import { DirectorPage } from './pages/DirectorPage'
+import { JsonViewer } from './components/JsonViewer'
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -56,7 +14,7 @@ function App() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
   const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
-  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'session-details'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'session-details' | 'director'>('dashboard');
   const [selectedSession, setSelectedSession] = useState<RaceSession | null>(null);
   const [iracingConnected, setIracingConnected] = useState(false);
   const [obsConnected, setObsConnected] = useState(false);
@@ -237,6 +195,13 @@ function App() {
             <Aperture className="w-6 h-6" />
           </button>
           <button 
+            onClick={() => setCurrentView('director')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'director' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="Director Control"
+          >
+            <Activity className="w-6 h-6" />
+          </button>
+          <button 
             className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors"
             title="Settings"
           >
@@ -313,7 +278,8 @@ function App() {
         </header>
 
         {/* Dashboard Area */}
-        <div className="flex-1 p-8 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-secondary/5 via-background to-background">
+        <div className="flex-1 overflow-y-auto bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-secondary/5 via-background to-background">
+          <div className="min-h-full p-8 flex flex-col items-center justify-center">
           {!user ? (
             <div className="max-w-md w-full bg-card border border-border rounded-xl p-8 shadow-2xl relative overflow-hidden group">
               <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
@@ -341,6 +307,8 @@ function App() {
             <div className="w-full max-w-6xl h-full">
               <ObsPage />
             </div>
+          ) : currentView === 'director' ? (
+            <DirectorPage onBack={() => setCurrentView('dashboard')} />
           ) : currentView === 'iracing' ? (
             <div className="w-full max-w-6xl h-full">
               <IracingPage cameras={selectedSession?.settings?.cameras} />
@@ -438,7 +406,10 @@ function App() {
               {/* Control Cards Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {/* Director Control Card */}
-                <div className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group relative overflow-hidden">
+                <div 
+                  onClick={() => setCurrentView('director')}
+                  className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group relative overflow-hidden cursor-pointer"
+                >
                   <div className="flex justify-between items-center z-10">
                     <div className="flex items-center gap-2">
                       <Activity className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
@@ -457,7 +428,7 @@ function App() {
                   </div>
 
                   <button 
-                    onClick={toggleDirector}
+                    onClick={(e) => { e.stopPropagation(); toggleDirector(); }}
                     className={`z-10 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
                       directorStatus.isRunning 
                         ? 'bg-destructive text-white hover:bg-destructive/90 shadow-[0_0_20px_rgba(239,51,64,0.4)]' 
@@ -541,6 +512,7 @@ function App() {
             </div>
             </div>
           )}
+          </div>
         </div>
       </main>
     </div>

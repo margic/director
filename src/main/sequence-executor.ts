@@ -41,7 +41,7 @@ export class SequenceExecutor {
     this.registry = new CommandHandlerRegistry(iracingService, obsService);
   }
 
-  async execute(sequence: DirectorSequence, onProgress?: (completed: number, total: number) => void): Promise<void> {
+  async execute(sequence: DirectorSequence, onProgress?: (completed: number, total: number, currentCommand?: DirectorCommand) => void): Promise<void> {
     console.log(`Executing sequence ${sequence.id} with ${sequence.commands.length} commands`);
     let completed = 0;
     const total = sequence.commands.length;
@@ -51,6 +51,8 @@ export class SequenceExecutor {
     for (const command of sequence.commands) {
       console.log(`Executing command: [${command.type}]`, JSON.stringify(command.payload));
       
+      if (onProgress) onProgress(completed, total, command);
+
       const handler = this.registry.get(command.type);
       if (handler) {
         try {

@@ -7,8 +7,14 @@ export class SwitchCameraHandler implements CommandHandler<SwitchCameraCommand> 
 
   async execute(command: SwitchCameraCommand): Promise<void> {
     const { carNumber, cameraGroupNumber, cameraGroupName } = command.payload;
-    console.log(`Switching camera to Car ${carNumber} - Group: ${cameraGroupName || cameraGroupNumber}`);
     
+    if (carNumber === 'Unknown') {
+        console.warn('Skipping camera switch for Unknown car number');
+        return;
+    }
+
+    console.log(`Switching camera to Car ${carNumber} - Group: ${cameraGroupName || cameraGroupNumber}`);
+
     const carNum = parseInt(String(carNumber), 10);
     const groupNum = parseInt(String(cameraGroupNumber), 10);
 
