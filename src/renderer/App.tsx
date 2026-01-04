@@ -422,9 +422,25 @@ function App() {
                     <div className="text-2xl font-jetbrains font-bold text-white mb-1">
                       {directorStatus.status}
                     </div>
-                    <div className="text-xs text-muted-foreground font-rajdhani truncate">
+                    <div className="text-xs text-muted-foreground font-rajdhani truncate mb-2">
                       {directorStatus.sessionId ? `Session: ${directorStatus.sessionId}` : 'No Active Session'}
                     </div>
+                    {directorStatus.isRunning && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="bg-background/50 p-2 rounded border border-border/50">
+                          <div className="text-lg font-jetbrains font-bold text-white">
+                            {directorStatus.totalSequencesProcessed || 0}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground uppercase">Sequences</div>
+                        </div>
+                        <div className="bg-background/50 p-2 rounded border border-border/50">
+                          <div className="text-lg font-jetbrains font-bold text-white">
+                            {directorStatus.status === 'BUSY' ? 'ACTIVE' : 'IDLE'}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground uppercase">State</div>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <button 

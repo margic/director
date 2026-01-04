@@ -16,6 +16,8 @@ export interface DirectorSequence {
   commands: DirectorCommand[];
   durationMs?: number;
   metadata?: Record<string, unknown>;
+  raceSessionId?: string;
+  generatedAt?: string;
 }
 
 export interface DirectorState {
@@ -31,4 +33,5 @@ export interface DirectorState {
   currentCommand?: DirectorCommand | null;
   lastCommand?: DirectorCommand | null;
   recentSequences?: DirectorSequence[];
+  totalSequencesProcessed?: number;
 }

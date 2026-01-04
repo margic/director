@@ -31,6 +31,7 @@ export class DirectorService {
   private currentCommand: DirectorCommand | null = null;
   private lastCommand: DirectorCommand | null = null;
   private recentSequences: DirectorSequence[] = [];
+  private totalSequencesProcessed: number = 0;
 
   constructor(
     private authService: AuthService, 
@@ -86,6 +87,7 @@ export class DirectorService {
     this.lastCommand = null;
     this.totalCommands = 0;
     this.processedCommands = 0;
+    this.totalSequencesProcessed = 0;
   }
 
   getStatus(): DirectorState {
@@ -101,7 +103,8 @@ export class DirectorService {
       sequenceStartedAt: this.sequenceStartedAt,
       currentCommand: this.currentCommand,
       lastCommand: this.lastCommand,
-      recentSequences: this.recentSequences
+      recentSequences: this.recentSequences,
+      totalSequencesProcessed: this.totalSequencesProcessed
     };
   }
 
@@ -342,7 +345,9 @@ export class DirectorService {
         id: sequenceData.sequenceId,
         commands: commands,
         durationMs: sequenceData.totalDurationMs,
-        metadata: sequenceData.metadata
+        metadata: sequenceData.metadata,
+        raceSessionId: sequenceData.raceSessionId,
+        generatedAt: sequenceData.generatedAt
       };
       
       this.currentSequence = sequence;
@@ -372,6 +377,8 @@ export class DirectorService {
         sequenceId: sequenceData.sequenceId,
         sessionId: this.currentRaceSessionId,
       });
+
+      this.totalSequencesProcessed++;
 
       return sequenceData.totalDurationMs ?? 0;
     } catch (error) {

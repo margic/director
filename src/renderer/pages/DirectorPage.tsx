@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Play, Square, Activity, Terminal, Clock, AlertCircle, CheckCircle2, Camera, Mic, Video, MessageSquare, Timer } from 'lucide-react';
-import { DirectorState } from '../director-types';
+import { ArrowLeft, Play, Square, Activity, Terminal, Clock, AlertCircle, CheckCircle2, Camera, Mic, Video, MessageSquare, Timer, X } from 'lucide-react';
+import { DirectorState, DirectorSequence } from '../director-types';
 import { JsonViewer } from '../components/JsonViewer';
 import { clientTelemetry } from '../telemetry';
 
@@ -41,6 +41,7 @@ interface DirectorPageProps {
 
 export const DirectorPage: React.FC<DirectorPageProps> = ({ onBack }) => {
   const [status, setStatus] = useState<DirectorState | null>(null);
+  const [selectedSequence, setSelectedSequence] = useState<DirectorSequence | null>(null);
 
   useEffect(() => {
     const pollStatus = async () => {
@@ -128,6 +129,40 @@ export const DirectorPage: React.FC<DirectorPageProps> = ({ onBack }) => {
           </button>
         </div>
       </div>
+
+      {/* Sequence Details Modal */}
+      {selectedSequence && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-8">
+          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-4xl max-h-full flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-6 border-b border-border">
+              <div className="flex items-center gap-3">
+                <Activity className="w-6 h-6 text-primary" />
+                <div>
+                  <h3 className="text-xl font-bold uppercase tracking-wider text-white">Sequence Details</h3>
+                  <p className="text-xs text-muted-foreground font-mono">{selectedSequence.id}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setSelectedSequence(null)}
+                className="p-2 rounded-lg hover:bg-white/10 text-muted-foreground hover:text-white transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6 bg-black/30">
+              <JsonViewer data={{
+                id: selectedSequence.id,
+                sequenceId: selectedSequence.id,
+                raceSessionId: selectedSequence.raceSessionId,
+                totalDurationMs: selectedSequence.durationMs,
+                generatedAt: selectedSequence.generatedAt,
+                commands: selectedSequence.commands,
+                metadata: selectedSequence.metadata
+              }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
         {/* Left Column: Current Execution */}
@@ -297,7 +332,11 @@ export const DirectorPage: React.FC<DirectorPageProps> = ({ onBack }) => {
             <div className="flex-1 overflow-y-auto pr-2 space-y-3">
               {status?.recentSequences && status.recentSequences.length > 0 ? (
                 status.recentSequences.map((seq) => (
-                  <div key={seq.id} className="bg-background/30 border border-border rounded-lg p-3 hover:border-border/80 transition-colors">
+                  <div 
+                    key={seq.id} 
+                    onClick={() => setSelectedSequence(seq)}
+                    className="bg-background/30 border border-border rounded-lg p-3 hover:border-border/80 transition-colors cursor-pointer hover:bg-white/5"
+                  >
                     <div className="flex items-center justify-between mb-2">
                       <span className="font-mono text-xs text-muted-foreground">{seq.id}</span>
                       <span className="text-xs font-bold text-green-500 flex items-center gap-1">
@@ -331,7 +370,7 @@ export const DirectorPage: React.FC<DirectorPageProps> = ({ onBack }) => {
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-background/50 p-3 rounded-lg border border-border/50">
                 <div className="text-2xl font-jetbrains font-bold text-white">
-                  {status?.recentSequences?.length || 0}
+                  {status?.totalSequencesProcessed || 0}
                 </div>
                 <div className="text-xs text-muted-foreground uppercase">Sequences</div>
               </div>
