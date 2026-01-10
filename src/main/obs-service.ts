@@ -1,5 +1,6 @@
 import OBSWebSocket from 'obs-websocket-js';
 import { telemetryService } from './telemetry-service';
+import { configService } from './config-service';
 
 export class ObsService {
     private obs: OBSWebSocket;
@@ -31,9 +32,21 @@ export class ObsService {
             console.log('ObsService: Identified');
             this.fetchScenes();
         });
+
+        const config = configService.get('obs');
+        if (config?.enabled) {
+            // Auto start if enabled
+            this.start();
+        }
     }
 
     public start(host?: string, password?: string) {
+        const config = configService.get('obs');
+        if (!config?.enabled) {
+             console.log('ObsService: Module disabled, start ignored.');
+             return;
+        }
+
         this.connect(host, password);
     }
 

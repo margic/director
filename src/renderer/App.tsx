@@ -4,6 +4,8 @@ import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 import { IracingPage } from './pages/IracingPage'
 import { ObsPage } from './pages/ObsPage'
+import { YoutubePage } from './pages/YoutubePage'
+import { SettingsPage } from './pages/SettingsPage'
 
 const JsonViewer = ({ data }: { data: any }) => {
   if (data === null || data === undefined) return <span className="text-muted-foreground italic">null</span>;
@@ -56,7 +58,7 @@ function App() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
   const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
-  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'session-details'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'youtube' | 'settings' | 'session-details'>('dashboard');
   const [selectedSession, setSelectedSession] = useState<RaceSession | null>(null);
   const [iracingConnected, setIracingConnected] = useState(false);
   const [obsConnected, setObsConnected] = useState(false);
@@ -237,7 +239,15 @@ function App() {
             <Aperture className="w-6 h-6" />
           </button>
           <button 
-            className="p-3 rounded-lg hover:bg-white/5 text-muted-foreground hover:text-primary transition-colors"
+            onClick={() => setCurrentView('youtube')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'youtube' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="YouTube"
+          >
+             <Play className="w-6 h-6" />
+          </button>
+          <button 
+            onClick={() => setCurrentView('settings')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'settings' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
             title="Settings"
           >
             <Settings className="w-6 h-6" />
@@ -340,6 +350,14 @@ function App() {
           ) : currentView === 'obs' ? (
             <div className="w-full max-w-6xl h-full">
               <ObsPage />
+            </div>
+          ) : currentView === 'youtube' ? (
+            <div className="w-full max-w-6xl h-full">
+              <YoutubePage />
+            </div>
+          ) : currentView === 'settings' ? (
+            <div className="w-full max-w-6xl h-full">
+              <SettingsPage />
             </div>
           ) : currentView === 'iracing' ? (
             <div className="w-full max-w-6xl h-full">

@@ -5,6 +5,8 @@ import { DirectorService } from './director-service';
 import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 import { IracingService } from './iracing-service';
 import { ObsService } from './obs-service';
+import { youtubeService } from './youtube-service';
+import { configService } from './config-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -98,6 +100,30 @@ app.on('ready', () => {
     }
   });
 
+  // Config IPC Handlers
+  ipcMain.handle('config:get', (event, key) => {
+    return configService.get(key as any);
+  });
+
+  ipcMain.handle('config:set', async (event, key, value) => {
+    configService.set(key as any, value);
+
+    if (key === 'iracing.enabled') {
+      if (value) {
+        iracingService.start();
+      } else {
+        iracingService.stop();
+      }
+    } else if (key === 'obs.enabled') {
+      if (value) {
+        obsService.start();
+      } else {
+        obsService.stop();
+      }
+    }
+    // YouTube handling requires more specific service methods, skipping for now to avoid errors
+  });
+
   // iRacing IPC Handlers
   ipcMain.handle('iracing:get-status', () => {
     return { connected: iracingService.isConnected() };
@@ -179,6 +205,20 @@ app.on('ready', () => {
     const severityLevel = severity ? SEVERITY_MAP[severity] : undefined;
     telemetryService.trackTrace(message, severityLevel, properties);
     return true;
+  });
+
+  // YouTube IPC
+  ipcMain.handle('youtube:get-status', () => youtubeService.getStatus());
+  ipcMain.handle('youtube:auth-start', () => youtubeService.startAuthFlow());
+  ipcMain.handle('youtube:auth-signout', () => youtubeService.signOut());
+  ipcMain.handle('youtube:search-videos', async (_, channelId) => youtubeService.searchLiveVideos(channelId));
+  ipcMain.handle('youtube:set-video', (_, videoId) => youtubeService.setVideo(videoId));
+  ipcMain.on('youtube-scraper:message', (_, msg) => {
+    // 1. Increment local counter
+    // youtubeService.getStatus().messageCount++; // Direct mutation avoided for now
+    // 2. Forward to Race Control API (TODO: Ingest)
+    // For now we just log
+    console.log('Main Process Received Chat:', msg);
   });
 });
 

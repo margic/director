@@ -1,4 +1,5 @@
 import koffi from 'koffi';
+import { configService } from './config-service';
 
 // Constants
 const IRSDK_BROADCASTMSG_NAME = 'IRSDK_BROADCASTMSG';
@@ -24,8 +25,17 @@ export class IracingService {
     private isWindows: boolean;
 
     constructor() {
+        // Check if enabled first
+        const config = configService.get('iracing');
+        if (!config?.enabled) {
+            console.log('IracingService: Module disabled in config');
+            this.isWindows = false; // Effectively disabled logic
+            return;
+        }
+
         this.isWindows = process.platform === 'win32';
         this.initNativeFunctions();
+        this.start(); // Auto-start monitoring if enabled
     }
 
     private initNativeFunctions() {
@@ -53,6 +63,9 @@ export class IracingService {
 
     public start() {
         if (this.checkInterval) return;
+
+        const config = configService.get('iracing');
+        if (!config?.enabled) return;
         
         // Check immediately
         this.checkConnection();

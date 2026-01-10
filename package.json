@@ -53,6 +53,8 @@
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",
     "electron-squirrel-startup": "^1.0.1",
+    "electron-store": "^8.1.0",
+    "googleapis": "^170.0.0",
     "koffi": "^2.15.0",
     "lucide-react": "^0.562.0",
     "obs-websocket-js": "^5.0.7",
