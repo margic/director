@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && tsc -p tsconfig.main.json && node run-electron.js\"",
     "build": "tsc -p tsconfig.main.json && vite build",
-    "dist": "npm run build && electron-builder",
+    "generate-icons": "electron-icon-builder --input=./assets/images/icon-logo.png --output=build --flatten",
+    "dist": "npm run generate-icons && npm run build && electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1",
     "test:director-loop": "ts-node --transpile-only -P tsconfig.test.json -r tsconfig-paths/register scripts/test-director-loop.ts"
   },
@@ -14,25 +15,30 @@
     "appId": "com.simracecenter.director",
     "productName": "Sim RaceCenter Director",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
       "package.json",
-      "icon.png",
+      {
+        "from": "build/icons/512x512.png",
+        "to": "icon.png"
+      },
       "!.env"
     ],
     "extraResources": [
       ".env"
     ],
-    "icon": "icon.png",
+    "icon": "build/icons/512x512.png",
     "win": {
       "target": "nsis",
-      "icon": "icon.ico"
+      "icon": "build/icons/icon.ico"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "build/icons"
     }
   },
   "repository": {
@@ -72,6 +78,7 @@
     "concurrently": "^9.2.1",
     "electron": "^39.2.7",
     "electron-builder": "^26.0.12",
+    "electron-icon-builder": "^2.0.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "tsconfig-paths": "^4.2.0",
