@@ -1,6 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  // Config API
+  config: {
+      get: (key: string) => ipcRenderer.invoke('config:get', key),
+      set: (key: string, value: any) => ipcRenderer.invoke('config:set', key, value),
+  },
+
   login: () => ipcRenderer.invoke('auth:login'),
   getAccount: () => ipcRenderer.invoke('auth:get-account'),
   getUserProfile: () => ipcRenderer.invoke('auth:get-user-profile'),

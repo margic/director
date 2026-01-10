@@ -6,7 +6,6 @@ import http from 'http';
 import url from 'url';
 import path from 'path';
 import { configService } from './config-service';
-import { AppWindow } from './main'; // Start assuming a typed AppWindow or similar
 
 // Scopes required for YouTube Chat
 const SCOPES = ['https://www.googleapis.com/auth/youtube.force-ssl'];
@@ -42,8 +41,19 @@ export class YoutubeService {
   private async initialize() {
     // Load config
     const savedConfig = configService.get('youtube');
+    
+    // Check if enabled
+    if (!savedConfig?.enabled) {
+      console.log('YouTube Service: Module disabled in config.');
+      return;
+    }
+
     if (savedConfig?.channelId) {
       this.status.channelId = savedConfig.channelId;
+    }
+
+    if (!savedConfig?.autoConnect) {
+      return;
     }
 
     // Try to restore tokens

@@ -100,3 +100,7 @@ This application utilizes the "Public Client" model (Desktop App).
 ### Compliance Statement
 Sim RaceCenter Director's use and transfer to any other app of information received from Google APIs will adhere to the [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy), including the Limited Use requirements.
 
+*Verification Status: Work in progress. See [Issue #27](https://github.com/margic/director/issues/27) for verification materials planning.*
+
+
+

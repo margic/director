@@ -6,6 +6,7 @@ import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 import { IracingService } from './iracing-service';
 import { ObsService } from './obs-service';
 import { youtubeService } from './youtube-service';
+import { configService } from './config-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -97,6 +98,30 @@ app.on('ready', () => {
       telemetryService.trackException(error as Error, { operation: 'logout' });
       throw error;
     }
+  });
+
+  // Config IPC Handlers
+  ipcMain.handle('config:get', (event, key) => {
+    return configService.get(key as any);
+  });
+
+  ipcMain.handle('config:set', async (event, key, value) => {
+    configService.set(key as any, value);
+
+    if (key === 'iracing.enabled') {
+      if (value) {
+        iracingService.start();
+      } else {
+        iracingService.stop();
+      }
+    } else if (key === 'obs.enabled') {
+      if (value) {
+        obsService.start();
+      } else {
+        obsService.stop();
+      }
+    }
+    // YouTube handling requires more specific service methods, skipping for now to avoid errors
   });
 
   // iRacing IPC Handlers

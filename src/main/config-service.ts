@@ -4,8 +4,17 @@ import { safeStorage } from 'electron';
 
 interface AppConfig {
   youtube: {
+    enabled: boolean;
     channelId?: string;
     autoConnect: boolean;
+  };
+  obs: {
+    enabled: boolean;
+    host?: string;
+    password?: string;
+  };
+  iracing: {
+    enabled: boolean;
   };
   // Future config sections can go here
 }
@@ -15,8 +24,25 @@ const schema = {
   youtube: {
     type: 'object',
     properties: {
+      enabled: { type: 'boolean', default: true },
       channelId: { type: 'string' },
       autoConnect: { type: 'boolean', default: false }
+    },
+    default: {}
+  },
+  obs: {
+    type: 'object',
+    properties: {
+      enabled: { type: 'boolean', default: true },
+      host: { type: 'string' },
+      password: { type: 'string' }
+    },
+    default: {}
+  },
+  iracing: {
+    type: 'object',
+    properties: {
+      enabled: { type: 'boolean', default: true }
     },
     default: {}
   }
