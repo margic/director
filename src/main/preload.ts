@@ -32,4 +32,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     trackTrace: (message: string, severity?: string, properties?: { [key: string]: string }) =>
       ipcRenderer.invoke('telemetry:track-trace', message, severity, properties),
   },
+
+  // YouTube API
+  youtube: {
+    getStatus: () => ipcRenderer.invoke('youtube:get-status'),
+    startAuth: () => ipcRenderer.invoke('youtube:auth-start'),
+    signOut: () => ipcRenderer.invoke('youtube:auth-signout'),
+    searchVideos: (channelId: string) => ipcRenderer.invoke('youtube:search-videos', channelId),
+    setVideo: (videoId: string) => ipcRenderer.invoke('youtube:set-video', videoId),
+    onStatusChange: (callback: (status: any) => void) => {
+        const subscription = (_: any, status: any) => callback(status);
+        ipcRenderer.on('youtube:status-change', subscription);
+        return () => ipcRenderer.removeListener('youtube:status-change', subscription);
+    }
+  }
 });

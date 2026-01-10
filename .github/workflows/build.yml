@@ -38,6 +38,8 @@ jobs:
         run: |
           echo "VITE_AZURE_CLIENT_ID=${{ secrets.VITE_AZURE_CLIENT_ID }}" > .env
           echo "VITE_AZURE_TENANT_ID=${{ secrets.VITE_AZURE_TENANT_ID }}" >> .env
+          echo "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" >> .env
+          echo "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" >> .env
         shell: bash
 
       - name: Build and Publish
