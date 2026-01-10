@@ -6,6 +6,7 @@ import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 import { IracingService } from './iracing-service';
 import { ObsService } from './obs-service';
 import { youtubeService } from './youtube-service';
+import { discordService } from './discord-service';
 import { configService } from './config-service';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -55,6 +56,8 @@ app.on('ready', () => {
   });
 
   authService = new AuthService();
+  discordService.setAuthService(authService);
+  discordService.setTelemetryService(telemetryService);
   iracingService = new IracingService();
   iracingService.start();
   obsService = new ObsService();
@@ -123,6 +126,15 @@ app.on('ready', () => {
     }
     // YouTube handling requires more specific service methods, skipping for now to avoid errors
   });
+
+  ipcMain.handle('config:save-secure', async (event, key, value) => {
+    return await configService.saveSecure(key, value);
+  });
+
+  ipcMain.handle('config:is-secure-set', async (event, key) => {
+    return configService.isSecureSet(key);
+  });
+
 
   // iRacing IPC Handlers
   ipcMain.handle('iracing:get-status', () => {
@@ -220,6 +232,30 @@ app.on('ready', () => {
     // For now we just log
     console.log('Main Process Received Chat:', msg);
   });
+
+  // Discord IPC
+  ipcMain.handle('discord:get-status', () => discordService.getStatus());
+  // The UI can ask to "Connect" or "Test Output"
+  ipcMain.handle('discord:connect', async (_, token?: string, channelId?: string) => {
+    let finalToken = token;
+    let finalChannelId = channelId;
+
+    if (!finalToken) {
+      finalToken = await configService.getSecure('discord.token') || undefined;
+    }
+    if (!finalChannelId) {
+      const conf = configService.get('discord');
+      finalChannelId = conf?.channelId;
+    }
+
+    if (!finalToken || !finalChannelId) {
+      throw new Error("Missing Discord Token or Channel ID configuration");
+    }
+
+    return discordService.connect(finalToken, finalChannelId);
+  });
+  ipcMain.handle('discord:disconnect', async () => discordService.disconnect());
+  ipcMain.handle('discord:send-test', async (_, text: string) => discordService.playTts(text));
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common

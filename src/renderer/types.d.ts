@@ -64,9 +64,23 @@ export interface IElectronAPI {
   obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[] }>;
   obsGetScenes: () => Promise<string[]>;
   obsSetScene: (sceneName: string) => Promise<void>;
+  discordGetStatus: () => Promise<{ connected: boolean; channelName?: string; lastMessage?: string; messagesSent: number }>;
+  discordConnect: (token?: string, channelId?: string) => Promise<void>;
+  discordDisconnect: () => Promise<void>;
+  discordSendTest: (text: string) => Promise<void>;
   config: {
     get: (key: string) => Promise<any>;
     set: (key: string, value: any) => Promise<void>;
+    saveSecure: (key: string, value: string) => Promise<boolean>;
+    isSecureSet: (key: string) => Promise<boolean>;
+  };
+  youtube: {
+    getStatus: () => Promise<any>;
+    startAuth: () => Promise<void>;
+    signOut: () => Promise<void>;
+    searchVideos: (channelId: string) => Promise<any>;
+    setVideo: (videoId: string) => Promise<void>;
+    onStatusChange: (callback: (status: any) => void) => () => void;
   };
   telemetry: {
     trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => Promise<boolean>;

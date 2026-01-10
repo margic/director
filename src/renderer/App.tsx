@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2, Car, ArrowLeft, Database, Aperture } from 'lucide-react'
+import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2, Car, ArrowLeft, Database, Aperture, Mic } from 'lucide-react'
 import RaceCenterIcon from '../../assets/images/icon.png'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 import { IracingPage } from './pages/IracingPage'
 import { ObsPage } from './pages/ObsPage'
 import { YoutubePage } from './pages/YoutubePage'
+import { DiscordPage } from './pages/DiscordPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 const JsonViewer = ({ data }: { data: any }) => {
@@ -59,11 +60,12 @@ function App() {
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
   const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
-  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'youtube' | 'settings' | 'session-details'>('dashboard');
+  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'youtube' | 'discord' | 'settings' | 'session-details'>('dashboard');
   const [selectedSession, setSelectedSession] = useState<RaceSession | null>(null);
   const [iracingConnected, setIracingConnected] = useState(false);
   const [obsConnected, setObsConnected] = useState(false);
   const [obsMissingScenes, setObsMissingScenes] = useState<string[]>([]);
+  const [discordStatus, setDiscordStatus] = useState<{ connected: boolean; lastCommand?: any }>({ connected: false });
   const sidebarRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
@@ -118,6 +120,15 @@ function App() {
         setObsMissingScenes(status.missingScenes);
       }
         setIracingConnected(status.connected);
+      }
+      
+      if (user && window.electronAPI?.discordGetStatus) {
+        try {
+          const status = await window.electronAPI.discordGetStatus();
+          setDiscordStatus(status);
+        } catch (e) {
+          // Ignore errors
+        }
       }
     };
     
@@ -247,6 +258,13 @@ function App() {
              <Play className="w-6 h-6" />
           </button>
           <button 
+            onClick={() => setCurrentView('discord')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'discord' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="Discord / Voice"
+          >
+             <Mic className="w-6 h-6" />
+          </button>
+          <button 
             onClick={() => setCurrentView('settings')}
             className={`p-3 rounded-lg transition-colors ${currentView === 'settings' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
             title="Settings"
@@ -324,9 +342,9 @@ function App() {
         </header>
 
         {/* Dashboard Area */}
-        <div className="flex-1 p-8 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-secondary/5 via-background to-background">
+        <div className="flex-1 p-8 overflow-y-auto flex flex-col items-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-secondary/5 via-background to-background">
           {!user ? (
-            <div className="max-w-md w-full bg-card border border-border rounded-xl p-8 shadow-2xl relative overflow-hidden group">
+            <div className="my-auto max-w-md w-full bg-card border border-border rounded-xl p-8 shadow-2xl relative overflow-hidden group">
               <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
               
               <div className="relative z-10 text-center space-y-6">
@@ -349,19 +367,23 @@ function App() {
               </div>
             </div>
           ) : currentView === 'obs' ? (
-            <div className="w-full max-w-6xl h-full">
+            <div className="w-full max-w-6xl">
               <ObsPage />
             </div>
           ) : currentView === 'youtube' ? (
-            <div className="w-full max-w-6xl h-full">
+            <div className="w-full max-w-6xl">
               <YoutubePage />
             </div>
+          ) : currentView === 'discord' ? (
+            <div className="w-full max-w-6xl">
+              <DiscordPage />
+            </div>
           ) : currentView === 'settings' ? (
-            <div className="w-full max-w-6xl h-full">
+            <div className="w-full max-w-6xl">
               <SettingsPage />
             </div>
           ) : currentView === 'iracing' ? (
-            <div className="w-full max-w-6xl h-full">
+            <div className="w-full max-w-6xl">
               <IracingPage cameras={selectedSession?.settings?.cameras} />
             </div>
           ) : currentView === 'session-details' && selectedSession ? (
@@ -550,6 +572,35 @@ function App() {
                     {obsConnected 
                       ? (obsMissingScenes.length > 0 ? `${obsMissingScenes.length} Scenes Missing` : 'Ready to Broadcast') 
                       : 'Waiting for OBS...'}
+                  </div>
+                </div>
+                
+                <div className="w-full py-3 rounded-lg bg-secondary text-white font-bold flex items-center justify-center gap-2 hover:bg-secondary/90 transition-colors shadow-[0_0_15px_rgba(0,163,224,0.3)]">
+                  <span>OPEN CONTROLS</span>
+                </div>
+              </div>
+
+              {/* Discord Status Card */}
+              <div 
+                onClick={() => setCurrentView('discord')}
+                className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
+              >
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <Mic className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                    <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Driver Voice</h3>
+                  </div>
+                  <div className={`w-3 h-3 rounded-full ${discordStatus.connected ? 'bg-green-500' : 'bg-red-500'}`} />
+                </div>
+                
+                <div>
+                  <div className="text-2xl font-jetbrains font-bold mb-1 text-white">
+                    {discordStatus.connected ? 'ONLINE' : 'OFFLINE'}
+                  </div>
+                  <div className="text-xs text-muted-foreground font-rajdhani">
+                    {discordStatus.lastCommand 
+                      ? `Last: ${discordStatus.lastCommand.type}` 
+                      : 'No commands received'}
                   </div>
                 </div>
                 

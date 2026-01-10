@@ -45,7 +45,7 @@ export class TelemetryService {
         .setAutoCollectPerformance(true, true)
         .setAutoCollectExceptions(true)
         .setAutoCollectDependencies(true)
-        .setAutoCollectConsole(true, false)
+        .setAutoCollectConsole(true, true) // Enable full console collection for transparency
         .setUseDiskRetryCaching(true)
         .setSendLiveMetrics(false)
         .setDistributedTracingMode(appInsights.DistributedTracingModes.AI_AND_W3C)

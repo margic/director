@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   config: {
       get: (key: string) => ipcRenderer.invoke('config:get', key),
       set: (key: string, value: any) => ipcRenderer.invoke('config:set', key, value),
+      saveSecure: (key: string, value: string) => ipcRenderer.invoke('config:save-secure', key, value),
+      isSecureSet: (key: string) => ipcRenderer.invoke('config:is-secure-set', key),
   },
 
   login: () => ipcRenderer.invoke('auth:login'),
@@ -28,6 +30,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obsGetStatus: () => ipcRenderer.invoke('obs:get-status'),
   obsGetScenes: () => ipcRenderer.invoke('obs:get-scenes'),
   obsSetScene: (sceneName: string) => ipcRenderer.invoke('obs:set-scene', sceneName),
+  
+  // Discord API
+  discordGetStatus: () => ipcRenderer.invoke('discord:get-status'),
+  discordConnect: (token: string, channelId: string) => ipcRenderer.invoke('discord:connect', token, channelId),
+  discordDisconnect: () => ipcRenderer.invoke('discord:disconnect'),
+  discordSendTest: (text: string) => ipcRenderer.invoke('discord:send-test', text),
   
   // Telemetry API
   telemetry: {
