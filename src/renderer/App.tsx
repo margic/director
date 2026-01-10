@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Activity, LayoutDashboard, Settings, User, LogOut, Play, Square, Loader2, Car, ArrowLeft, Database, Aperture } from 'lucide-react'
+import RaceCenterIcon from '../../assets/images/icon.png'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 import { IracingPage } from './pages/IracingPage'
@@ -212,8 +213,8 @@ function App() {
     <div className="flex h-screen w-full bg-background text-foreground font-rajdhani overflow-hidden">
       {/* Sidebar */}
       <aside className="w-20 border-r border-border bg-card flex flex-col items-center py-6 gap-8">
-        <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(255,95,31,0.5)]">
-          <Activity className="text-white w-6 h-6" />
+        <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(255,95,31,0.5)] overflow-hidden">
+          <img src={RaceCenterIcon} alt="Race Center" className="w-full h-full object-cover" />
         </div>
         
         <nav className="flex flex-col gap-6 w-full items-center">
