@@ -77,7 +77,7 @@ export class DiscordService {
               reject(new Error('Connection timed out'));
           }, 15000);
 
-          this.client!.once('ready', async () => {
+          this.client!.once('clientReady', async () => {
               console.log(`[DiscordService] Bot logged in as ${this.client?.user?.tag}`);
               try {
                   const channel = await this.client?.channels.fetch(channelId);
@@ -194,19 +194,30 @@ export class DiscordService {
         }
 
         const url = `${apiConfig.baseUrl}${apiConfig.endpoints.tts}`;
+        
+        // Construct minimal payload according to OpenAPI spec
+        // We omit 'context' to avoid potential server-side parsing issues with optional fields
+        // and because the previous 'voiceId' field caused issues.
+        const payload = {
+            text
+        };
+
+        console.log(`[DiscordService] Sending TTS request to ${url} with payload:`, JSON.stringify(payload));
+
         const response = await fetch(url, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Accept': 'audio/wav' 
             },
-            body: JSON.stringify({ 
-                text,
-                voiceId // Optional: Pass voiceId if the API supports it
-            })
+            body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
+            // Log the raw response text in case the 500 contains a useful error message
+             const errorText = await response.text();
+             console.error(`[DiscordService] TTS API Error Body: ${errorText}`);
             throw new Error(`TTS API error: ${response.status} ${response.statusText}`);
         }
 
