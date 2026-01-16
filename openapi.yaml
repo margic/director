@@ -1,0 +1,848 @@
+openapi: 3.0.0
+info:
+  title: Race Control API
+  version: 1.0.0
+  description: API for Sim RaceCenter Race Control and Director Integration
+servers:
+  - url: https://api.simracecenter.com
+    description: Production Server
+  - url: http://localhost:7071
+    description: Local Development Server
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    DirectorCommandType:
+      type: string
+      enum:
+        - SWITCH_CAMERA
+        - PLAY_AUDIO
+        - SHOW_OVERLAY
+        - HIDE_OVERLAY
+      description: The type of command to execute.
+    DirectorCommand:
+      type: object
+      properties:
+        commandType:
+          $ref: '#/components/schemas/DirectorCommandType'
+        target:
+          type: object
+          description: Target details for the command (e.g., car, camera, overlay).
+          properties:
+            carIndex:
+              type: integer
+              description: The index of the car to focus on.
+            driverName:
+              type: string
+              description: The name of the driver.
+            carNumber:
+              type: string
+              description: The number of the car.
+            cameraGroup:
+              type: string
+              description: The camera group to use (e.g., TV1, Cockpit).
+            sceneType:
+              type: string
+              description: The type of scene (e.g., Forward, Rear, General).
+            obsSceneId:
+              type: string
+              description: The OBS Scene ID to switch to.
+          additionalProperties: true
+        durationMs:
+          type: integer
+          description: Duration to hold this state in milliseconds.
+        offsetMs:
+          type: integer
+          description: Time offset from the start of the sequence to execute this command.
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum:
+            - WAIT
+            - LOG
+        payload:
+          type: object
+      required:
+        - commandType
+        - target
+        - offsetMs
+    DirectorSequence:
+      type: object
+      properties:
+        sequenceId:
+          type: string
+          format: uuid
+          description: Unique identifier for this generated sequence.
+        raceSessionId:
+          type: string
+          format: uuid
+          description: The session context.
+        commands:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectorCommand'
+          description: List of commands to execute.
+        totalDurationMs:
+          type: integer
+          description: Expected duration of the entire sequence in milliseconds.
+        generatedAt:
+          type: string
+          format: date-time
+          description: Timestamp when the sequence was generated.
+        createdAt:
+          type: string
+          format: date-time
+        priority:
+          type: string
+          enum:
+            - LOW
+            - NORMAL
+            - HIGH
+            - URGENT
+      required:
+        - sequenceId
+        - raceSessionId
+        - commands
+        - totalDurationMs
+        - generatedAt
+    RaceSession:
+      type: object
+      properties:
+        raceSessionId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        centerId:
+          type: string
+        obsHost:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        scheduledStart:
+          type: string
+          format: date-time
+        simulator:
+          type: string
+        directorSceneId:
+          type: string
+        drivers:
+          type: array
+          items:
+            $ref: '#/components/schemas/RaceSessionDriver'
+        iracing:
+          type: object
+          description: >-
+            Raw iRacing session data including camera info, car setup, driver
+            info, etc.
+          additionalProperties: true
+    CreateSessionRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        simulator:
+          type: string
+        directorSceneId:
+          type: string
+        centerId:
+          type: string
+        drivers:
+          type: array
+          items:
+            type: object
+            properties:
+              driverId:
+                type: string
+              rigId:
+                type: string
+              obsSceneId:
+                type: string
+              carNumber:
+                type: string
+      required:
+        - name
+        - simulator
+        - directorSceneId
+        - drivers
+    RaceSessionDriver:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        driverId:
+          type: string
+        carNumber:
+          type: string
+        rigId:
+          type: string
+        obsSceneId:
+          type: string
+    UserProfile:
+      type: object
+      properties:
+        userId:
+          type: string
+        displayName:
+          type: string
+        username:
+          type: string
+        centerId:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+    NextSequenceResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+            - IDLE
+            - BUSY
+            - ERROR
+        sequence:
+          $ref: '#/components/schemas/DirectorSequence'
+security:
+  - bearerAuth: []
+paths:
+  /api/audit-logs:
+    get:
+      summary: Get Audit Logs
+      description: Retrieves a list of audit logs for system activities.
+      responses:
+        '200':
+          description: List of audit logs retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    action:
+                      type: string
+                    entityType:
+                      type: string
+                    entityId:
+                      type: string
+                    userId:
+                      type: string
+                    timestamp:
+                      type: string
+                      format: date-time
+        '401':
+          description: Unauthorized. User is not authenticated.
+        '500':
+          description: Internal server error.
+  /api/center:
+    get:
+      summary: Get Center Configuration
+      description: Retrieves the configuration for the current center.
+      responses:
+        '200':
+          description: Center configuration retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  centerId:
+                    type: string
+                  name:
+                    type: string
+                  obsHost:
+                    type: string
+        '500':
+          description: Internal server error.
+    put:
+      summary: Update Center Configuration
+      description: Updates the configuration for the current center.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                obsHost:
+                  type: string
+      responses:
+        '200':
+          description: Center configuration updated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  centerId:
+                    type: string
+                  name:
+                    type: string
+                  obsHost:
+                    type: string
+        '500':
+          description: Internal server error.
+  /api/director/v1/sessions/{raceSessionId}/sequences/next:
+    get:
+      summary: Generate Next Sequence
+      description: >
+        Generates the next sequence of commands for execution based on real-time
+        race state.
+
+
+        This endpoint acts as an "AI Director", analyzing telemetry, gaps, and
+        incidents to determine the most interesting shots to show.
+
+        The returned sequence contains a list of time-stamped commands (e.g.,
+        camera switches) that the client should execute.
+      parameters:
+        - in: path
+          name: raceSessionId
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: The ID of the active race session.
+        - in: query
+          name: lastSequenceId
+          schema:
+            type: string
+            format: uuid
+          description: >-
+            The ID of the sequence that was just completed (for chaining and
+            logging).
+      responses:
+        '200':
+          description: A new sequence is generated and returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectorSequence'
+        '404':
+          description: Session not found or user not authorized for this center.
+        '500':
+          description: Internal server error during sequence generation.
+  /api/director/v1/sessions:
+    get:
+      summary: List Active Sessions for Director
+      description: >
+        Retrieves a list of active race sessions available for the Director,
+        filtered by their assigned Center.
+
+        This endpoint is used by the Director application to discover sessions
+        it can join.
+      parameters:
+        - in: query
+          name: centerId
+          schema:
+            type: string
+          required: true
+          description: The Center ID to filter sessions by.
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum:
+              - PLANNED
+              - ACTIVE
+              - COMPLETED
+              - CANCELED
+          description: Filter by session status.
+      responses:
+        '200':
+          description: List of sessions retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RaceSession'
+        '401':
+          description: Unauthorized. User is not authenticated.
+        '403':
+          description: >-
+            Access denied. User does not have the required role or center
+            assignment.
+  /api/drivers:
+    get:
+      summary: Get All Drivers
+      description: Retrieves a list of all registered drivers.
+      responses:
+        '200':
+          description: List of drivers retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    driverId:
+                      type: string
+                    name:
+                      type: string
+        '500':
+          description: Internal server error.
+  /api/drivers/{driverId}:
+    get:
+      summary: Get Driver by ID
+      description: Retrieves details of a specific driver by their ID.
+      parameters:
+        - in: path
+          name: driverId
+          schema:
+            type: string
+          required: true
+          description: The ID of the driver to retrieve.
+      responses:
+        '200':
+          description: Driver details retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  driverId:
+                    type: string
+                  name:
+                    type: string
+        '400':
+          description: Driver ID is required.
+        '404':
+          description: Driver not found.
+        '500':
+          description: Internal server error.
+  /api/publisher-config/{publisherCode}:
+    get:
+      summary: Get Publisher Configuration
+      description: >-
+        Retrieves configuration for the telemetry publisher based on a unique
+        publisher code.
+      parameters:
+        - in: path
+          name: publisherCode
+          schema:
+            type: string
+          required: true
+          description: The unique code assigned to the publisher.
+      responses:
+        '200':
+          description: Publisher configuration retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  gatewayUrl:
+                    type: string
+                    description: The URL of the telemetry gateway.
+                  raceSessionId:
+                    type: string
+                    description: The ID of the active race session.
+                  id:
+                    type: string
+                    description: The Cosmos DB document ID.
+                  driverId:
+                    type: string
+                    description: The ID of the driver.
+                  displayName:
+                    type: string
+                    description: The display name of the driver.
+                  nickname:
+                    type: string
+                    description: The nickname of the driver.
+                  iracingName:
+                    type: string
+                    description: The iRacing name of the driver.
+                  publisherCode:
+                    type: string
+                    description: The publisher code of the driver.
+                  createdAt:
+                    type: string
+                    description: The creation timestamp.
+                  updatedAt:
+                    type: string
+                    description: The update timestamp.
+        '400':
+          description: Publisher code is required.
+        '404':
+          description: Invalid publisher code or no active session found.
+        '503':
+          description: Session is active but gateway is not provisioned.
+  /api/auth/user:
+    get:
+      summary: Get User Profile
+      description: >
+        Retrieves the authenticated user's profile, including their assigned
+        centerId and roles.
+
+        This endpoint is used to verify authentication status and get user
+        details.
+      responses:
+        '200':
+          description: User profile retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          description: Unauthorized. User is not authenticated.
+  /api/admin/grant-role:
+    post:
+      summary: Grant Role to User
+      description: |
+        Grants a specific role to a user identified by their email.
+        Note: This is a development/admin endpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  description: The email of the user.
+                role:
+                  type: string
+                  description: The role to grant (e.g., RaceDirector, Admin).
+      responses:
+        '200':
+          description: Role granted successfully or user already has the role.
+        '400':
+          description: Invalid input or invalid role.
+        '404':
+          description: User not found.
+        '500':
+          description: Internal server error.
+  /api/director/v1/sessions/{id}/commands:
+    post:
+      summary: Queue a chat/voice command
+      description: >
+        Queues a command (e.g., TTS_MESSAGE or SHOW_OVERLAY) to be included in
+        the next director sequence.
+
+        This endpoint is called by external AI Bot webhooks to inject
+        asynchronous commands into the broadcast.
+      tags:
+        - Director
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: The ID of the active race session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - payload
+              properties:
+                type:
+                  type: string
+                  enum:
+                    - TTS_MESSAGE
+                    - SHOW_OVERLAY
+                  description: The type of command to queue
+                payload:
+                  type: object
+                  properties:
+                    text:
+                      type: string
+                      description: The text content (for TTS or overlay)
+                    author:
+                      type: string
+                      description: The author of the message
+                  additionalProperties: true
+                  description: Command-specific payload data
+                priority:
+                  type: integer
+                  default: 5
+                  description: Command priority (lower number = higher priority)
+      responses:
+        '201':
+          description: Command queued successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  sessionId:
+                    type: string
+                    format: uuid
+                  type:
+                    type: string
+                  payload:
+                    type: object
+                  priority:
+                    type: integer
+                  createdAt:
+                    type: string
+                    format: date-time
+        '400':
+          description: Invalid request body
+        '404':
+          description: Session not found
+        '500':
+          description: Internal server error
+  /api/sessions:
+    post:
+      summary: Create Race Session
+      description: Creates a new race session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RaceSession'
+        '400':
+          description: Missing required fields.
+        '401':
+          description: Unauthorized.
+        '500':
+          description: Internal server error.
+    get:
+      summary: List Sessions
+      description: Retrieves a list of race sessions, optionally filtered by center ID.
+      parameters:
+        - in: query
+          name: centerId
+          schema:
+            type: string
+          description: Filter by Center ID.
+      responses:
+        '200':
+          description: List of sessions retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/RaceSession'
+        '500':
+          description: Internal server error.
+  /api/sessions/{sessionId}:
+    get:
+      summary: Get Session by ID
+      description: Retrieves details of a specific race session.
+      parameters:
+        - in: path
+          name: sessionId
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: The ID of the session to retrieve.
+      responses:
+        '200':
+          description: Session details retrieved successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RaceSession'
+        '400':
+          description: Session ID is required.
+        '404':
+          description: Session not found.
+        '500':
+          description: Internal server error.
+    delete:
+      summary: Delete Session
+      description: Deletes a specific race session.
+      parameters:
+        - in: path
+          name: sessionId
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: The ID of the session to delete.
+      responses:
+        '204':
+          description: Session deleted successfully.
+        '400':
+          description: Session ID is required.
+        '401':
+          description: Unauthorized.
+        '404':
+          description: Session not found.
+        '500':
+          description: Internal server error.
+  /api/chat/messages:
+    post:
+      summary: Store a chat message
+      description: Stores a chat message from a director in the database.
+      tags:
+        - Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - raceSessionId
+                - source
+                - authorName
+                - messageContent
+                - timestamp
+              properties:
+                raceSessionId:
+                  type: string
+                  format: uuid
+                source:
+                  type: string
+                authorName:
+                  type: string
+                authorAvatarUrl:
+                  type: string
+                messageContent:
+                  type: string
+                externalId:
+                  type: string
+                timestamp:
+                  type: string
+                  format: date-time
+      responses:
+        '201':
+          description: Message stored successfully
+        '400':
+          description: Invalid request
+        '500':
+          description: Internal server error
+  /api/sessions/{sessionId}/telemetry-status:
+    get:
+      summary: Get Telemetry Status
+      description: Retrieves the current telemetry status for a specific session.
+      parameters:
+        - in: path
+          name: sessionId
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: The ID of the session.
+      responses:
+        '200':
+          description: Telemetry status retrieved successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  isConnected:
+                    type: boolean
+                  lastUpdate:
+                    type: string
+                    format: date-time
+        '400':
+          description: Session ID is required.
+        '500':
+          description: Internal server error.
+  /api/tts:
+    post:
+      summary: Generate Text-to-Speech audio
+      description: >
+        Generates an audio file from the provided text using Google Gemini
+        models.
+
+        Requires authentication.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - text
+              properties:
+                text:
+                  type: string
+                  description: The text to synthesize.
+                context:
+                  type: object
+                  description: Context to determine voice/tone.
+                  properties:
+                    type:
+                      type: string
+                      description: Type of message (e.g. race_update, commentary)
+                    urgency:
+                      type: string
+                      description: Urgency level (e.g. low, medium, high)
+      responses:
+        '200':
+          description: Audio generated successfully.
+          content:
+            audio/wav:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Bad request (missing text).
+        '401':
+          description: Unauthorized.
+        '500':
+          description: Internal server error.
+  /api/auth/user/theme:
+    patch:
+      summary: Update User Theme
+      description: Updates the authenticated user's theme preference (light or dark).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                theme:
+                  type: string
+                  enum:
+                    - light
+                    - dark
+                  description: The desired theme.
+      responses:
+        '200':
+          description: Theme updated successfully.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  theme:
+                    type: string
+        '400':
+          description: Invalid theme value.
+        '401':
+          description: Unauthorized.
+        '500':
+          description: Internal server error.
+tags: []

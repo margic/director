@@ -23,7 +23,7 @@ export const msalConfig = {
         console.log(message);
       },
       piiLoggingEnabled: false,
-      logLevel: 3,
+      logLevel: 1, // Warning
     },
   },
 };
@@ -34,5 +34,6 @@ export const apiConfig = {
     userProfile: '/api/auth/user',
     listSessions: '/api/director/v1/sessions',
     nextSequence: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/sequences/next`,
+    tts: '/api/tts',
   },
 };

@@ -73,6 +73,27 @@ To prevent remote code execution (RCE) from compromised web content (e.g., YouTu
 *   **Audit**: Source code is public for community audit.
 *   **Data Minimization**: We do not store user PII locally beyond the minimum required tokens for operation.
 
+## 7. Logging & Telemetry Transparency
+
+To ensure application stability, diagnose errors, and improve feature reliability, Sim RaceCenter Director includes automated telemetry and logging capabilities.
+
+### Data Collection (Application Insights)
+We use Microsoft Azure Application Insights to collect the following diagnostic data:
+*   **Operational Logs**: Health status of internal services (e.g., "Discord TTS Service connected").
+*   **Exceptions**: Stack traces of application crashes or handled errors to identify bugs.
+*   **Performance Metrics**: Execution times of key operations (e.g., API latency) to optimize performance.
+*   **Usage Events**: Anonymous Feature usage counters (e.g., "Director Loop Started").
+
+### Privacy Controls
+*   **No PII**: We do not capture Personal Identifiable Information (Names, Emails, Passwords) in logs.
+*   **Tokens Redacted**: All authentication tokens (Bearer tokens, Refresh tokens) are automatically redacted or excluded from logging pipelines.
+*   **Console Logging**: In the default configuration, console output (stdout/stderr) from the application is transmitted to our diagnostic service to assist in debugging specific user issues.
+    *   *Note: Authentication headers are filtered out of these logs.*
+*   **Feature Flag**: Telemetry collection can be disabled entirely by setting `VITE_APPINSIGHTS_ENABLED=false` in the application environment configuration.
+
+### Data Retention
+Diagnostic data is retained for a limited period (typically 90 days) for analysis and then automatically purged.
+
 ## 6. Google API Services Usage Disclosure
 
 *This section provides specific transparency regarding our use of Google APIs, in compliance with the Google API Services User Data Policy.*

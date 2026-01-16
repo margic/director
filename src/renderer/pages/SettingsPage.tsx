@@ -9,10 +9,13 @@ import { YouTubeConnectionStatus } from '../youtube-types';
 export const SettingsPage = () => {
     const [ytStatus, setYtStatus] = useState<{ connected: boolean, channelId: string }>({ connected: false, channelId: '' });
     const [loading, setLoading] = useState(false);
+    const [discordConfig, setDiscordConfig] = useState({ tokenSet: false, channelId: '' });
+    const [discordTokenInput, setDiscordTokenInput] = useState('');
     const [modules, setModules] = useState({
         iracing: { enabled: true },
         obs: { enabled: true },
-        youtube: { enabled: true }
+        youtube: { enabled: true },
+        discord: { enabled: true }
     });
 
     useEffect(() => {
@@ -22,12 +25,22 @@ export const SettingsPage = () => {
                     const iracing = await window.electronAPI.config.get('iracing');
                     const obs = await window.electronAPI.config.get('obs');
                     const youtube = await window.electronAPI.config.get('youtube');
+                    const discord = await window.electronAPI.config.get('discord');
                     
                     setModules({
                         iracing: iracing || { enabled: true },
                         obs: obs || { enabled: true },
-                        youtube: youtube || { enabled: true }
+                        youtube: youtube || { enabled: true },
+                        discord: discord || { enabled: true }
                     });
+
+                    // Load Discord Config
+                    const tokenSet = await window.electronAPI.config.isSecureSet('discord.token');
+                    setDiscordConfig({
+                        tokenSet,
+                        channelId: discord?.channelId || ''
+                    });
+
                 } catch (e) {
                     console.error("Failed to load config", e);
                 }
@@ -64,7 +77,7 @@ export const SettingsPage = () => {
         await window.electronAPI.youtube.signOut();
     };
 
-    const toggleModule = async (module: 'iracing' | 'obs' | 'youtube', enabled: boolean) => {
+    const toggleModule = async (module: 'iracing' | 'obs' | 'youtube' | 'discord', enabled: boolean) => {
         setModules(prev => ({
             ...prev,
             [module]: { ...prev[module], enabled }
@@ -75,8 +88,23 @@ export const SettingsPage = () => {
         }
     };
 
+    const handleSaveDiscord = async () => {
+        try {
+            await window.electronAPI.config.set('discord.channelId', discordConfig.channelId);
+            if (discordTokenInput) {
+                await window.electronAPI.config.saveSecure('discord.token', discordTokenInput);
+                setDiscordConfig(prev => ({ ...prev, tokenSet: true }));
+                setDiscordTokenInput('');
+            }
+            alert('Discord settings saved');
+        } catch (error) {
+            console.error(error);
+            alert('Failed to save Discord settings');
+        }
+    };
+
     return (
-        <div className="p-8 space-y-8 animate-in fade-in duration-500 overflow-y-auto max-h-screen">
+        <div className="p-8 space-y-8 animate-in fade-in duration-500">
             <h1 className="text-4xl font-bold uppercase tracking-widest mb-8">System Configuration</h1>
 
             {/* Modules Toggle Section */}
@@ -131,6 +159,20 @@ export const SettingsPage = () => {
                         <Switch id="module-youtube" checked={modules.youtube.enabled} onCheckedChange={(c) => toggleModule('youtube', c)} />
                      </div>
 
+                     {/* Discord Toggle */}
+                     <div className="flex items-center justify-between p-4 border border-border/50 rounded-lg bg-background/50">
+                        <div className="flex items-center gap-4">
+                             <div className="p-2 bg-indigo-900/50 rounded text-indigo-400">
+                                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-1.5584 15.6565 1.5833 21.0373a.081.081 0 00.041.035c2.31 1.6966 4.757 2.6568 6.9407 2.6568a.0762.0762 0 00.0783-.0466c.2774-.3808.5316-.7823.7663-1.199a.076.076 0 00-.0415-.1066 12.8716 12.8716 0 01-1.9545-.9372.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.9314.0766.0766 0 00-.0407.1067c.2379.4124.502.8125.787 1.1893a.0764.0764 0 00.0775.0451c2.197 0 4.671-.9704 6.974-2.651a.0805.0805 0 00.04-.0355c3.553-5.8504 1.761-12.0673-1.617-16.6393a.0754.0754 0 00-.0317-.0273zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg>
+                             </div>
+                             <div>
+                                <h3 className="font-bold">Discord Bot</h3>
+                                <p className="text-xs text-muted-foreground">Voice chat & TTS announcements</p>
+                             </div>
+                        </div>
+                        <Switch id="module-discord" checked={modules.discord.enabled} onCheckedChange={(c) => toggleModule('discord', c)} />
+                     </div>
+
                 </CardContent>
             </Card>
 
@@ -173,6 +215,41 @@ export const SettingsPage = () => {
                             </div>
                         </div>
 
+                    </CardContent>
+                </Card>
+
+                 {/* Discord Config */}
+                 <Card className="bg-card border-border">
+                    <CardHeader>
+                        <CardTitle className="text-muted-foreground text-sm uppercase font-rajdhani tracking-widest">
+                            Discord Configuration
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                       <div className="space-y-2">
+                            <label className="text-sm font-medium uppercase text-muted-foreground">Bot Token</label>
+                            <Input 
+                                type="password"
+                                placeholder={discordConfig.tokenSet ? "Token is set (enter to update)" : "Enter Bot Token"}
+                                className="bg-background border-border font-mono"
+                                value={discordTokenInput}
+                                onChange={(e) => setDiscordTokenInput(e.target.value)}
+                            />
+                            <p className="text-xs text-muted-foreground">Required for bot connection.</p>
+                       </div>
+
+                       <div className="space-y-2">
+                            <label className="text-sm font-medium uppercase text-muted-foreground">Default Voice Channel ID</label>
+                             <Input 
+                                placeholder="123456789..." 
+                                className="bg-background border-border font-mono"
+                                value={discordConfig.channelId}
+                                onChange={(e) => setDiscordConfig({...discordConfig, channelId: e.target.value})}
+                            />
+                            <p className="text-xs text-muted-foreground">The ID of the voice channel to join.</p>
+                       </div>
+
+                        <Button onClick={handleSaveDiscord} className="w-full">Save Discord Settings</Button>
                     </CardContent>
                 </Card>
 
