@@ -59,8 +59,6 @@ export interface IElectronAPI {
   directorStop: () => Promise<any>;
   directorStatus: () => Promise<any>;
   directorListSessions: (centerId?: string) => Promise<RaceSession[]>;
-  iracingGetStatus: () => Promise<{ connected: boolean }>;
-  iracingSendCommand: (cmd: number, var1: number, var2: number, var3?: number) => Promise<void>;
   obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[] }>;
   obsGetScenes: () => Promise<string[]>;
   obsSetScene: (sceneName: string) => Promise<void>;
@@ -74,18 +72,9 @@ export interface IElectronAPI {
     saveSecure: (key: string, value: string) => Promise<boolean>;
     isSecureSet: (key: string) => Promise<boolean>;
   };
-  youtube: {
-    getStatus: () => Promise<any>;
-    startAuth: () => Promise<void>;
-    signOut: () => Promise<void>;
-    searchVideos: (channelId: string) => Promise<any>;
-    setVideo: (videoId: string) => Promise<void>;
-    onStatusChange: (callback: (status: any) => void) => () => void;
-  };
-  telemetry: {
-    trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => Promise<boolean>;
-    trackException: (error: { message: string; stack?: string; name: string }, properties?: { [key: string]: string }) => Promise<boolean>;
-    trackTrace: (message: string, severity?: string, properties?: { [key: string]: string }) => Promise<boolean>;
+  extensions: {
+      getStatus: () => Promise<Record<string, { active: boolean; version?: string }>>;
+      executeIntent: (intent: string, data: any) => Promise<any>;
   };
 }
 
@@ -94,3 +83,4 @@ declare global {
     electronAPI: IElectronAPI;
   }
 }
+

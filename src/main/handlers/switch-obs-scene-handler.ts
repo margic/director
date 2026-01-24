@@ -1,6 +1,6 @@
 import { CommandHandler } from './command-handler';
 import { SwitchObsSceneCommand } from '../director-types';
-import { ObsService } from '../obs-service';
+import { ObsService } from '../modules/obs-core/obs-service';
 
 export class SwitchObsSceneHandler implements CommandHandler<SwitchObsSceneCommand> {
   constructor(private obsService: ObsService) {}

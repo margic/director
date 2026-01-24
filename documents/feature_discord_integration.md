@@ -1,67 +1,22 @@
-# Discord & Driver Voice Integration Feature Specification
+# Discord Integration
 
-## Overview
-This feature implements the **"Driver Voice" Output System**, enabling the Race Director to broadcast audio announcements directly to a Discord Voice Channel where drivers are listening.
+> **Status: Active Extension**
+> This feature is implemented as an extension located at `src/extensions/discord`.
+> It provides generic Audio/Communication capabilities.
 
-Unlike the previous POC (which was a standalone service), this implementation integrates the Discord Voice client directly into the **Director Application**. The Director app receives commands from the Race Control API (as part of `DirectorSequence`) and relays the audio to the active Discord session.
+## Architecture: Extension Extension
+The Discord integration is now a standard extension using the `communication.announce` intent.
 
-## Feature Intent
-*   **Direction**: Output (Director -> Discord).
-*   **Content**: Audio messages (TTS or Pre-recorded) generated or specified by Race Control.
-*   **Audience**: Drivers in the Discord Voice Channel.
+### Manifest (`package.json`)
+- **ID**: `director-discord`
+- **Intents**:
+    - `communication.announce`: Play an audio message (TTS or File) to the configured Discord channel.
 
-## Architecture
+### Backend Implementation (`src/extensions/discord/index.ts`)
+The extension wraps the `discord.js` library.
+- **Connection**: Managed via Settings configuration passed to the extension.
+- **Audio**: Streams audio data to the Discord Voice Connection when the intent is received.
 
-1.  **Race Control API**: Generates a `DirectorSequence` containing `DRIVER_TTS` (or `PLAY_AUDIO`) commands.
-    *   *Logic*: The API decides *what* to say and *when*.
-    *   *Payload*: Contains text (for local synthesis) or an audio URL.
-2.  **Director (Main Process)**:
-    *   Maintains a persistent connection to the Discord Gateway (Bot).
-    *   Joins the configured Voice Channel.
-    *   Executes the command by playing the audio stream to the channel.
+### Frontend Integration
+The Discord controls currently reside in the generic Settings or Dashboard area. As it is primarily an Output-only extension (Command driven), it does not require a complex Control Deck like iRacing.
 
-## Scope
-
-### 1. Backend (Main Process)
-- **Service**: `DiscordService`.
-    - **Connection**: Connects to Discord using a Bot Token (from Settings/Env).
-    - **Voice Management**: Joins/Leaves Voice Channels.
-    - **Playback**: Streams audio to the Voice Connection.
-- **Dependencies**: TBD (Likely `discord.js` + `@discordjs/voice` + `ffmpeg-static` or `sodium`). *Note: Current implementation uses stubs/mocks until dependencies are added.*
-- **Commands**:
-    - `DRIVER_TTS`: Synthesize text (using system TTS or cloud API) -> Stream to Discord.
-    - `PLAY_AUDIO`: Stream provided URL -> Discord.
-
-### 2. Frontend (Renderer)
-- **Navigation**: "Driver Voice" (Mic Icon).
-- **Preview Module**:
-    - Status: Connected/Disconnected (Voice Channel).
-    - Data: "Channel: #drivers-briefing".
-- **Detail Page (`DiscordPage.tsx`)**:
-    - **Connection Config**: Bot Token (masked), Guild ID, Channel ID input.
-    - **Status Panel**: Connection State, Current Channel, Latency.
-    - **Manual Override**: Text input to manually send a TTS announcement to the channel.
-    - **Logs**: History of messages sent.
-
-## API & Data Types
-
-**Command Payload (`DRIVER_TTS`)**:
-```typescript
-interface DriverTtsCommandPayload {
-  text: string;      // The message to speak
-  voiceId?: string;  // Preferred voice
-  channelId?: string;// Target channel override
-}
-```
-
-## Comparisons to Legacy POC (`ttsdiscord`)
-*   **Legacy**: Separate Python Microservice listening to NATS.
-*   **New**: Integrated Electron Module polling HTTP API.
-*   **Commonality**: Both output audio to Discord.
-
-## Implementation Status (Current)
-- [x] **Architecture Refactor**: Updated to Output-only model.
-- [x] **Backend Service**: `DiscordService` implemented (Stubbed logic).
-- [x] **UI**: `DiscordPage` implemented with connection controls and manual TTS test.
-- [x] **Command Handler**: `DriverTtsHandler` routed to service.
-- [x] **Verification**: Logic verified via headless test script (`scripts/test-discord-integration.ts`).

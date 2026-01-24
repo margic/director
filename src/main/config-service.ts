@@ -70,6 +70,10 @@ class ConfigService {
     return this.store.get(key);
   }
 
+  getAny(key: string): any {
+    return this.store.get(key);
+  }
+
   set<K extends keyof AppConfig>(key: K, value: AppConfig[K]): void {
     this.store.set(key, value);
   }

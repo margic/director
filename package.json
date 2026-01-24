@@ -2,10 +2,10 @@
   "name": "director",
   "version": "0.0.7",
   "description": "Sim RaceCenter Director UI App",
-  "main": "dist-electron/main.js",
+  "main": "dist-electron/main/main.js",
   "scripts": {
-    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && tsc -p tsconfig.main.json && node run-electron.js\"",
-    "build": "tsc -p tsconfig.main.json && vite build",
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && tsc -p tsconfig.main.json && node scripts/copy-extension-assets.js && node run-electron.js\"",
+    "build": "tsc -p tsconfig.main.json && node scripts/copy-extension-assets.js && vite build",
     "generate-icons": "electron-icon-builder --input=./assets/images/icon-logo.png --output=build --flatten",
     "dist": "npm run generate-icons && npm run build && electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1",

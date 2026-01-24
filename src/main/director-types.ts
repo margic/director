@@ -3,7 +3,7 @@
  * Based on documents/feature_director_loop.md
  */
 
-export type CommandType = 'WAIT' | 'LOG' | 'SWITCH_CAMERA' | 'SWITCH_OBS_SCENE' | 'DRIVER_TTS' | 'VIEWER_CHAT';
+export type CommandType = 'WAIT' | 'LOG' | 'SWITCH_CAMERA' | 'SWITCH_OBS_SCENE' | 'DRIVER_TTS' | 'VIEWER_CHAT' | 'EXECUTE_INTENT';
 
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR';
 
@@ -48,6 +48,11 @@ export interface DriverTtsCommandPayload {
   channelId?: string;
 }
 
+export interface ExecuteIntentCommandPayload {
+  intent: string;
+  payload: any;
+}
+
 export interface ViewerChatCommandPayload {
   platform: 'YOUTUBE' | 'TWITCH';
   message: string;
@@ -90,13 +95,19 @@ export interface ViewerChatCommand extends BaseCommand {
   payload: ViewerChatCommandPayload;
 }
 
+export interface ExecuteIntentCommand extends BaseCommand {
+  type: 'EXECUTE_INTENT';
+  payload: ExecuteIntentCommandPayload;
+}
+
 export type DirectorCommand = 
   | WaitCommand 
   | LogCommand 
   | SwitchCameraCommand 
   | SwitchObsSceneCommand 
   | DriverTtsCommand 
-  | ViewerChatCommand;
+  | ViewerChatCommand
+  | ExecuteIntentCommand;
 
 // --- Sequences ---
 

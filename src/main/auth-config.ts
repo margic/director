@@ -34,6 +34,7 @@ export const apiConfig = {
     userProfile: '/api/auth/user',
     listSessions: '/api/director/v1/sessions',
     nextSequence: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/sequences/next`,
+    getSequence: (sequenceId: string) => `/api/director/v1/sequences/${sequenceId}`,
     tts: '/api/tts',
   },
 };

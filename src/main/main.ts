@@ -3,11 +3,15 @@ import path from 'path';
 import { AuthService } from './auth-service';
 import { DirectorService } from './director-service';
 import { telemetryService, SEVERITY_MAP } from './telemetry-service';
-import { IracingService } from './iracing-service';
-import { ObsService } from './obs-service';
-import { youtubeService } from './youtube-service';
+import { ObsService } from './modules/obs-core/obs-service';
 import { discordService } from './discord-service';
 import { configService } from './config-service';
+import { ExtensionHostService } from './extension-host/extension-host';
+import { IntentRegistry } from './extension-host/intent-registry';
+import { ExtensionEventBus } from './extension-host/event-bus';
+import { ViewRegistry } from './extension-host/view-registry';
+import { EventMapper } from './event-mapper';
+
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -17,8 +21,15 @@ if (require('electron-squirrel-startup')) {
 let mainWindow: BrowserWindow | null = null;
 let authService: AuthService;
 let directorService: DirectorService;
-let iracingService: IracingService;
+// let iracingService: IracingService;
 let obsService: ObsService;
+let extensionHost: ExtensionHostService;
+let intentRegistry: IntentRegistry;
+let eventBus: ExtensionEventBus;
+let viewRegistry: ViewRegistry;
+let eventMapper: EventMapper;
+
+
 
 const createWindow = () => {
   // Create the browser window.
@@ -58,11 +69,31 @@ app.on('ready', () => {
   authService = new AuthService();
   discordService.setAuthService(authService);
   discordService.setTelemetryService(telemetryService);
-  iracingService = new IracingService();
-  iracingService.start();
+
   obsService = new ObsService();
   obsService.start('ws://localhost:4455');
-  directorService = new DirectorService(authService, iracingService, obsService);
+  // Initialize Extension Host
+  intentRegistry = new IntentRegistry();
+  eventBus = new ExtensionEventBus();
+  viewRegistry = new ViewRegistry();
+  
+  // Use dist-electron/extensions (which is __dirname/../extensions in compiled structure)
+  // In development/tsc structure: dist-electron/main/main.js -> dist-electron/extensions
+  const extensionsPath = path.join(__dirname, '../extensions');
+  extensionHost = new ExtensionHostService(extensionsPath, intentRegistry, eventBus, viewRegistry, authService);
+
+  // Initialize Director Service with all dependencies
+  directorService = new DirectorService(authService, obsService, extensionHost);
+
+  // Initialize Event Mapper
+  eventMapper = new EventMapper(eventBus, directorService);
+
+  // Start extension host (async)
+  extensionHost.start().catch(err => {
+    console.error('Failed to start extension host:', err);
+    telemetryService.trackException(err, { component: 'ExtensionHost' });
+  });
+
   createWindow();
 
   ipcMain.handle('auth:login', async () => {
@@ -108,14 +139,24 @@ app.on('ready', () => {
     return configService.get(key as any);
   });
 
+  ipcMain.handle('extensions:get-status', () => {
+    return extensionHost.getStatus();
+  });
+
+  ipcMain.handle('extensions:execute-intent', async (event, intent, data) => {
+    return extensionHost.executeIntent(intent, data);
+  });
+
   ipcMain.handle('config:set', async (event, key, value) => {
     configService.set(key as any, value);
 
     if (key === 'iracing.enabled') {
       if (value) {
-        iracingService.start();
+        // iracingService.start();
+        // TODO: Enable extension
       } else {
-        iracingService.stop();
+        // iracingService.stop();
+        // TODO: Disable extension
       }
     } else if (key === 'obs.enabled') {
       if (value) {
@@ -136,14 +177,7 @@ app.on('ready', () => {
   });
 
 
-  // iRacing IPC Handlers
-  ipcMain.handle('iracing:get-status', () => {
-    return { connected: iracingService.isConnected() };
-  });
-
-  ipcMain.handle('iracing:send-command', (event, cmd, var1, var2, var3) => {
-    iracingService.broadcastMessage(cmd, var1, var2, var3);
-  });
+  // iRacing IPC Handlers - REMOVED (Migrated to Extension)
 
   // OBS IPC Handlers
   ipcMain.handle('obs:get-status', () => {
@@ -219,20 +253,6 @@ app.on('ready', () => {
     return true;
   });
 
-  // YouTube IPC
-  ipcMain.handle('youtube:get-status', () => youtubeService.getStatus());
-  ipcMain.handle('youtube:auth-start', () => youtubeService.startAuthFlow());
-  ipcMain.handle('youtube:auth-signout', () => youtubeService.signOut());
-  ipcMain.handle('youtube:search-videos', async (_, channelId) => youtubeService.searchLiveVideos(channelId));
-  ipcMain.handle('youtube:set-video', (_, videoId) => youtubeService.setVideo(videoId));
-  ipcMain.on('youtube-scraper:message', (_, msg) => {
-    // 1. Increment local counter
-    // youtubeService.getStatus().messageCount++; // Direct mutation avoided for now
-    // 2. Forward to Race Control API (TODO: Ingest)
-    // For now we just log
-    console.log('Main Process Received Chat:', msg);
-  });
-
   // Discord IPC
   ipcMain.handle('discord:get-status', () => discordService.getStatus());
   // The UI can ask to "Connect" or "Test Output"
@@ -266,6 +286,12 @@ app.on('window-all-closed', async () => {
     telemetryService.trackEvent('Application.Quit');
     await telemetryService.flush();
     app.quit();
+  }
+});
+
+app.on('will-quit', async () => {
+  if (extensionHost) {
+    await extensionHost.stop();
   }
 });
 

@@ -1,6 +1,6 @@
 import OBSWebSocket from 'obs-websocket-js';
-import { telemetryService } from './telemetry-service';
-import { configService } from './config-service';
+import { telemetryService } from '../../telemetry-service';
+import { configService } from '../../config-service';
 
 export class ObsService {
     private obs: OBSWebSocket;

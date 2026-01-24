@@ -1,5 +1,8 @@
 # OBS Integration Feature Specification
 
+> **Status: Core Module**
+> This feature is implemented as a core module located at `src/main/modules/obs-core`. It is integrated directly into the `DirectorService` and `SequenceExecutor` for high-performance sequence execution.
+
 ## Overview
 This feature implements the integration with **OBS Studio** (Open Broadcaster Software) using the `obs-websocket-js` library. This allows the Director application to control broadcast scenes programmatically, ensuring the correct camera feeds and graphics are displayed during a race event.
 

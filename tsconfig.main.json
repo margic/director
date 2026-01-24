@@ -6,5 +6,8 @@
     "outDir": "dist-electron",
     "tsBuildInfoFile": "dist-electron/.tsbuildinfo"
   },
-  "include": ["src/main/**/*"]
+  "include": [
+    "src/main/**/*",
+    "src/extensions/**/*"
+  ]
 }

@@ -1,6 +1,8 @@
 
 import { DirectorService } from '../src/main/director-service';
 import { AuthService } from '../src/main/auth-service';
+import { ObsService } from '../src/main/modules/obs-core/obs-service';
+import { ExtensionHostService } from '../src/main/extension-host/extension-host';
 import { RaceSession, GetNextSequenceResponse } from '../src/main/director-types';
 
 // Mock AuthService (duck typing)
@@ -8,6 +10,18 @@ const mockAuthService = {
   getAccessToken: async () => "mock-token",
   getUserProfile: async () => ({ centerId: "mock-center-id" }),
 } as unknown as AuthService;
+
+const mockObsService = {
+  connect: async () => {},
+  disconnect: () => {},
+  switchScene: async () => {},
+} as unknown as ObsService;
+
+const mockExtensionHost = {
+  start: async () => {},
+  stop: () => {},
+  executeIntent: async () => [{ success: true }],
+} as unknown as ExtensionHostService;
 
 // Mock Fetch
 const mockSessions: RaceSession[] = [
@@ -128,7 +142,11 @@ global.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Res
 async function runTest() {
   console.log("Starting Director Loop Test...");
   
-  const directorService = new DirectorService(mockAuthService);
+  const directorService = new DirectorService(
+    mockAuthService, 
+    mockObsService, 
+    mockExtensionHost
+  );
 
   // Start the service
   await directorService.start();

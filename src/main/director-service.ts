@@ -11,8 +11,8 @@ import { randomUUID } from 'crypto';
 import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
-import { IracingService } from './iracing-service';
-import { ObsService } from './obs-service';
+import { ExtensionHostService } from './extension-host/extension-host';
+import { ObsService } from './modules/obs-core/obs-service';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -29,10 +29,10 @@ export class DirectorService {
 
   constructor(
     private authService: AuthService, 
-    private iracingService: IracingService, 
-    private obsService: ObsService
+    private obsService: ObsService,
+    private extensionHost: ExtensionHostService
   ) {
-    this.executor = new SequenceExecutor(iracingService, obsService);
+    this.executor = new SequenceExecutor(obsService, extensionHost);
   }
 
   async start() {
@@ -86,6 +86,42 @@ export class DirectorService {
       processedCommands: this.processedCommands,
       lastError: this.lastError
     };
+  }
+
+  async executeSequenceById(sequenceId: string) {
+    if (!sequenceId) return;
+    
+    console.log(`[Director] Manual execution of sequence: ${sequenceId}`);
+    
+    // Fetch sequence definition
+    const token = await this.authService.getAccessToken();
+    if (!token) {
+        console.warn('[Director] Cannot execute sequence: No auth token.');
+        return;
+    }
+
+    try {
+        const url = `${apiConfig.baseUrl}${apiConfig.endpoints.getSequence(sequenceId)}`;
+        const response = await fetch(url, {
+             headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+            console.error(`[Director] Failed to fetch sequence ${sequenceId}: ${response.status}`);
+            return;
+        }
+
+        const sequence: DirectorSequence = await response.json();
+        
+        // Execute immediately (interrupting/parallel to loop?)
+        // The executor handles commands sequentially for a single sequence.
+        // If the loop is running, it might overlap.
+        // For now, fire and forget.
+        this.executor.execute(sequence);
+        
+    } catch (err) {
+        console.error(`[Director] Error executing sequence ${sequenceId}:`, err);
+    }
   }
 
   async listSessions(centerId?: string): Promise<RaceSession[]> {

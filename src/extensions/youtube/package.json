@@ -1,0 +1,56 @@
+{
+  "name": "director-youtube",
+  "version": "1.0.0",
+  "main": "index.js",
+  "displayName": "YouTube Chat & Integration",
+  "description": "Provides YouTube Live Chat integration for communication and context.",
+  "contributes": {
+    "intents": [
+      {
+        "intent": "communication.talkToChat",
+        "title": "Send Chat Message",
+        "description": "Sends a message to the active YouTube Live Chat.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "message": { "type": "string" }
+          },
+          "required": ["message"]
+        }
+      }
+    ],
+    "events": [
+      {
+        "event": "chat.messageReceived",
+        "title": "Chat Message Received",
+        "description": "Emitted when a new chat message is detected in the stream.",
+        "schema": {
+           "type": "object",
+           "properties": {
+             "author": { "type": "string" },
+             "message": { "type": "string" },
+             "timestamp": { "type": "string" }
+           }
+        }
+      }
+    ],
+    "settings": {
+      "youtube.channelId": {
+        "type": "string",
+        "description": "The YouTube Channel ID to monitor."
+      },
+      "youtube.clientId": {
+        "type": "string",
+        "description": "Google OAuth Client ID"
+      },
+      "youtube.clientSecret": {
+        "type": "string",
+        "description": "Google OAuth Client Secret (Secure)"
+      },
+      "youtube.refreshToken": {
+         "type": "string",
+         "description": "Stored Refresh Token (Secure)"
+      }
+    }
+  }
+}

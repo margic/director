@@ -6,23 +6,29 @@ import { SwitchCameraHandler } from './handlers/switch-camera-handler';
 import { SwitchObsSceneHandler } from './handlers/switch-obs-scene-handler';
 import { DriverTtsHandler } from './handlers/driver-tts-handler';
 import { ViewerChatHandler } from './handlers/viewer-chat-handler';
-import { IracingService } from './iracing-service';
-import { ObsService } from './obs-service';
+import { ExecuteIntentHandler } from './handlers/execute-intent-handler';
+import { ExtensionHostService } from './extension-host/extension-host';
+import { ObsService } from './modules/obs-core/obs-service';
 
 export class CommandHandlerRegistry {
   private handlers: Map<CommandType, CommandHandler<any>> = new Map();
 
-  constructor(private iracingService: IracingService, private obsService: ObsService) {
+  constructor(
+    private obsService: ObsService,
+    private extensionHost: ExtensionHostService
+  ) {
     this.registerDefaults();
   }
 
   private registerDefaults() {
     this.register('WAIT', new WaitHandler());
     this.register('LOG', new LogHandler());
-    this.register('SWITCH_CAMERA', new SwitchCameraHandler(this.iracingService));
+    this.register('SWITCH_CAMERA', new SwitchCameraHandler(this.extensionHost));
     this.register('SWITCH_OBS_SCENE', new SwitchObsSceneHandler(this.obsService));
-    this.register('DRIVER_TTS', new DriverTtsHandler());
-    this.register('VIEWER_CHAT', new ViewerChatHandler());
+    // Deprecated: DriverTtsHandler replaced by EXECUTE_INTENT
+    // this.register('DRIVER_TTS', new DriverTtsHandler());
+    this.register('VIEWER_CHAT', new ViewerChatHandler(this.extensionHost));
+    this.register('EXECUTE_INTENT', new ExecuteIntentHandler(this.extensionHost));
   }
 
   register(type: CommandType, handler: CommandHandler<any>) {
@@ -37,8 +43,11 @@ export class CommandHandlerRegistry {
 export class SequenceExecutor {
   private registry: CommandHandlerRegistry;
 
-  constructor(iracingService: IracingService, obsService: ObsService) {
-    this.registry = new CommandHandlerRegistry(iracingService, obsService);
+  constructor(
+    obsService: ObsService,
+    extensionHost: ExtensionHostService
+  ) {
+    this.registry = new CommandHandlerRegistry(obsService, extensionHost);
   }
 
   async execute(sequence: DirectorSequence, onProgress?: (completed: number, total: number) => void): Promise<void> {

@@ -1,0 +1,46 @@
+{
+  "name": "director-iracing",
+  "version": "1.0.0",
+  "main": "index.js",
+  "displayName": "iRacing Broadcast Controller",
+  "description": "Controls iRacing Cameras and Replay state via Broadcast Messages.",
+  "contributes": {
+    "intents": [
+      {
+        "intent": "broadcast.showLiveCam",
+        "title": "Show Live Camera",
+        "description": "Switches the live camera to valid car/group.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "carNum": { "type": "string" },
+            "camGroup": { "type": "string" },
+            "camNum": { "type": "string" }
+          },
+          "required": ["carNum"]
+        }
+      },
+      {
+        "intent": "broadcast.replayFromTo",
+        "title": "Play Replay Segment",
+        "description": "Plays a replay segment from frame A to B.",
+        "schema": {
+          "type": "object",
+          "properties": {
+             "startFrame": { "type": "number" },
+             "endFrame": { "type": "number" },
+             "speed": { "type": "number" }
+          },
+          "required": ["startFrame", "endFrame"]
+        }
+      }
+    ],
+    "settings": {
+      "iracing.enabled": {
+        "type": "boolean",
+        "description": "Enable iRacing Integration",
+        "default": true
+      }
+    }
+  }
+}
