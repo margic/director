@@ -44,6 +44,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Extension API (Unified)
   extensions: {
       getStatus: () => ipcRenderer.invoke('extensions:get-status'),
+      getViews: (type?: string) => ipcRenderer.invoke('extensions:get-views', type),
       executeIntent: (intent: string, data: any) => ipcRenderer.invoke('extensions:execute-intent', intent, data),
+      onExtensionEvent: (callback: (data: any) => void) => {
+        const subscription = (_: any, data: any) => callback(data);
+        ipcRenderer.on('extension:event', subscription);
+        // Return unsubscribe function
+        return () => ipcRenderer.removeListener('extension:event', subscription);
+      }
   }
 });

@@ -31,7 +31,7 @@ extensions.forEach(ext => {
     }
 
     // List of files to copy
-    const assets = ['package.json'];
+    const assets = ['package.json', 'widget.html', 'panel.html'];
 
     assets.forEach(asset => {
         const srcAsset = path.join(extSrcPath, asset);

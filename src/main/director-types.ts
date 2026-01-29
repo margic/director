@@ -189,3 +189,31 @@ export interface GetNextSequenceResponse {
   commands: DirectorCommand[];
   totalDurationMs?: number;
 }
+
+// --- Extension Protocol ---
+
+export type ExtensionMessageType = 'EXTENSION_INTENT' | 'EXTENSION_EVENT' | 'EXTENSION_STATUS';
+
+export interface ExtensionMessage {
+  type: ExtensionMessageType;
+}
+
+export interface ExtensionIntentMessage extends ExtensionMessage {
+  type: 'EXTENSION_INTENT';
+  intent: string; // The intent ID (e.g., 'communication.message')
+  payload?: any;  // The intent payload
+}
+
+export interface ExtensionEventMessage extends ExtensionMessage {
+  type: 'EXTENSION_EVENT';
+  data: {
+    eventName: string;
+    payload: any;
+  };
+}
+
+export interface ExtensionStatusMessage extends ExtensionMessage {
+  type: 'EXTENSION_STATUS';
+  data: Record<string, { active: boolean; [key: string]: any }>;
+}
+

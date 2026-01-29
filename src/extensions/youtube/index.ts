@@ -11,6 +11,8 @@ interface ExtensionAPI {
   closeScraper(windowId: string): void;
   openExternal(url: string): Promise<void>;
   registerIntentHandler(intent: string, handler: (payload: any) => Promise<void>): void;
+  registerCommandHandler(command: string, handler: (payload: any) => Promise<any>): void;
+  registerScraperMessageHandler(handler: (payload: any) => void): void;
   emitEvent(event: string, payload: any): void;
   updateSetting(key: string, value: any): Promise<void>;
   log(level: 'info' | 'warn' | 'error', message: string): void;
@@ -22,10 +24,18 @@ const REDIRECT_URI = 'http://localhost:3000/callback';
 let oauth2Client: OAuth2Client | null = null;
 let activeScraperId: string | null = null;
 let directorAPI: ExtensionAPI | null = null;
+let monitorInterval: NodeJS.Timeout | null = null;
+let stats = {
+    messagesReceived: 0,
+    messagesSent: 0
+};
 
 export async function activate(director: ExtensionAPI) {
     directorAPI = director;
     director.log('info', 'YouTube Extension Activating...');
+    
+    // Reset Stats
+    stats = { messagesReceived: 0, messagesSent: 0 };
 
     const clientId = director.settings['youtube.clientId'];
     const clientSecret = director.settings['youtube.clientSecret'];
@@ -41,15 +51,19 @@ export async function activate(director: ExtensionAPI) {
             director.log('info', 'YouTube Extension: Credentials loaded.');
         }
 
-        // Register Auth Handlers? 
-        // We lack a direct "Command" system for extensions to expose backend functions to UI easily
-        // besides Intents. 
-        // For now, we'll watch for a specific 'system' intent or just assume the 'Command' triggers this?
-        // Let's register a synthetic intent for Login
-        director.registerIntentHandler('system.extension.login', async (payload: { extensionId: string }) => {
-             if (payload.extensionId === 'director-youtube') {
-                 await startAuthFlow(director);
-             }
+        // Register Command Handlers
+        director.registerIntentHandler('director.youtube.login', async () => {
+             director.log('info', 'Login command received.');
+             await startAuthFlow(director);
+             // return { success: true }; // Intents do not return values
+        });
+
+        director.registerIntentHandler('director.youtube.logout', async () => {
+             // Logic to clear token
+             await director.updateSetting('youtube.refreshToken', null);
+             oauth2Client = null;
+             director.log('info', 'Logged out.');
+             // return { success: true };
         });
     }
 
@@ -57,17 +71,85 @@ export async function activate(director: ExtensionAPI) {
     director.registerIntentHandler('communication.talkToChat', async (payload: { message: string }) => {
         director.log('info', `Sending message to chat: ${payload.message}`);
         await sendMessageToChat(payload.message, director);
+        stats.messagesSent++;
+        broadcastStats(director);
     });
 
-    // Determine if we should start scraping?
-    // Maybe an intent 'youtube.monitorChat'? Or just startup?
-    // Let's check settings.
+    // Register Scraper Handler
+    director.registerScraperMessageHandler((data) => {
+        // Assume data is { author, message, timestamp }
+        stats.messagesReceived++;
+        broadcastStats(director);
+        
+        // Log sample
+        director.log('info', `[Chat] ${data.author}: ${data.message}`);
+    });
+
+    director.registerIntentHandler('youtube.startMonitor', async () => {
+        if (activeScraperId) return;
+        
+        director.log('info', 'Starting YouTube Scraper Monitoring...');
+        // TODO: This URL should probably be dynamic/configurable
+        // For now, we assume user pastes a live studio URL or we have a way to find it.
+        // Or we use the authenticated client to find the broadcast ID and construct the URL.
+        
+        const broadcast = await getActiveBroadcast(director); // Helper to get URL via API?
+        if (!broadcast.url) {
+            director.log('error', 'No active broadcast found. Cannot start scraper.');
+            return;
+        }
+
+        activeScraperId = await director.openScraper(broadcast.url);
+        director.emitEvent('youtube.status', { monitoring: true });
+        broadcastStats(director);
+    });
+
+    director.registerIntentHandler('youtube.stopMonitor', async () => {
+        if (activeScraperId) {
+            director.closeScraper(activeScraperId);
+            activeScraperId = null;
+        }
+        director.log('info', 'Stopped YouTube Monitoring.');
+        director.emitEvent('youtube.status', { monitoring: false });
+        broadcastStats(director);
+    });
+
+    // Auto-start if channel ID is present
     const channelId = director.settings['youtube.channelId'];
     if (channelId) {
-        // We can try to find live video and open scraper.
-        // For now, let's just log. Implementing the full robust Poller here is step 2.
         director.log('info', `Monitoring Channel: ${channelId}`);
     }
+}
+
+async function getActiveBroadcast(director: ExtensionAPI): Promise<{ url?: string }> {
+    if (!oauth2Client) return {};
+
+    try {
+        const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
+        const response = await youtube.liveBroadcasts.list({
+            part: ['snippet', 'id'],
+            broadcastStatus: 'active',
+            broadcastType: 'all'
+        });
+
+        const broadcast = response.data.items?.[0];
+        if (broadcast && broadcast.id) {
+             // Return the popout chat URL
+             return { url: `https://www.youtube.com/live_chat?is_popout=1&v=${broadcast.id}` };
+        }
+    } catch (err: any) {
+        director.log('error', `Failed to find broadcast: ${err.message}`);
+    }
+    return {};
+}
+
+function broadcastStats(director: ExtensionAPI) {
+    director.emitEvent('youtube.stats', stats);
+}
+
+// Remove old checkBroadcastStatus and replace with generic stats emitter
+async function checkBroadcastStatus(director: ExtensionAPI) {
+    // Deprecated in favor of scraper + stats
 }
 
 async function sendMessageToChat(text: string, director: ExtensionAPI) {

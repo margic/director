@@ -5,17 +5,26 @@ export interface ExtensionManifest {
   description?: string;
   contributes?: {
     intents?: IntentContribution[];
+    commands?: CommandContribution[];
     events?: EventContribution[];
     settings?: Record<string, any>;
     views?: ViewContribution[];
   };
 }
 
+export interface CommandContribution {
+  command: string; // e.g. "director.youtube.login"
+  title: string;
+  description?: string;
+}
+
 export interface ViewContribution {
-  id: string;
+  id: string; // unique relative id e.g. "status-card"
   name: string;
-  type: 'panel' | 'dialog' | 'overlay';
-  path?: string;
+  type: 'panel' | 'dialog' | 'overlay' | 'widget';
+  path?: string; // e.g. "dist/widget.html"
+  width?: number; // for widgets (cols)
+  height?: number; // for widgets (rows)
 }
 
 export interface IntentContribution {
@@ -43,11 +52,16 @@ export interface ExtensionAPI {
   openScraper(url: string, script?: string): Promise<string>; // Returns windowId
   closeScraper(windowId: string): void;
   
+  // Platform Capabilities
+  registerScraperMessageHandler(handler: (payload: any) => void): void;
+
   // System Capability
   openExternal(url: string): Promise<void>;
 
   // Register a handler for a specific intent
   registerIntentHandler(intent: string, handler: (payload: any) => Promise<void>): void;
+
+  // registerCommandHandler removed
   
   // Emit an event to the Core
   emitEvent(event: string, payload: any): void;
@@ -60,11 +74,39 @@ export interface ExtensionAPI {
 }
 
 // IPC Messages
-export type IpcMessageType = 'LOAD_EXTENSION' | 'EXECUTE_INTENT' | 'REGISTER_INTENT' | 'EMIT_EVENT' | 'LOG' | 'INVOKE' | 'INVOKE_RESULT';
+export type IpcMessageType = 
+  | 'LOAD_EXTENSION' 
+  | 'EXECUTE_INTENT' 
+  | 'REGISTER_INTENT' 
+  | 'EXECUTE_COMMAND'
+  | 'REGISTER_COMMAND'
+  | 'COMMAND_RESULT'
+  | 'EMIT_EVENT' 
+  | 'LOG' 
+  | 'INVOKE' 
+  | 'INVOKE_RESULT'
+  | 'SCRAPER_MESSAGE';
 
 export interface IpcMessage {
   type: IpcMessageType;
   payload: any;
+}
+
+export interface ExecuteCommandPayload {
+  requestId: string;
+  command: string;
+  args: any;
+}
+
+export interface RegisterCommandPayload {
+    command: string;
+    extensionId: string;
+}
+
+export interface CommandResultPayload {
+    requestId: string;
+    result?: any;
+    error?: string;
 }
 
 export interface InvokePayload {

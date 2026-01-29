@@ -17,6 +17,36 @@
           },
           "required": ["message"]
         }
+      },
+      {
+        "intent": "youtube.startMonitor",
+        "title": "Start Chat Monitoring",
+        "description": "Begins polling YouTube API for chat messages."
+      },
+      {
+        "intent": "youtube.stopMonitor",
+        "title": "Stop Chat Monitoring",
+        "description": "Stops polling YouTube API."
+      }
+    ],
+    "commands": [
+      {
+        "command": "director.youtube.login",
+        "title": "Sign in to YouTube",
+        "description": "Starts the OAuth flow for YouTube."
+      },
+      {
+        "command": "director.youtube.logout",
+        "title": "Sign out of YouTube",
+        "description": "Clears stored credentials."
+      }
+    ],
+    "views": [
+      {
+        "id": "status-widget",
+        "name": "YouTube Status",
+        "type": "widget",
+        "path": "widget.html"
       }
     ],
     "events": [

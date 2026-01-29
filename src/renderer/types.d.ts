@@ -74,7 +74,10 @@ export interface IElectronAPI {
   };
   extensions: {
       getStatus: () => Promise<Record<string, { active: boolean; version?: string }>>;
+      getViews: (type?: 'panel' | 'dialog' | 'overlay' | 'widget') => Promise<any[]>;
       executeIntent: (intent: string, data: any) => Promise<any>;
+      executeCommand: (command: string, args?: any) => Promise<any>;
+      onExtensionEvent: (callback: (data: { extensionId: string; eventName: string; payload: any }) => void) => () => void;
   };
 }
 

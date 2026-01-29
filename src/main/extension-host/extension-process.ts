@@ -29,7 +29,7 @@ class ExtensionApiImpl implements ExtensionAPI {
 
   registerIntentHandler(intent: string, handler: (payload: any) => Promise<void>): void {
     // We store the handler locally in the process map
-    ExtensionProcess.registerHandler(this.extensionId, intent, handler);
+    ExtensionProcess.registerIntentHandler(this.extensionId, intent, handler);
     
     // Notify main process that we support this intent (optional, mainly for verification)
     // Note: The main process already knows from the manifest, this just confirms the code is ready.
@@ -37,6 +37,13 @@ class ExtensionApiImpl implements ExtensionAPI {
       type: 'REGISTER_INTENT',
       payload: { intent }
     });
+  }
+
+  // COMMAND Handlers removed
+
+
+  registerScraperMessageHandler(handler: (payload: any) => void): void {
+      ExtensionProcess.registerScraperHandler(this.extensionId, handler);
   }
 
   emitEvent(event: string, payload: any): void {
@@ -61,13 +68,24 @@ class ExtensionApiImpl implements ExtensionAPI {
 // Global state for the process
 class ExtensionProcess {
   // intent -> handler
-  private static handlers = new Map<string, (payload: any) => Promise<void>>();
+  private static intentHandlers = new Map<string, (payload: any) => Promise<void>>();
+  // command -> handler
+  private static commandHandlers = new Map<string, (payload: any) => Promise<any>>();
+  // scraper listener
+  private static scraperHandlers = new Map<string, (payload: any) => void>();
+  
   private static pendingInvokes = new Map<string, {resolve: (val: any) => void, reject: (err: Error) => void}>();
   
-  public static registerHandler(extensionId: string, intent: string, handler: (payload: any) => Promise<void>) {
-    // TODO: Maybe namespace intents by extensionId locally? 
-    // For now, simple map.
-    this.handlers.set(intent, handler);
+  public static registerIntentHandler(extensionId: string, intent: string, handler: (payload: any) => Promise<void>) {
+    this.intentHandlers.set(intent, handler);
+  }
+
+  public static registerCommandHandler(extensionId: string, command: string, handler: (payload: any) => Promise<any>) {
+    this.commandHandlers.set(command, handler);
+  }
+
+  public static registerScraperHandler(extensionId: string, handler: (payload: any) => void) {
+      this.scraperHandlers.set(extensionId, handler);
   }
 
   public static async invoke(method: string, args: any[] = [], extensionId?: string): Promise<any> {
@@ -106,6 +124,13 @@ class ExtensionProcess {
       case 'EXECUTE_INTENT':
         await this.executeIntent(msg.payload as ExecuteIntentPayload);
         break;
+      // EXECUTE_COMMAND case removed
+      case 'SCRAPER_MESSAGE':
+        const handler = this.scraperHandlers.get(msg.payload.extensionId);
+        if (handler) {
+            handler(msg.payload.data);
+        }
+        break;
     }
   }
 
@@ -134,7 +159,7 @@ class ExtensionProcess {
   }
 
   private static async executeIntent(payload: ExecuteIntentPayload) {
-    const handler = this.handlers.get(payload.intent);
+    const handler = this.intentHandlers.get(payload.intent);
     if (!handler) {
       console.warn(`[ExtProcess] No handler found for intent ${payload.intent}`);
       return;
@@ -151,6 +176,8 @@ class ExtensionProcess {
       });
     }
   }
+
+  // executeCommand removed in favor of Intents
 }
 
 // Setup Listener

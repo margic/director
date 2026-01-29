@@ -9,5 +9,8 @@
   "include": [
     "src/main/**/*",
     "src/extensions/**/*"
+  ],
+  "exclude": [
+    "src/extensions/**/renderer/**/*"
   ]
 }

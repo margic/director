@@ -52,13 +52,28 @@ An extension consists of:
 Extensions contribute functionality to the Core via the `manifest`. Crucially, **Intents** must be self-describing to support the AI agent's inference engine.
 
 *   **`intents`**: High-level semantic actions the extension can perform (e.g., `communication.announceToDrivers`, `lighting.signalRaceStart`).
+    *   **Purpose**: **Automation & AI Control**. The AI executes *Intents* to control the broadcast context.
     *   **Abstraction Layer**: The AI executes *Intents*, not low-level actions.
     *   **Static Intents**: Simple built-in capabilities (e.g., "Send Message").
     *   **User-Defined Intents**: Complex configurations created by the user within the extension (e.g., a specific light show pattern) and exposed as a high-level intent (e.g., `lighting.victoryLap`).
     *   Must include **Input Schema** (JSON Schema): Defines required parameters (e.g., "messageText").
+*   **`commands`**: Internal RPC methods for UI interactivity and Configuration.
+    *   **Purpose**: **UI & Configuration**. Used by the Extension's Frontend (Panel/Widget) to trigger Main Process logic (e.g., `system.login`, `settings.save`).
+    *   **Isolation**: Commands are **NOT** exposed to the Automator or Cloud AI. They are strictly for User interaction via the Control Deck or Extension Panel.
+*   **`views`**: UI components contributed to the Core application.
+    *   **`widget`**: A small summary card for the Dashboard (e.g., Status Indicator).
+    *   **`panel`**: A full-page interface for the Extension (e.g., "YouTube Studio").
 *   **`events`**: Triggers that the Core can listen to (e.g., `streamdeck.buttonPressed`, `iracing.flagChanged`).
     *   **Usage**: Enables hardware controllers (Stream Deck, Button Boxes) or external webhooks to initiate Director sequences.
-*   **`settings`**: Configuration schema (e.g., API Keys, IP addresses).
+
+### 2.3 Extension Configuration & Persistence
+The Director Core intentionally **does not** provide a unified settings interface or storage mechanism for extensions.
+
+*   **Self-Managed State**: Extensions are fully responsible for managing their own configuration (API keys, preferences, local data).
+*   **Custom UI**: Extensions must provide their own configuration interface within their contributed `panel` view.
+    *   **Flexibility**: The `panel` view is the extension's full-canvas playground. Developers can structure this with tabs, navigation menus, or minimal forms as needed.
+    *   **Example**: A "YouTube" extension might have a `Status` tab for the current stream and a `Settings` tab for authentication.
+*   **No Central Schema**: The `manifest` does not define configuration schemas. The Core treats the extension as a black box that is either "enabled" or "disabled".
 
 ### 2.4 Event-Driven Triggers (Hardware Support)
 To support hardware controllers, extensions can emit events that the user maps to specific Director Sequences.
@@ -91,6 +106,24 @@ To ensure the Cloud AI can create sequences effectively:
     *   *Example:* "I have an intent `communication.announceToDrivers` that accepts `text`."
 3.  **The "Black Box" Approach**: The AI decides *what* it wants to achieve (the intent) but delegates the *how* (the implementation details) to the local extension.
     *   *AI Logic:* "There is a crash. I should `communication.announceToDrivers('Safety Car Deployed')`."
+
+### 2.6 The Extension Host Protocol
+To ensure secure and standardized communication between the Extension UI (`widget` or `panel` loaded in an iframe) and the Director Core, a strict messaging protocol is enforced using `postMessage`.
+
+**Message Direction: Extension UI -> Director Core**
+*   **`EXTENSION_COMMAND`**: Execute a backend command (RPC).
+    *   Target: `ExtensionHost` -> `ExtensionService`.
+    *   Payload: `{ type: 'EXTENSION_COMMAND', command: 'extensionId.commandName', payload: Object }`
+*   **`EXTENSION_INTENT`**: Request an Intent execution.
+    *   Target: `DirectorService` -> `IntentRegistry`.
+    *   Payload: `{ type: 'EXTENSION_INTENT', intent: 'domain.action', payload: Object }`
+
+**Message Direction: Director Core -> Extension UI**
+*   **`EXTENSION_EVENT`**: Events forwarded from the main process.
+    *   Payload: `{ type: 'EXTENSION_EVENT', data: { eventName: 'source.event', payload: Object } }`
+*   **`EXTENSION_STATUS`**: System status updates.
+    *   Payload: `{ type: 'EXTENSION_STATUS', data: { [extensionId]: { active: boolean } } }`
+
     *   *Extension Logic:* Receives intent -> Generates TTS -> Connects to Discord -> Plays Audio.
 
 ---

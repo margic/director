@@ -11,6 +11,8 @@ import { AuthService } from '../auth-service';
 
 class ScraperManager {
   private scrapers: Map<string, { window: BrowserWindow, extensionId: string }> = new Map();
+  // We need a way to send messages to child process
+  private onMessageReceived?: (extensionId: string, data: any) => void;
 
   constructor(private eventBus: ExtensionEventBus) {
     // Listen for scraper messages
@@ -20,13 +22,20 @@ class ScraperManager {
     });
   }
 
+  public setMessageHandler(handler: (extensionId: string, data: any) => void) {
+      this.onMessageReceived = handler;
+  }
+
   private handleScraperMessage(senderId: number, data: any) {
     // Find the scraper belonging to this sender
     for (const [id, info] of this.scrapers.entries()) {
         if (info.window.webContents.id === senderId) {
-            // Found it. Emit event to the extension.
-            // The extension should handle "chat.messageReceived" or just raw scraper message?
-            // Let's emit a generic "scraper-message" event namespaced to the extension.
+            // 1. Notify the backend extension process
+            if (this.onMessageReceived) {
+                this.onMessageReceived(info.extensionId, data);
+            }
+            
+            // 2. Also emit the public event for the UI/Other extensions
             this.eventBus.emitExtensionEvent(info.extensionId, 'chat.messageReceived', data);
             
             console.log(`[ScraperManager] Routed message from scraper ${id} to extension ${info.extensionId}`);
@@ -69,6 +78,9 @@ export class ExtensionHostService {
   private authService: AuthService;
   private scraperManager: ScraperManager;
   private loadedExtensions: Set<string> = new Set();
+  // commandId -> extensionId
+  private commandHandlers: Map<string, string> = new Map();
+  private pendingCommandExecutions: Map<string, { resolve: (res: any) => void; reject: (err: Error) => void }> = new Map();
   
   // Track if we are ready
   private isReady: boolean = false;
@@ -86,6 +98,16 @@ export class ExtensionHostService {
     this.viewRegistry = viewRegistry;
     this.authService = authService;
     this.scraperManager = new ScraperManager(eventBus);
+    
+    // Wire up scraper manager to child process
+    this.scraperManager.setMessageHandler((extensionId, data) => {
+        if (this.child) {
+            this.child.postMessage({
+                type: 'SCRAPER_MESSAGE',
+                payload: { extensionId, data }
+            });
+        }
+    });
   }
 
   public async start() {
@@ -159,6 +181,15 @@ export class ExtensionHostService {
     this.child.postMessage(msg);
   }
 
+  // executeCommand removed in favor of Intents
+
+  public getViews(type?: 'panel' | 'dialog' | 'overlay' | 'widget') {
+      if (type) {
+          return this.viewRegistry.getByType(type);
+      }
+      return this.viewRegistry.getAll();
+  }
+
   public getStatus(): Record<string, { active: boolean; version?: string }> {
     // Return simple status for now. 
     // In future, utility process could send heartbeats.
@@ -189,9 +220,22 @@ export class ExtensionHostService {
 
     // Register Views
     if (ext.manifest.contributes?.views) {
-      for (const view of ext.manifest.contributes.views) {
-        this.viewRegistry.register(ext.id, view);
-      }
+        if (Array.isArray(ext.manifest.contributes.views)) {
+            for (const view of ext.manifest.contributes.views) {
+                this.viewRegistry.register(ext.id, ext.path, view);
+            }
+        } else {
+             // Legacy Object support (temporary)
+             const views = ext.manifest.contributes.views as any;
+             for (const key of Object.keys(views)) {
+                 this.viewRegistry.register(ext.id, ext.path, { 
+                     id: key, 
+                     type: key as any, 
+                     path: views[key], 
+                     name: key 
+                 });
+             }
+        }
     }
 
     // Collect Settings
@@ -237,6 +281,23 @@ export class ExtensionHostService {
         break;
       case 'REGISTER_INTENT':
         // Optional verification
+        break;
+      case 'REGISTER_COMMAND':
+        const cmdPayload = msg.payload;
+        this.commandHandlers.set(cmdPayload.command, cmdPayload.extensionId);
+        console.log(`[ExtensionHost] Registered command handler for '${cmdPayload.command}' from ${cmdPayload.extensionId}`);
+        break;
+      case 'COMMAND_RESULT':
+        const resultPayload = msg.payload;
+        const pending = this.pendingCommandExecutions.get(resultPayload.requestId);
+        if (pending) {
+            if (resultPayload.error) {
+                pending.reject(new Error(resultPayload.error));
+            } else {
+                pending.resolve(resultPayload.result);
+            }
+            this.pendingCommandExecutions.delete(resultPayload.requestId);
+        }
         break;
       case 'INVOKE':
         this.handleInvoke(msg.payload);

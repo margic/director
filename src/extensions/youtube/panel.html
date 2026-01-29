@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Studio Panel</title>
+    <style>
+        :root {
+            --background: #090B10;
+            --card: #111317;
+            --primary: #FF5F1F;
+            --primary-foreground: #ffffff;
+            --secondary: #00A3E0;
+            --secondary-foreground: #ffffff;
+            --destructive: #EF3340;
+            --border: #282A30;
+            --muted-foreground: #888888;
+            --foreground: #ffffff;
+            --radius: 0.5rem;
+        }
+
+        body {
+            background-color: var(--background);
+            color: var(--foreground);
+            font-family: system-ui, -apple-system, sans-serif;
+            margin: 0;
+            padding: 2rem;
+            box-sizing: border-box;
+        }
+
+        /* Typography */
+        h1, h2, h3, h4 {
+            margin: 0;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .text-muted { color: var(--muted-foreground); }
+        .text-primary { color: var(--primary); }
+        .text-secondary { color: var(--secondary); }
+        .text-xs { font-size: 0.75rem; }
+        .text-sm { font-size: 0.875rem; }
+        .font-mono { font-family: monospace; }
+        .font-bold { font-weight: bold; }
+
+        /* Layout */
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+        }
+
+        @media (min-width: 768px) {
+            .grid { grid-template-columns: 1fr 1fr; }
+            .col-span-2 { grid-column: span 2; }
+        }
+
+        /* Components */
+        .card {
+            background-color: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .card-header {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius);
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover { opacity: 0.9; }
+        
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--primary-foreground);
+        }
+
+        .btn-outline {
+            background-color: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+        }
+
+        .btn-destructive {
+            background-color: var(--destructive);
+            color: white;
+        }
+
+        .btn-secondary {
+            background-color: var(--secondary);
+            color: var(--secondary-foreground);
+        }
+
+        .input {
+            background-color: rgba(255,255,255,0.05);
+            border: 1px solid var(--border);
+            color: var(--foreground);
+            padding: 0.5rem;
+            border-radius: var(--radius);
+            flex: 1;
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.5rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            font-weight: bold;
+            display: inline-block;
+        }
+
+        .status-active { background-color: var(--destructive); color: white; animation: pulse 2s infinite; }
+        .status-idle { border: 1px solid var(--border); color: var(--muted-foreground); }
+
+        .flex-row { display: flex; flex-direction: row; gap: 1rem; align-items: center; }
+        .justify-between { justify-content: space-between; }
+        
+        .panel {
+            background-color: rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.05);
+            padding: 1rem;
+            border-radius: var(--radius);
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container animate-in">
+        <header class="header">
+            <div>
+                <h1 style="display: flex; align-items: center; gap: 10px;">
+                    <span style="background: rgba(255,95,31,0.1); padding: 5px; border-radius: 4px;">📺</span>
+                    YouTube Studio
+                </h1>
+                <p class="text-muted text-sm font-mono" style="margin-top: 0.5rem;">
+                    EXTENSION STATUS: <span id="ext-status" class="text-secondary">CONNECTING...</span>
+                </p>
+            </div>
+            <button id="login-btn" class="btn btn-outline">Sign In (Browser)</button>
+        </header>
+
+        <div class="grid">
+            <!-- Broadcast Monitor -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title text-secondary">📡 Broadcast Monitor</div>
+                    <div class="text-muted text-sm">Control telemetry polling and check live status.</div>
+                </div>
+                <div class="panel flex-row justify-between">
+                    <div>
+                        <h3 class="text-sm">Monitor Status</h3>
+                        <p id="monitor-text" class="text-muted text-xs">Idle</p>
+                    </div>
+                    <button id="monitor-btn" class="btn btn-primary">Start Monitoring</button>
+                </div>
+            </div>
+
+            <!-- Live Telemetry -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title text-secondary">👥 Live Telemetry</div>
+                </div>
+                <div class="grid" style="grid-template-columns: 1fr; gap: 1rem;">
+                    <div class="panel" style="text-align: center;">
+                        <h4 class="text-muted text-xs" style="margin-bottom: 0.5rem;">Monitoring Status</h4>
+                        <div id="monitoring-badge" class="status-badge status-idle">IDLE</div>
+                    </div>
+                    <div class="panel" style="text-align: center;">
+                        <h4 class="text-muted text-xs" style="margin-bottom: 0.5rem;">Broadcast Title</h4>
+                        <p id="broadcast-title" class="font-bold text-sm">Unknown Broadcast</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Interaction -->
+            <div class="card col-span-2">
+                <div class="card-header">
+                    <div class="card-title text-secondary">💬 Chat Interaction</div>
+                </div>
+                <div class="flex-row">
+                    <input type="text" id="chat-input" class="input font-mono" placeholder="Type a message to send to live chat...">
+                    <button id="send-btn" class="btn btn-secondary">Send</button>
+                </div>
+                <p class="text-muted text-xs" style="margin-top: 0.5rem;">* Requires an active broadcast and valid authentication.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let isMonitoring = false;
+        let extActive = false;
+
+        // Elements
+        const loginBtn = document.getElementById('login-btn');
+        const monitorBtn = document.getElementById('monitor-btn');
+        const monitorText = document.getElementById('monitor-text');
+        const statusBadge = document.getElementById('monitoring-badge');
+        const extStatusEl = document.getElementById('ext-status');
+        const chatInput = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+        const broadcastTitle = document.getElementById('broadcast-title');
+
+        // Helper to send messages to parent
+        function sendToParent(type, payload) {
+            window.parent.postMessage({ type, ...payload }, '*');
+        }
+
+        // Actions
+        loginBtn.addEventListener('click', () => {
+            sendToParent('EXTENSION_INTENT', { intent: 'director.youtube.login' });
+        });
+
+        monitorBtn.addEventListener('click', () => {
+            const intent = isMonitoring ? 'youtube.stopMonitor' : 'youtube.startMonitor';
+            sendToParent('EXTENSION_INTENT', { intent, payload: {} });
+        });
+
+        sendBtn.addEventListener('click', () => {
+            const message = chatInput.value;
+            if (!message) return;
+            sendToParent('EXTENSION_INTENT', { 
+                intent: 'communication.talkToChat', 
+                payload: { message } 
+            });
+            chatInput.value = '';
+        });
+
+        // Event Handling
+        window.addEventListener('message', (event) => {
+            const { type, data } = event.data;
+
+            if (type === 'EXTENSION_EVENT') {
+                handleExtensionEvent(data);
+            } else if (type === 'EXTENSION_STATUS') {
+                 // Initial active status might come here if we implement a status handshake
+                 if (data && data['director-youtube']) {
+                     updateExtStatus(data['director-youtube'].active);
+                 }
+            }
+        });
+
+        function handleExtensionEvent(data) {
+            if (data.eventName === 'youtube.status') {
+                updateMonitoringState(data.payload.monitoring);
+            } else if (data.eventName === 'youtube.stats') {
+                // Assuming payload has similar structure to React component logic
+                broadcastTitle.textContent = data.payload.title || 'Unknown Broadcast';
+            }
+        }
+
+        function updateMonitoringState(monitoring) {
+            isMonitoring = monitoring;
+            if (isMonitoring) {
+                monitorBtn.textContent = 'Stop Monitoring';
+                monitorBtn.className = 'btn btn-destructive';
+                monitorText.textContent = 'Polling active (30s)';
+                statusBadge.className = 'status-badge status-active';
+                statusBadge.textContent = 'ACTIVE SCRAPER';
+            } else {
+                monitorBtn.textContent = 'Start Monitoring';
+                monitorBtn.className = 'btn btn-primary';
+                monitorText.textContent = 'Idle';
+                statusBadge.className = 'status-badge status-idle';
+                statusBadge.textContent = 'IDLE';
+            }
+        }
+
+        function updateExtStatus(active) {
+            extActive = active;
+            extStatusEl.textContent = active ? 'ACTIVE' : 'INACTIVE';
+            extStatusEl.className = active ? 'text-secondary' : 'text-primary'; // Using green/red equivalent logic
+            if(active) {
+                extStatusEl.style.color = '#00ff00';
+            } else {
+                extStatusEl.style.color = '#ff0000';
+            }
+        }
+
+        // Request initial status
+        // We can invent a handshake or just wait for updates. 
+        // Ideally the parent frame should push status on load.
+    </script>
+</body>
+</html>

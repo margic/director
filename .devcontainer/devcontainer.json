@@ -27,6 +27,8 @@
 
   "postCreateCommand": "npm install -g npm@latest && sudo apt-get update && sudo apt-get install -y chromium",
 
+  "postStartCommand": "bash ./scripts/restart-vnc.sh",
+
   "remoteUser": "node",
 
   "mounts": [],
