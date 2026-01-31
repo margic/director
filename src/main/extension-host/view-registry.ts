@@ -29,7 +29,19 @@ export class ViewRegistry {
     this.views.set(viewId, def);
     console.log(`[ViewRegistry] Registered view: ${viewId} at ${def.path}`);
   }
-
+  public unregisterViews(extensionId: string) {
+    const idsToRemove: string[] = [];
+    for (const [id, def] of this.views.entries()) {
+      if (def.extensionId === extensionId) {
+        idsToRemove.push(id);
+      }
+    }
+    
+    for (const id of idsToRemove) {
+      this.views.delete(id);
+      console.log(`[ViewRegistry] Unregistered view '${id}' from ${extensionId}`);
+    }
+  }
   public get(viewId: string): ViewDefinition | undefined {
     return this.views.get(viewId);
   }

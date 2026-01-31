@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { Activity, User, Play, Square, Loader2, Car, Aperture, Mic } from 'lucide-react'
 import { UserProfile, RaceSession } from '../types'
 import { clientTelemetry } from '../telemetry'
+import { DiscordStatus } from '../../extensions/discord/renderer/Status'
+import { YouTubeStatus } from '../../extensions/youtube/renderer/Status'
 
 interface DashboardProps {
   user: any;
@@ -19,12 +21,23 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
   const [obsConnected, setObsConnected] = useState(false);
   const [obsMissingScenes, setObsMissingScenes] = useState<string[]>([]);
   const [discordStatus, setDiscordStatus] = useState<{ connected: boolean; lastCommand?: any }>({ connected: false });
-  const [widgets, setWidgets] = useState<any[]>([]);
+  const [extensionStatus, setExtensionStatus] = useState<Record<string, { active: boolean }>>({});
 
   useEffect(() => {
-     if (window.electronAPI?.extensions?.getViews) {
-         window.electronAPI.extensions.getViews('widget').then(setWidgets).catch(console.error);
-     }
+     const loadExtensionStatus = async () => {
+       if (window.electronAPI?.extensions?.getStatus) {
+         try {
+           const status = await window.electronAPI.extensions.getStatus();
+           setExtensionStatus(status);
+         } catch (e) {
+           console.error('Failed to load extension status', e);
+         }
+       }
+     };
+     
+     loadExtensionStatus();
+     const interval = setInterval(loadExtensionStatus, 5000); // Poll every 5s
+     return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -325,22 +338,9 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
           </div>
         </div>
 
-        {/* Dynamic Extension Widgets */}
-        {widgets.map(widget => (
-          <div key={widget.id} className="bg-card border border-border rounded-xl h-64 overflow-hidden relative group hover:border-primary/50 transition-colors">
-            {/* Header overlay */}
-            <div className="absolute top-0 left-0 right-0 p-4 bg-gradient-to-b from-black/80 to-transparent pointer-events-none z-10 flex justify-between items-center">
-                 <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">{widget.name}</h3>
-                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-            </div>
-            
-            <iframe 
-                src={`extension://${widget.extensionId}/${widget.path.split('/').pop()}`}
-                className="w-full h-full border-0" 
-                sandbox="allow-scripts"
-            />
-          </div>
-        ))}
+        {/* Extension Widgets - Direct React Components */}
+        {extensionStatus['director-discord']?.active && <DiscordStatus />}
+        {extensionStatus['director-youtube']?.active && <YouTubeStatus />}
 
       </div>
     </div>

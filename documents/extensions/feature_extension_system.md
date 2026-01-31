@@ -43,10 +43,10 @@ An extension is a self-contained package (inspired by VS Code extensions) that c
 #### Anatomy of an Extension
 An extension consists of:
 1.  **Manifest (`package.json`)**: Defines metadata, activation events, and contribution points.
-2.  **Main Process (Node.js)**: The implementation of the logic (connecting to Discord Gateway, Hue Bridge, etc.).
+2.  **Main Process (Node.js)**: The implementation of the logic (connecting to Discord Gateway, Hue Bridge, etc.), running in an isolated utility process.
 3.  **Renderer Process (React)**:
-    *   **Dashboard Widget**: A small summary card for the home screen (e.g., Discord: Connected).
-    *   **Settings/Panel**: A dedicated full-page UI for configuration and deep control.
+    *   **Dashboard Widget**: A small summary card (React component) for the home screen (e.g., Discord: Connected).
+    *   **Settings/Panel**: A dedicated full-page React component for configuration and deep control.
 
 #### Contribution Points
 Extensions contribute functionality to the Core via the `manifest`. Crucially, **Intents** must be self-describing to support the AI agent's inference engine.
@@ -60,16 +60,19 @@ Extensions contribute functionality to the Core via the `manifest`. Crucially, *
 *   **`commands`**: Internal RPC methods for UI interactivity and Configuration.
     *   **Purpose**: **UI & Configuration**. Used by the Extension's Frontend (Panel/Widget) to trigger Main Process logic (e.g., `system.login`, `settings.save`).
     *   **Isolation**: Commands are **NOT** exposed to the Automator or Cloud AI. They are strictly for User interaction via the Control Deck or Extension Panel.
-*   **`views`**: UI components contributed to the Core application.
-    *   **`widget`**: A small summary card for the Dashboard (e.g., Status Indicator).
-    *   **`panel`**: A full-page interface for the Extension (e.g., "YouTube Studio").
+*   **`views`**: React components contributed to the Core application.
+    *   **`widget`**: A small summary React component for the Dashboard (e.g., Status Indicator).
+    *   **`panel`**: A full-page React component for the Extension (e.g., "YouTube Studio").
 *   **`events`**: Triggers that the Core can listen to (e.g., `streamdeck.buttonPressed`, `iracing.flagChanged`).
     *   **Usage**: Enables hardware controllers (Stream Deck, Button Boxes) or external webhooks to initiate Director sequences.
 
 ### 2.3 Extension Configuration & Persistence
-The Director Core intentionally **does not** provide a unified settings interface or storage mechanism for extensions.
+The Director Core intentionally **does not** provide a unified settings interface or storage mechanism for extensions, with ONE exception: The Master Toggle.
 
-*   **Self-Managed State**: Extensions are fully responsible for managing their own configuration (API keys, preferences, local data).
+*   **Master Extension Toggle**: The Core Settings page provides a single "Enable/Disable" switch for each installed extension.
+    *   **Behavior**: When disabled, the extension is **fully unloaded** from the Extension Host. It consumes no resources, runs no background processes, and removes its contributed Views and Intents from the system.
+    *   **Life-Cycle**: Toggling ON triggers the `activate()` method. Toggling OFF triggers the `deactivate()` method (if defined) and then destroys the reference.
+*   **Self-Managed State**: Extensions are fully responsible for managing their own granular configuration (API keys, preferences, local data).
 *   **Custom UI**: Extensions must provide their own configuration interface within their contributed `panel` view.
     *   **Flexibility**: The `panel` view is the extension's full-canvas playground. Developers can structure this with tabs, navigation menus, or minimal forms as needed.
     *   **Example**: A "YouTube" extension might have a `Status` tab for the current stream and a `Settings` tab for authentication.
@@ -107,22 +110,33 @@ To ensure the Cloud AI can create sequences effectively:
 3.  **The "Black Box" Approach**: The AI decides *what* it wants to achieve (the intent) but delegates the *how* (the implementation details) to the local extension.
     *   *AI Logic:* "There is a crash. I should `communication.announceToDrivers('Safety Car Deployed')`."
 
-### 2.6 The Extension Host Protocol
-To ensure secure and standardized communication between the Extension UI (`widget` or `panel` loaded in an iframe) and the Director Core, a strict messaging protocol is enforced using `postMessage`.
+### 2.6 Extension Architecture
+Extensions are built using the following architecture:
 
-**Message Direction: Extension UI -> Director Core**
-*   **`EXTENSION_COMMAND`**: Execute a backend command (RPC).
-    *   Target: `ExtensionHost` -> `ExtensionService`.
-    *   Payload: `{ type: 'EXTENSION_COMMAND', command: 'extensionId.commandName', payload: Object }`
-*   **`EXTENSION_INTENT`**: Request an Intent execution.
-    *   Target: `DirectorService` -> `IntentRegistry`.
-    *   Payload: `{ type: 'EXTENSION_INTENT', intent: 'domain.action', payload: Object }`
+**Main Process (Extension Host)**
+*   Extensions run in an isolated Node.js utility process managed by the Extension Host.
+*   Each extension exports an `activate(extensionAPI)` function that receives the Extension API.
+*   The Extension API provides methods to register intent handlers, emit events, and access configuration.
 
-**Message Direction: Director Core -> Extension UI**
-*   **`EXTENSION_EVENT`**: Events forwarded from the main process.
-    *   Payload: `{ type: 'EXTENSION_EVENT', data: { eventName: 'source.event', payload: Object } }`
-*   **`EXTENSION_STATUS`**: System status updates.
-    *   Payload: `{ type: 'EXTENSION_STATUS', data: { [extensionId]: { active: boolean } } }`
+**Renderer Process (React Components)**
+*   Extensions contribute React components directly to the Core UI.
+*   **Widget Components**: Displayed on the Dashboard, imported and rendered by the Core.
+*   **Panel Components**: Full-page views accessible via navigation, imported and rendered by the Core.
+*   Components communicate with the Main Process via the `window.electronAPI.extensions` interface.
+*   All communication uses typed IPC calls rather than postMessage/iframes.
+
+**Communication Flow**
+```
+React Component -> window.electronAPI.extensions.executeIntent()
+                                    ↓
+                            IPC Main Process
+                                    ↓
+                           Extension Host Service
+                                    ↓
+                          Extension Utility Process
+                                    ↓
+                         Extension Intent Handler
+```
 
     *   *Extension Logic:* Receives intent -> Generates TTS -> Connects to Discord -> Plays Audio.
 
@@ -169,7 +183,7 @@ Refactor existing hardcoded integrations (Discord) into the new internal folder 
 *   Define `ExtensionAPI` interface.
 
 ### Phase 2: The Manifest
-Create the definition for `director-extension.json` or extend `package.json`.
+Create the definition for extension manifests using `package.json`.
 ```json
 {
   "name": "director-streamdeck-integration",
@@ -184,12 +198,25 @@ Create the definition for `director-extension.json` or extend `package.json`.
         }
       }
     ],
-    "views": {
-      "panel": "./dist/panel.js"
-    }
+    "views": [
+      {
+        "id": "status-widget",
+        "name": "Stream Deck Status",
+        "type": "widget"
+      },
+      {
+        "id": "main-panel",
+        "name": "Stream Deck",
+        "type": "panel"
+      }
+    ]
   }
 }
 ```
+
+**Note**: The `path` field in views is no longer used. React components are directly imported by the Core based on convention:
+- Widget: `src/extensions/{extensionId}/renderer/Status.tsx`
+- Panel: `src/extensions/{extensionId}/renderer/Panel.tsx`
 
 ### Phase 3: Public API & Sandbox
 Ensure extensions cannot crash the main director loop. Implement error boundaries and possibly separate process execution for robust extensions.

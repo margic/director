@@ -4,27 +4,27 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 
 export const SettingsPage = () => {
-    const [modules, setModules] = useState({
-        iracing: { enabled: true },
+    const [extensions, setExtensions] = useState({
+        'director-iracing': { enabled: true },
         obs: { enabled: true },
-        youtube: { enabled: true },
-        discord: { enabled: true }
+        'director-youtube': { enabled: true },
+        'director-discord': { enabled: true }
     });
 
     useEffect(() => {
         const loadConfig = async () => {
             if (window.electronAPI?.config) {
                 try {
-                    const iracing = await window.electronAPI.config.get('iracing');
+                    const iracing = await window.electronAPI.config.get('director-iracing');
                     const obs = await window.electronAPI.config.get('obs');
-                    const youtube = await window.electronAPI.config.get('youtube');
-                    const discord = await window.electronAPI.config.get('discord');
+                    const youtube = await window.electronAPI.config.get('director-youtube');
+                    const discord = await window.electronAPI.config.get('director-discord');
                     
-                    setModules({
-                        iracing: iracing || { enabled: true },
+                    setExtensions({
+                        'director-iracing': iracing || { enabled: true },
                         obs: obs || { enabled: true },
-                        youtube: youtube || { enabled: true },
-                        discord: discord || { enabled: true }
+                        'director-youtube': youtube || { enabled: true },
+                        'director-discord': discord || { enabled: true }
                     });
 
                 } catch (e) {
@@ -35,14 +35,33 @@ export const SettingsPage = () => {
         loadConfig();
     }, []);
 
-    const toggleModule = async (module: 'iracing' | 'obs' | 'youtube' | 'discord', enabled: boolean) => {
-        setModules(prev => ({
+    const toggleExtension = async (id: 'director-iracing' | 'obs' | 'director-youtube' | 'director-discord', enabled: boolean) => {
+        setExtensions(prev => ({
             ...prev,
-            [module]: { ...prev[module], enabled }
+            [id]: { ...prev[id], enabled }
         }));
         
-        if (window.electronAPI?.config) {
-            await window.electronAPI.config.set(`${module}.enabled`, enabled);
+        if (window.electronAPI) {
+            if (id === 'obs') {
+                 // Legacy module handling
+                 await window.electronAPI.config.set(`${id}.enabled`, enabled);
+            } else {
+                 // Extension system handling
+                 await window.electronAPI.extensions.setEnabled(id, enabled);
+                 
+                 // Reload extension status to reflect changes
+                 setTimeout(async () => {
+                     try {
+                         const status = await window.electronAPI.extensions.getStatus();
+                         setExtensions(prev => ({
+                             ...prev,
+                             [id]: { enabled: status[id]?.active || false }
+                         }));
+                     } catch (e) {
+                         console.error('Failed to reload extension status', e);
+                     }
+                 }, 500); // Small delay to allow extension to load/unload
+            }
         }
     };
 
@@ -50,15 +69,17 @@ export const SettingsPage = () => {
         <div className="p-8 space-y-8 animate-in fade-in duration-500">
             <h1 className="text-4xl font-bold uppercase tracking-widest mb-8">System Configuration</h1>
 
-            {/* Modules Toggle Section */}
+            {/* Extensions Toggle Section */}
              <Card className="bg-card border-border">
                 <CardHeader>
                     <CardTitle className="text-muted-foreground text-sm uppercase font-rajdhani tracking-widest">
-                        Module Management
+                        Extension Management
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                     <p className="text-sm text-muted-foreground">Enable or disable core system modules. Disabled modules will stop background processing.</p>
+                     <p className="text-sm text-muted-foreground">
+                        Master switch for extension contribution. When disabled, the extension is fully unloaded and removed from the system.
+                     </p>
                      
                      {/* iRacing Toggle */}
                      <div className="flex items-center justify-between p-4 border border-border/50 rounded-lg bg-background/50">
@@ -71,7 +92,7 @@ export const SettingsPage = () => {
                                 <p className="text-xs text-muted-foreground">Telemetry & Command control</p>
                              </div>
                         </div>
-                        <Switch id="module-iracing" checked={modules.iracing.enabled} onCheckedChange={(c) => toggleModule('iracing', c)} />
+                        <Switch id="ext-iracing" checked={extensions['director-iracing'].enabled} onCheckedChange={(c) => toggleExtension('director-iracing', c)} />
                      </div>
 
                      {/* OBS Toggle */}
@@ -82,10 +103,10 @@ export const SettingsPage = () => {
                              </div>
                              <div>
                                 <h3 className="font-bold">OBS Studio</h3>
-                                <p className="text-xs text-muted-foreground">Scene switching & status</p>
+                                <p className="text-xs text-muted-foreground">Scene switching & status (Legacy Module)</p>
                              </div>
                         </div>
-                        <Switch id="module-obs" checked={modules.obs.enabled} onCheckedChange={(c) => toggleModule('obs', c)} />
+                        <Switch id="module-obs" checked={extensions.obs.enabled} onCheckedChange={(c) => toggleExtension('obs', c)} />
                      </div>
 
                      {/* YouTube Toggle */}
@@ -99,7 +120,7 @@ export const SettingsPage = () => {
                                 <p className="text-xs text-muted-foreground">Chat monitoring & responses</p>
                              </div>
                         </div>
-                        <Switch id="module-youtube" checked={modules.youtube.enabled} onCheckedChange={(c) => toggleModule('youtube', c)} />
+                        <Switch id="ext-youtube" checked={extensions['director-youtube'].enabled} onCheckedChange={(c) => toggleExtension('director-youtube', c)} />
                      </div>
 
                      {/* Discord Toggle */}
@@ -113,7 +134,7 @@ export const SettingsPage = () => {
                                 <p className="text-xs text-muted-foreground">Voice chat & TTS announcements</p>
                              </div>
                         </div>
-                        <Switch id="module-discord" checked={modules.discord.enabled} onCheckedChange={(c) => toggleModule('discord', c)} />
+                        <Switch id="module-discord" checked={extensions['director-discord'].enabled} onCheckedChange={(c) => toggleExtension('director-discord', c)} />
                      </div>
 
                 </CardContent>

@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Extension API (Unified)
   extensions: {
       getStatus: () => ipcRenderer.invoke('extensions:get-status'),
+      setEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke('extensions:set-enabled', id, enabled),
       getViews: (type?: string) => ipcRenderer.invoke('extensions:get-views', type),
       executeIntent: (intent: string, data: any) => ipcRenderer.invoke('extensions:execute-intent', intent, data),
       onExtensionEvent: (callback: (data: any) => void) => {

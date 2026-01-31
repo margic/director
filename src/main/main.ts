@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, protocol, net } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { url } from 'inspector';
 import { AuthService } from './auth-service';
@@ -60,32 +60,6 @@ const createWindow = () => {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on('ready', () => {
-  // Register 'extension://' protocol
-  protocol.handle('extension', (request) => {
-      const url = request.url.replace('extension://', '');
-      // Format: extension://<extensionId>/<file>
-      // But our viewRegistry currently stores absolute paths.
-      // Let's assume the viewRegistry sends us specific paths, OR better yet:
-      // We map extension://root/path/to/file -> file:///<absolute_path>
-      
-      // Simplest: Request is extension://<absolute-path-encoded> ? No that's ugly.
-      
-      // Better: The ViewRegistry returns absolute file paths. 
-      // The Frontend will try to load `extension://<absolute-path>` ? 
-      // No, `file://` is blocked.
-      
-      // We will define a standard: extension://view/<viewId> is NOT enough because the view is HTML which loads CSS/JS relatively.
-      
-      // Let's implement a simple pass-through for now that takes an absolute path encoded in the URL if possible,
-      // Or we just map the 'extensions' folder to the root of the protocol.
-      // extension://<extensionId>/widget.html -> dist-electron/extensions/<extensionId>/widget.html
-      
-      const [extId, ...rest] = url.split('/');
-      const filePath = path.join(__dirname, '../extensions', extId, ...rest);
-      
-      return net.fetch('file://' + filePath);
-  });
-
   // Initialize telemetry first
   telemetryService.initialize();
   telemetryService.trackEvent('Application.Started', {
@@ -183,6 +157,11 @@ app.on('ready', () => {
 
   ipcMain.handle('extensions:get-views', (event, type) => {
       return extensionHost.getViews(type);
+  });
+  
+  ipcMain.handle('extensions:set-enabled', async (event, extensionId, enabled) => {
+      await extensionHost.setExtensionEnabled(extensionId, enabled);
+      return true;
   });
 
   ipcMain.handle('config:set', async (event, key, value) => {

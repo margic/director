@@ -78,6 +78,7 @@ export class ExtensionHostService {
   private authService: AuthService;
   private scraperManager: ScraperManager;
   private loadedExtensions: Set<string> = new Set();
+  private scannedExtensions: Map<string, ScannedExtension> = new Map();
   // commandId -> extensionId
   private commandHandlers: Map<string, string> = new Map();
   private pendingCommandExecutions: Map<string, { resolve: (res: any) => void; reject: (err: Error) => void }> = new Map();
@@ -191,11 +192,12 @@ export class ExtensionHostService {
   }
 
   public getStatus(): Record<string, { active: boolean; version?: string }> {
-    // Return simple status for now. 
-    // In future, utility process could send heartbeats.
     const status: Record<string, { active: boolean; version?: string }> = {};
-    for (const id of this.loadedExtensions) {
-        status[id] = { active: this.isReady, version: '1.0.0' }; // TODO: Read real version
+    for (const [id, ext] of this.scannedExtensions) {
+        status[id] = { 
+            active: this.loadedExtensions.has(id), 
+            version: ext.manifest.version || '0.0.0' 
+        };
     }
     return status;
   }
@@ -204,8 +206,36 @@ export class ExtensionHostService {
     const extensions = await this.scanner.scan();
     
     for (const ext of extensions) {
+      this.scannedExtensions.set(ext.id, ext);
+      
+      // Check config
+      const config = configService.getAny(ext.id) as any;
+      if (config && config.enabled === false) {
+          console.log(`[ExtensionHost] Skipping disabled extension: ${ext.id}`);
+          continue;
+      }
+
       await this.loadExtension(ext);
     }
+  }
+
+  public async setExtensionEnabled(extensionId: string, enabled: boolean) {
+      // 1. Update Config
+      const current = configService.getAny(extensionId) as any || {};
+      current.enabled = enabled;
+      configService.setAny(extensionId, current); 
+      
+      // 2. Load or Unload
+      if (enabled) {
+          const ext = this.scannedExtensions.get(extensionId);
+          if (ext) {
+              await this.loadExtension(ext);
+          } else {
+              console.warn(`[ExtensionHost] Cannot enable unknown extension: ${extensionId}`);
+          }
+      } else {
+          await this.unloadExtension(extensionId);
+      }
   }
 
   private async loadExtension(ext: ScannedExtension) {
@@ -268,6 +298,35 @@ export class ExtensionHostService {
 
       this.loadedExtensions.add(ext.id);
     }
+  }
+
+  private async unloadExtension(extensionId: string) {
+      if (!this.loadedExtensions.has(extensionId)) return;
+      
+      console.log(`[ExtensionHost] Unloading extension: ${extensionId}`);
+      
+      // 1. Unregister Intents
+      this.intentRegistry.unregisterIntents(extensionId);
+      
+      // 2. Unregister Views
+      this.viewRegistry.unregisterViews(extensionId);
+      
+      // 3. Notify Child Process
+      if (this.isReady && this.child) {
+          this.child.postMessage({
+              type: 'UNLOAD_EXTENSION',
+              payload: { extensionId }
+          });
+      }
+      
+      // 4. Clean up handlers
+      for (const [cmd, ext] of this.commandHandlers.entries()) {
+          if (ext === extensionId) {
+              this.commandHandlers.delete(cmd);
+          }
+      }
+      
+      this.loadedExtensions.delete(extensionId);
   }
 
   private handleMessage(msg: IpcMessage) {

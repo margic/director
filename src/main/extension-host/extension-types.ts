@@ -76,6 +76,7 @@ export interface ExtensionAPI {
 // IPC Messages
 export type IpcMessageType = 
   | 'LOAD_EXTENSION' 
+  | 'UNLOAD_EXTENSION'
   | 'EXECUTE_INTENT' 
   | 'REGISTER_INTENT' 
   | 'EXECUTE_COMMAND'

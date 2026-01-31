@@ -67,21 +67,23 @@ class ExtensionApiImpl implements ExtensionAPI {
 
 // Global state for the process
 class ExtensionProcess {
-  // intent -> handler
-  private static intentHandlers = new Map<string, (payload: any) => Promise<void>>();
-  // command -> handler
-  private static commandHandlers = new Map<string, (payload: any) => Promise<any>>();
+  // intent -> handler data
+  private static intentHandlers = new Map<string, { handler: (payload: any) => Promise<void>, extensionId: string }>();
+  // command -> handler data
+  private static commandHandlers = new Map<string, { handler: (payload: any) => Promise<any>, extensionId: string }>();
   // scraper listener
   private static scraperHandlers = new Map<string, (payload: any) => void>();
+  // active extensions
+  private static activeExtensions = new Map<string, any>();
   
   private static pendingInvokes = new Map<string, {resolve: (val: any) => void, reject: (err: Error) => void}>();
   
   public static registerIntentHandler(extensionId: string, intent: string, handler: (payload: any) => Promise<void>) {
-    this.intentHandlers.set(intent, handler);
+    this.intentHandlers.set(intent, { handler, extensionId });
   }
 
   public static registerCommandHandler(extensionId: string, command: string, handler: (payload: any) => Promise<any>) {
-    this.commandHandlers.set(command, handler);
+    this.commandHandlers.set(command, { handler, extensionId });
   }
 
   public static registerScraperHandler(extensionId: string, handler: (payload: any) => void) {
@@ -121,6 +123,9 @@ class ExtensionProcess {
       case 'LOAD_EXTENSION':
         await this.loadExtension(msg.payload as LoadExtensionPayload);
         break;
+      case 'UNLOAD_EXTENSION':
+        await this.unloadExtension(msg.payload.extensionId);
+        break;
       case 'EXECUTE_INTENT':
         await this.executeIntent(msg.payload as ExecuteIntentPayload);
         break;
@@ -147,6 +152,7 @@ class ExtensionProcess {
 
       const api = new ExtensionApiImpl(payload.extensionId, payload.settings);
       await extensionModule.activate(api);
+      this.activeExtensions.set(payload.extensionId, extensionModule);
       
       console.log(`[ExtProcess] Extension ${payload.extensionId} activated.`);
     } catch (err: any) {
@@ -158,15 +164,49 @@ class ExtensionProcess {
     }
   }
 
+  private static async unloadExtension(extensionId: string) {
+    const mod = this.activeExtensions.get(extensionId);
+    if (mod) {
+        if (typeof mod.deactivate === 'function') {
+            try {
+                await mod.deactivate();
+                console.log(`[ExtProcess] Extension ${extensionId} deactivated.`);
+            } catch (e) {
+                console.error(`[ExtProcess] Error deactivating ${extensionId}`, e);
+            }
+        }
+        this.activeExtensions.delete(extensionId);
+    }
+    
+    // Clean up handlers
+    // Remove Intent Handlers
+    for (const [key, val] of this.intentHandlers.entries()) {
+        if (val.extensionId === extensionId) {
+            this.intentHandlers.delete(key);
+        }
+    }
+    
+    // Remove Command Handlers
+    for (const [key, val] of this.commandHandlers.entries()) {
+        if (val.extensionId === extensionId) {
+            this.commandHandlers.delete(key);
+        }
+    }
+    
+    // Remove Scraper Handlers (map is key=extId)
+    this.scraperHandlers.delete(extensionId);
+    console.log(`[ExtProcess] Extension ${extensionId} unloaded.`);
+  }
+
   private static async executeIntent(payload: ExecuteIntentPayload) {
-    const handler = this.intentHandlers.get(payload.intent);
-    if (!handler) {
+    const handlerData = this.intentHandlers.get(payload.intent);
+    if (!handlerData) {
       console.warn(`[ExtProcess] No handler found for intent ${payload.intent}`);
       return;
     }
     
     try {
-      await handler(payload.data);
+      await handlerData.handler(payload.data);
       // We could send a success acknowledgement if needed
     } catch (err: any) {
       console.error(`[ExtProcess] Error executing intent ${payload.intent}`, err);

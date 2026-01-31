@@ -19,6 +19,21 @@ export class IntentRegistry {
     }
   }
 
+  public unregisterIntents(extensionId: string) {
+    const intentsToRemove: string[] = [];
+    for (const [intent, owner] of this.intentOwners.entries()) {
+      if (owner === extensionId) {
+        intentsToRemove.push(intent);
+      }
+    }
+    
+    for (const intent of intentsToRemove) {
+      this.intents.delete(intent);
+      this.intentOwners.delete(intent);
+      console.log(`[IntentRegistry] Unregistered intent '${intent}' from ${extensionId}`);
+    }
+  }
+
   public getIntent(intent: string): IntentContribution | undefined {
     return this.intents.get(intent);
   }

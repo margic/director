@@ -5,7 +5,6 @@ import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 import { IracingPage } from './pages/IracingPage'
 import { ObsPage } from './pages/ObsPage'
-import { ExtensionFrame } from './components/ExtensionFrame'
 import { DiscordPage } from './pages/DiscordPage'
 import { YoutubePage } from './pages/YoutubePage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -59,8 +58,9 @@ function App() {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [activeMenu, setActiveMenu] = useState<'sidebar' | 'header' | null>(null);
-  const [currentView, setCurrentView] = useState<'dashboard' | 'iracing' | 'obs' | 'youtube' | 'discord' | 'settings' | 'session-details'>('dashboard');
+  const [currentView, setCurrentView] = useState<string>('dashboard');
   const [selectedSession, setSelectedSession] = useState<RaceSession | null>(null);
+  const [extensionStatus, setExtensionStatus] = useState<Record<string, { active: boolean; version?: string }>>({});
   const sidebarRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
 
@@ -99,6 +99,24 @@ function App() {
 
     // Track page view on mount
     clientTelemetry.trackPageView('MainDashboard');
+  }, []);
+
+  // Poll extension status
+  useEffect(() => {
+    const loadExtensionStatus = async () => {
+      if (window.electronAPI?.extensions?.getStatus) {
+        try {
+          const status = await window.electronAPI.extensions.getStatus();
+          setExtensionStatus(status);
+        } catch (e) {
+          console.error('Failed to load extension status', e);
+        }
+      }
+    };
+    
+    loadExtensionStatus();
+    const interval = setInterval(loadExtensionStatus, 5000); // Poll every 5s
+    return () => clearInterval(interval);
   }, []);
 
   const handleLogin = async () => {
@@ -154,13 +172,19 @@ function App() {
           >
             <LayoutDashboard className="w-6 h-6" />
           </button>
-          <button 
-            onClick={() => setCurrentView('iracing')}
-            className={`p-3 rounded-lg transition-colors ${currentView === 'iracing' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
-            title="iRacing"
-          >
-            <Car className="w-6 h-6" />
-          </button>
+          
+          {/* Dynamic Extension Navigation */}
+          {extensionStatus['director-iracing']?.active && (
+            <button 
+              onClick={() => setCurrentView('iracing')}
+              className={`p-3 rounded-lg transition-colors ${currentView === 'iracing' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+              title="iRacing"
+            >
+              <Car className="w-6 h-6" />
+            </button>
+          )}
+          
+          {/* OBS is a legacy module, always show */}
           <button 
             onClick={() => setCurrentView('obs')}
             className={`p-3 rounded-lg transition-colors ${currentView === 'obs' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
@@ -168,20 +192,27 @@ function App() {
           >
             <Aperture className="w-6 h-6" />
           </button>
-          <button 
-            onClick={() => setCurrentView('youtube')}
-            className={`p-3 rounded-lg transition-colors ${currentView === 'youtube' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
-            title="YouTube"
-          >
-             <Play className="w-6 h-6" />
-          </button>
-          <button 
-            onClick={() => setCurrentView('discord')}
-            className={`p-3 rounded-lg transition-colors ${currentView === 'discord' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
-            title="Discord / Voice"
-          >
-             <Mic className="w-6 h-6" />
-          </button>
+          
+          {extensionStatus['director-youtube']?.active && (
+            <button 
+              onClick={() => setCurrentView('youtube')}
+              className={`p-3 rounded-lg transition-colors ${currentView === 'youtube' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+              title="YouTube"
+            >
+               <Play className="w-6 h-6" />
+            </button>
+          )}
+          
+          {extensionStatus['director-discord']?.active && (
+            <button 
+              onClick={() => setCurrentView('discord')}
+              className={`p-3 rounded-lg transition-colors ${currentView === 'discord' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+              title="Discord / Voice"
+            >
+               <Mic className="w-6 h-6" />
+            </button>
+          )}
+          
           <button 
             onClick={() => setCurrentView('settings')}
             className={`p-3 rounded-lg transition-colors ${currentView === 'settings' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
@@ -273,11 +304,11 @@ function App() {
             <div className="w-full max-w-6xl">
               <ObsPage />
             </div>
-          ) : currentView === 'youtube' ? (
+          ) : currentView === 'youtube' && extensionStatus['director-youtube']?.active ? (
             <div className="w-full max-w-6xl">
               <YoutubePage />
             </div>
-          ) : currentView === 'discord' ? (
+          ) : currentView === 'discord' && extensionStatus['director-discord']?.active ? (
             <div className="w-full max-w-6xl">
               <DiscordPage />
             </div>
@@ -285,7 +316,7 @@ function App() {
             <div className="w-full max-w-6xl">
               <SettingsPage />
             </div>
-          ) : currentView === 'iracing' ? (
+          ) : currentView === 'iracing' && extensionStatus['director-iracing']?.active ? (
             <div className="w-full max-w-6xl">
               <IracingPage cameras={selectedSession?.settings?.cameras} />
             </div>

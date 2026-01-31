@@ -78,6 +78,10 @@ class ConfigService {
     this.store.set(key, value);
   }
 
+  setAny(key: string, value: any): void {
+    this.store.set(key, value);
+  }
+
   // Secure Storage Methods using Keytar/safeStorage abstraction
   // Note: Electron safeStorage is only available after app 'ready'
   async saveSecure(key: string, value: string): Promise<boolean> {

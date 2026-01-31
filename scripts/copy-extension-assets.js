@@ -11,7 +11,6 @@ if (!fs.existsSync(srcDir)) {
 
 // Ensure dest dir exists
 if (!fs.existsSync(destDir)) {
-    console.log('Destination directory does not exist, creating...');
     fs.mkdirSync(destDir, { recursive: true });
 }
 
@@ -30,18 +29,34 @@ extensions.forEach(ext => {
         fs.mkdirSync(extDestPath, { recursive: true });
     }
 
-    // List of files to copy
-    const assets = ['package.json', 'widget.html', 'panel.html'];
+    // Copy package.json (required for all extensions)
+    const manifestSrc = path.join(extSrcPath, 'package.json');
+    const manifestDest = path.join(extDestPath, 'package.json');
+    
+    if (fs.existsSync(manifestSrc)) {
+        fs.copyFileSync(manifestSrc, manifestDest);
+        console.log(`✓ ${ext}/package.json`);
+    } else {
+        console.error(`✗ ${ext}/package.json missing (required)`);
+        return;
+    }
 
-    assets.forEach(asset => {
+    // Optional: Copy static HTML assets if they exist (for legacy iframe-based extensions)
+    const optionalAssets = ['widget.html', 'panel.html'];
+    let hasStaticAssets = false;
+    
+    optionalAssets.forEach(asset => {
         const srcAsset = path.join(extSrcPath, asset);
         const destAsset = path.join(extDestPath, asset);
         
         if (fs.existsSync(srcAsset)) {
             fs.copyFileSync(srcAsset, destAsset);
-            console.log(`Copied ${ext}/${asset}`);
-        } else {
-            console.warn(`Warning: ${ext}/${asset} missing`);
+            console.log(`✓ ${ext}/${asset}`);
+            hasStaticAssets = true;
         }
     });
+    
+    if (!hasStaticAssets) {
+        console.log(`  ${ext} → React-based (no static HTML)`);
+    }
 });
