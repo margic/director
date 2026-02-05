@@ -45,8 +45,7 @@
       {
         "id": "status-widget",
         "name": "YouTube Status",
-        "type": "widget",
-        "path": "widget.html"
+        "type": "widget"
       }
     ],
     "events": [

@@ -25,6 +25,13 @@
 
   "forwardPorts": [3000, 5173, 8080, 6080],
 
+  "portsAttributes": {
+    "6080": {
+      "label": "noVNC Desktop",
+      "visibility": "public"
+    }
+  },
+
   "postCreateCommand": "npm install -g npm@latest && sudo apt-get update && sudo apt-get install -y chromium",
 
   "postStartCommand": "bash ./scripts/restart-vnc.sh",

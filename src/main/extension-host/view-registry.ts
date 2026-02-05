@@ -27,7 +27,13 @@ export class ViewRegistry {
     };
     
     this.views.set(viewId, def);
-    console.log(`[ViewRegistry] Registered view: ${viewId} at ${def.path}`);
+    
+    // Log registration with appropriate message for React vs legacy HTML views
+    if (def.path) {
+      console.log(`[ViewRegistry] Registered view: ${viewId} at ${def.path}`);
+    } else {
+      console.log(`[ViewRegistry] Registered view: ${viewId} (React component)`);
+    }
   }
   public unregisterViews(extensionId: string) {
     const idsToRemove: string[] = [];
