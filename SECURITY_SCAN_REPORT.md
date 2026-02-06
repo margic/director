@@ -11,16 +11,27 @@ A comprehensive security scan was conducted on the Director application codebase
 ## 🔴 Critical Findings (FIXED)
 
 ### 1. Hardcoded Application Insights Keys
-**File:** `src/main/telemetry-config.ts`  
+**Files:**
+- `src/main/telemetry-config.ts`
+- `documents/observability/application_insights_quickstart.md`
+- `documents/observability/application_insights_implementation.md`
+- `documents/observability/application_insights_proposal.md`
+
 **Severity:** CRITICAL  
 **Status:** ✅ FIXED
 
 **Issue:**
-Application Insights instrumentation keys and application IDs were hardcoded as fallback values:
+Application Insights instrumentation keys and application IDs were hardcoded in both source code and documentation:
 ```typescript
-// BEFORE (INSECURE)
+// BEFORE (INSECURE) - in telemetry-config.ts
 instrumentationKey: process.env.VITE_APPINSIGHTS_INSTRUMENTATION_KEY || 'a3338f9b-48c6-4d3f-b07c-a6e4e4516ea9',
 applicationId: process.env.VITE_APPINSIGHTS_APPLICATION_ID || '7fa3a6e8-91ae-4549-b0de-995d0e8b0c7d',
+```
+
+```bash
+# BEFORE (INSECURE) - in documentation files
+VITE_APPINSIGHTS_INSTRUMENTATION_KEY=a3338f9b-48c6-4d3f-b07c-a6e4e4516ea9
+VITE_APPINSIGHTS_APPLICATION_ID=7fa3a6e8-91ae-4549-b0de-995d0e8b0c7d
 ```
 
 **Risk:**
@@ -30,11 +41,18 @@ applicationId: process.env.VITE_APPINSIGHTS_APPLICATION_ID || '7fa3a6e8-91ae-454
 - Violates principle of least privilege and secret management best practices
 
 **Remediation:**
-Changed fallback values to empty strings, requiring proper environment variable configuration:
+Changed fallback values to empty strings in source code:
 ```typescript
-// AFTER (SECURE)
+// AFTER (SECURE) - in telemetry-config.ts
 instrumentationKey: process.env.VITE_APPINSIGHTS_INSTRUMENTATION_KEY || '',
 applicationId: process.env.VITE_APPINSIGHTS_APPLICATION_ID || '',
+```
+
+Replaced with placeholder values in documentation:
+```bash
+# AFTER (SECURE) - in documentation files
+VITE_APPINSIGHTS_INSTRUMENTATION_KEY=your_instrumentation_key_here
+VITE_APPINSIGHTS_APPLICATION_ID=your_application_id_here
 ```
 
 **Impact:**
@@ -132,6 +150,7 @@ const mockToken = "MOCK_BOT_TOKEN";
 - Configuration files (`.env.example`, `.gitignore`)
 - CI/CD workflows (`.github/workflows/`)
 - Extension code in `src/extensions/`
+- Documentation files in `documents/observability/`
 
 ---
 
