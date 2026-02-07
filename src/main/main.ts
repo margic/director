@@ -9,6 +9,7 @@ import { discordService } from './discord-service';
 import { configService } from './config-service';
 import { ExtensionHostService } from './extension-host/extension-host';
 import { IntentRegistry } from './extension-host/intent-registry';
+import { CapabilityCatalog } from './extension-host/capability-catalog';
 import { ExtensionEventBus } from './extension-host/event-bus';
 import { ViewRegistry } from './extension-host/view-registry';
 import { EventMapper } from './event-mapper';
@@ -26,6 +27,7 @@ let directorService: DirectorService;
 let obsService: ObsService;
 let extensionHost: ExtensionHostService;
 let intentRegistry: IntentRegistry;
+let capabilityCatalog: CapabilityCatalog;
 let eventBus: ExtensionEventBus;
 let viewRegistry: ViewRegistry;
 let eventMapper: EventMapper;
@@ -73,18 +75,20 @@ app.on('ready', () => {
 
   obsService = new ObsService();
   obsService.start('ws://localhost:4455');
-  // Initialize Extension Host
+  // Initialize Extension Host with Two-Tier Registry
   intentRegistry = new IntentRegistry();
+  capabilityCatalog = new CapabilityCatalog();
   eventBus = new ExtensionEventBus();
   viewRegistry = new ViewRegistry();
   
   // Use dist-electron/extensions (which is __dirname/../extensions in compiled structure)
   // In development/tsc structure: dist-electron/main/main.js -> dist-electron/extensions
   const extensionsPath = path.join(__dirname, '../extensions');
-  extensionHost = new ExtensionHostService(extensionsPath, intentRegistry, eventBus, viewRegistry, authService);
+  extensionHost = new ExtensionHostService(extensionsPath, intentRegistry, eventBus, viewRegistry, authService, capabilityCatalog);
 
-  // Initialize Director Service with all dependencies
-  directorService = new DirectorService(authService, obsService, extensionHost);
+  // Initialize Director Service — no longer depends on ObsService directly.
+  // OBS scene switching is now handled by the obs extension via intents.
+  directorService = new DirectorService(authService, extensionHost);
 
   // Initialize Event Mapper
   eventMapper = new EventMapper(eventBus, directorService);

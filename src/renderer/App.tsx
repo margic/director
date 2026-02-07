@@ -1,12 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { LayoutDashboard, Settings, User, LogOut, Play, Car, ArrowLeft, Database, Aperture, Mic } from 'lucide-react'
+import { LayoutDashboard, Settings, User, LogOut, Car, ArrowLeft, Database } from 'lucide-react'
 import RaceCenterIcon from '../../assets/images/icon.png'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
-import { IracingPage } from './pages/IracingPage'
-import { ObsPage } from './pages/ObsPage'
-import { DiscordPage } from './pages/DiscordPage'
-import { YoutubePage } from './pages/YoutubePage'
+import { extensionViews, getExtensionView } from './extension-views'
 import { SettingsPage } from './pages/SettingsPage'
 import { Dashboard } from './pages/Dashboard'
 
@@ -173,44 +170,18 @@ function App() {
             <LayoutDashboard className="w-6 h-6" />
           </button>
           
-          {/* Dynamic Extension Navigation */}
-          {extensionStatus['director-iracing']?.active && (
-            <button 
-              onClick={() => setCurrentView('iracing')}
-              className={`p-3 rounded-lg transition-colors ${currentView === 'iracing' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
-              title="iRacing"
-            >
-              <Car className="w-6 h-6" />
-            </button>
-          )}
-          
-          {/* OBS is a legacy module, always show */}
-          <button 
-            onClick={() => setCurrentView('obs')}
-            className={`p-3 rounded-lg transition-colors ${currentView === 'obs' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
-            title="OBS"
-          >
-            <Aperture className="w-6 h-6" />
-          </button>
-          
-          {extensionStatus['director-youtube']?.active && (
-            <button 
-              onClick={() => setCurrentView('youtube')}
-              className={`p-3 rounded-lg transition-colors ${currentView === 'youtube' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
-              title="YouTube"
-            >
-               <Play className="w-6 h-6" />
-            </button>
-          )}
-          
-          {extensionStatus['director-discord']?.active && (
-            <button 
-              onClick={() => setCurrentView('discord')}
-              className={`p-3 rounded-lg transition-colors ${currentView === 'discord' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
-              title="Discord / Voice"
-            >
-               <Mic className="w-6 h-6" />
-            </button>
+          {/* Extension navigation — generated from the view registry */}
+          {extensionViews.map((view) =>
+            extensionStatus[view.extensionId]?.active ? (
+              <button
+                key={view.extensionId}
+                onClick={() => setCurrentView(view.extensionId)}
+                className={`p-3 rounded-lg transition-colors ${currentView === view.extensionId ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+                title={view.label}
+              >
+                <view.icon className="w-6 h-6" />
+              </button>
+            ) : null
           )}
           
           <button 
@@ -300,25 +271,9 @@ function App() {
               onLogin={handleLogin}
               onSessionSelect={handleSessionClick}
             />
-          ) : currentView === 'obs' ? (
-            <div className="w-full max-w-6xl">
-              <ObsPage />
-            </div>
-          ) : currentView === 'youtube' && extensionStatus['director-youtube']?.active ? (
-            <div className="w-full max-w-6xl">
-              <YoutubePage />
-            </div>
-          ) : currentView === 'discord' && extensionStatus['director-discord']?.active ? (
-            <div className="w-full max-w-6xl">
-              <DiscordPage />
-            </div>
           ) : currentView === 'settings' ? (
             <div className="w-full max-w-6xl">
               <SettingsPage />
-            </div>
-          ) : currentView === 'iracing' && extensionStatus['director-iracing']?.active ? (
-            <div className="w-full max-w-6xl">
-              <IracingPage cameras={selectedSession?.settings?.cameras} />
             </div>
           ) : currentView === 'session-details' && selectedSession ? (
             <div className="w-full max-w-6xl space-y-6">
@@ -348,7 +303,7 @@ function App() {
 
               <div className="flex justify-end">
                 <button 
-                  onClick={() => setCurrentView('iracing')}
+                  onClick={() => setCurrentView('director-iracing')}
                   className="bg-primary hover:bg-primary/90 text-white font-bold py-3 px-6 rounded-lg uppercase tracking-wider transition-all flex items-center gap-2"
                 >
                   <Car className="w-5 h-5" />
@@ -356,11 +311,29 @@ function App() {
                 </button>
               </div>
             </div>
-          ) : (
-            <div className="w-full max-w-6xl text-center text-muted-foreground">
-               View not found: {currentView}
-            </div>
-          )}
+          ) : (() => {
+            /* Extension views — resolved dynamically from the registry */
+            const activeView = getExtensionView(currentView);
+            if (activeView && extensionStatus[activeView.extensionId]?.active) {
+              const ViewComponent = activeView.component;
+              const viewProps: Record<string, unknown> = {};
+              if (activeView.extensionId === 'director-iracing') {
+                viewProps.cameras = selectedSession?.settings?.cameras;
+              }
+              return (
+                <div className="w-full max-w-6xl">
+                  <div className="animate-in fade-in duration-500 h-full">
+                    <ViewComponent {...viewProps} />
+                  </div>
+                </div>
+              );
+            }
+            return (
+              <div className="w-full max-w-6xl text-center text-muted-foreground">
+                View not found: {currentView}
+              </div>
+            );
+          })()}
         </div>
       </main>
     </div>

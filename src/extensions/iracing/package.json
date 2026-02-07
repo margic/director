@@ -33,6 +33,55 @@
           },
           "required": ["startFrame", "endFrame"]
         }
+      },
+      {
+        "intent": "broadcast.setReplaySpeed",
+        "title": "Set Replay Speed",
+        "description": "Sets the replay playback speed.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "speed": { "type": "number" }
+          },
+          "required": ["speed"]
+        }
+      },
+      {
+        "intent": "broadcast.setReplayPosition",
+        "title": "Set Replay Position",
+        "description": "Jumps to a specific replay frame.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "frame": { "type": "number" }
+          },
+          "required": ["frame"]
+        }
+      },
+      {
+        "intent": "broadcast.setReplayState",
+        "title": "Set Replay State",
+        "description": "Sets the iRacing replay state.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "state": { "type": "number" }
+          },
+          "required": ["state"]
+        }
+      }
+    ],
+    "events": [
+      {
+        "event": "iracing.connectionStateChanged",
+        "title": "iRacing Connection Changed",
+        "description": "Emitted when iRacing simulator connection state changes.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "connected": { "type": "boolean" }
+          }
+        }
       }
     ],
     "settings": {

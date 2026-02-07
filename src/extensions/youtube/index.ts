@@ -11,7 +11,6 @@ interface ExtensionAPI {
   closeScraper(windowId: string): void;
   openExternal(url: string): Promise<void>;
   registerIntentHandler(intent: string, handler: (payload: any) => Promise<void>): void;
-  registerCommandHandler(command: string, handler: (payload: any) => Promise<any>): void;
   registerScraperMessageHandler(handler: (payload: any) => void): void;
   emitEvent(event: string, payload: any): void;
   updateSetting(key: string, value: any): Promise<void>;

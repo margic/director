@@ -8,7 +8,7 @@ import { YouTubeStatus } from '../../extensions/youtube/renderer/Status'
 interface DashboardProps {
   user: any;
   userProfile: UserProfile | null;
-  setCurrentView: (view: 'dashboard' | 'iracing' | 'obs' | 'youtube' | 'discord' | 'settings' | 'session-details') => void;
+  setCurrentView: (view: string) => void;
   onLogin: () => void;
   onSessionSelect: (session: RaceSession) => void;
 }
@@ -245,7 +245,7 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
 
         {/* iRacing Status Card */}
         <div 
-          onClick={() => setCurrentView('iracing')}
+          onClick={() => setCurrentView('director-iracing')}
           className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
         >
           <div className="flex justify-between items-center">
@@ -272,7 +272,7 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
 
         {/* OBS Status Card */}
         <div 
-          onClick={() => setCurrentView('obs')}
+          onClick={() => setCurrentView('director-obs')}
           className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
         >
           <div className="flex justify-between items-center">
@@ -301,7 +301,7 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
 
         {/* Extension Widgets - Direct React Components */}
         {extensionStatus['director-discord']?.active && (
-          <DiscordDashboardCard onClick={() => setCurrentView('discord')} />
+          <DiscordDashboardCard onClick={() => setCurrentView('director-discord')} />
         )}
         {extensionStatus['director-youtube']?.active && <YouTubeStatus />}
 

@@ -3,9 +3,10 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { ExtensionScanner, ScannedExtension } from './extension-scanner';
 import { IntentRegistry } from './intent-registry';
+import { CapabilityCatalog } from './capability-catalog';
 import { ViewRegistry } from './view-registry';
 import { ExtensionEventBus } from './event-bus';
-import { IpcMessage, ExecuteIntentPayload, LoadExtensionPayload, InvokePayload } from './extension-types';
+import { IpcMessage, ExecuteIntentPayload, LoadExtensionPayload, InvokePayload, ViewsContribution, ViewContribution } from './extension-types';
 import { configService } from '../config-service';
 import { AuthService } from '../auth-service';
 
@@ -72,7 +73,8 @@ class ScraperManager {
 export class ExtensionHostService {
   private child: UtilityProcess | null = null;
   private scanner: ExtensionScanner;
-  private intentRegistry: IntentRegistry;
+  private intentRegistry: IntentRegistry;       // Dynamic tier: active handlers
+  private capabilityCatalog: CapabilityCatalog;  // Static tier: all installed intents
   private viewRegistry: ViewRegistry;
   private eventBus: ExtensionEventBus;
   private authService: AuthService;
@@ -91,10 +93,12 @@ export class ExtensionHostService {
     intentRegistry: IntentRegistry,
     eventBus: ExtensionEventBus,
     viewRegistry: ViewRegistry,
-    authService: AuthService
+    authService: AuthService,
+    capabilityCatalog?: CapabilityCatalog
   ) {
     this.scanner = new ExtensionScanner(extensionsPath);
     this.intentRegistry = intentRegistry;
+    this.capabilityCatalog = capabilityCatalog || new CapabilityCatalog();
     this.eventBus = eventBus;
     this.viewRegistry = viewRegistry;
     this.authService = authService;
@@ -161,10 +165,16 @@ export class ExtensionHostService {
       return;
     }
 
-    // Check if intent is valid
+    // Check dynamic registry (active handlers)
     const reg = this.intentRegistry.getIntent(intent);
     if (!reg) {
-      console.warn(`[ExtensionHost] Unknown intent '${intent}'`);
+      // Soft Failure: Check if intent exists in catalog but handler is inactive
+      const catalogEntry = this.capabilityCatalog.getIntent(intent);
+      if (catalogEntry) {
+        console.warn(`[ExtensionHost] Intent '${intent}' exists in catalog (extension: ${catalogEntry.extensionId}) but is not active. Skipping.`);
+      } else {
+        console.warn(`[ExtensionHost] Unknown intent '${intent}' — not found in catalog or active registry.`);
+      }
       return;
     }
 
@@ -202,13 +212,38 @@ export class ExtensionHostService {
     return status;
   }
 
+  /**
+   * Returns the static Capability Catalog for Editor UI / Cloud Handshake.
+   */
+  public getCapabilityCatalog(): CapabilityCatalog {
+    return this.capabilityCatalog;
+  }
+
+  /**
+   * Checks whether a handler is currently active for the given intent.
+   */
+  public hasActiveHandler(intent: string): boolean {
+    return !!this.intentRegistry.getIntent(intent);
+  }
+
   private async scanAndLoad() {
     const extensions = await this.scanner.scan();
     
+    // Phase 1: Populate the Static Capability Catalog for ALL extensions
     for (const ext of extensions) {
       this.scannedExtensions.set(ext.id, ext);
       
-      // Check config
+      const config = configService.getAny(ext.id) as any;
+      const enabled = !(config && config.enabled === false);
+      
+      // Register in catalog regardless of enabled state (Static Tier)
+      this.capabilityCatalog.registerExtension(ext.id, ext.manifest, enabled);
+    }
+    
+    console.log(`[ExtensionHost] Capability Catalog built: ${this.capabilityCatalog.getAllIntents().length} intents from ${extensions.length} extensions`);
+
+    // Phase 2: Load only enabled extensions (Dynamic Tier)
+    for (const ext of extensions) {
       const config = configService.getAny(ext.id) as any;
       if (config && config.enabled === false) {
           console.log(`[ExtensionHost] Skipping disabled extension: ${ext.id}`);
@@ -225,7 +260,10 @@ export class ExtensionHostService {
       current.enabled = enabled;
       configService.setAny(extensionId, current); 
       
-      // 2. Load or Unload
+      // 2. Update Capability Catalog (static tier flag)
+      this.capabilityCatalog.setExtensionEnabled(extensionId, enabled);
+      
+      // 3. Load or Unload (dynamic tier)
       if (enabled) {
           const ext = this.scannedExtensions.get(extensionId);
           if (ext) {
@@ -243,28 +281,50 @@ export class ExtensionHostService {
 
     console.log(`[ExtensionHost] Loading extension: ${ext.id}`);
 
-    // Register Intents first
+    // Register Intents in the Dynamic Handler Registry
     if (ext.manifest.contributes?.intents) {
       this.intentRegistry.registerIntents(ext.id, ext.manifest.contributes.intents);
     }
 
-    // Register Views
+    // Register Views (handle both spec object and legacy array format)
     if (ext.manifest.contributes?.views) {
-        if (Array.isArray(ext.manifest.contributes.views)) {
-            for (const view of ext.manifest.contributes.views) {
+        const views = ext.manifest.contributes.views;
+        if (Array.isArray(views)) {
+            // Legacy array format
+            for (const view of views) {
                 this.viewRegistry.register(ext.id, ext.path, view);
             }
         } else {
-             // Legacy Object support (temporary)
-             const views = ext.manifest.contributes.views as any;
-             for (const key of Object.keys(views)) {
-                 this.viewRegistry.register(ext.id, ext.path, { 
-                     id: key, 
-                     type: key as any, 
-                     path: views[key], 
-                     name: key 
-                 });
-             }
+            // Spec-compliant object format: { dashboard, sidebar, panels }
+            const viewsObj = views as ViewsContribution;
+            if (viewsObj.dashboard) {
+                this.viewRegistry.register(ext.id, ext.path, {
+                    id: 'dashboard',
+                    type: 'dashboard',
+                    name: 'Dashboard Widget',
+                    component: viewsObj.dashboard.component,
+                } as ViewContribution);
+            }
+            if (viewsObj.sidebar) {
+                this.viewRegistry.register(ext.id, ext.path, {
+                    id: 'sidebar',
+                    type: 'sidebar',
+                    name: viewsObj.sidebar.label,
+                    icon: viewsObj.sidebar.icon,
+                    label: viewsObj.sidebar.label,
+                    target: viewsObj.sidebar.target,
+                } as ViewContribution);
+            }
+            if (viewsObj.panels) {
+                for (const panel of viewsObj.panels) {
+                    this.viewRegistry.register(ext.id, ext.path, {
+                        id: panel.id,
+                        type: 'panel',
+                        name: panel.title,
+                        component: panel.component,
+                    } as ViewContribution);
+                }
+            }
         }
     }
 

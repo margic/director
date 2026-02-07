@@ -5,10 +5,15 @@ export interface ViewDefinition {
   id: string; // e.g. "my-extension.main-view"
   extensionId: string;
   name: string;
-  type: 'panel' | 'dialog' | 'overlay' | 'widget';
+  type: 'panel' | 'dialog' | 'overlay' | 'widget' | 'dashboard' | 'sidebar';
+  component?: string; // React component export name
   path?: string; // Relative path to HTML/component if applicable
   width?: number;
   height?: number;
+  // Sidebar-specific
+  icon?: string;
+  label?: string;
+  target?: string;
 }
 
 export class ViewRegistry {
@@ -21,18 +26,24 @@ export class ViewRegistry {
       extensionId,
       name: view.name || viewId,
       type: view.type || 'panel',
+      component: view.component,
       path: view.path ? path.resolve(extensionPath, view.path) : undefined,
       width: view.width,
-      height: view.height
+      height: view.height,
+      icon: view.icon,
+      label: view.label,
+      target: view.target,
     };
     
     this.views.set(viewId, def);
     
     // Log registration with appropriate message for React vs legacy HTML views
-    if (def.path) {
+    if (def.component) {
+      console.log(`[ViewRegistry] Registered view: ${viewId} (React: ${def.component})`);
+    } else if (def.path) {
       console.log(`[ViewRegistry] Registered view: ${viewId} at ${def.path}`);
     } else {
-      console.log(`[ViewRegistry] Registered view: ${viewId} (React component)`);
+      console.log(`[ViewRegistry] Registered view: ${viewId}`);
     }
   }
   public unregisterViews(extensionId: string) {
@@ -52,7 +63,7 @@ export class ViewRegistry {
     return this.views.get(viewId);
   }
 
-  public getByType(type: 'panel' | 'dialog' | 'overlay' | 'widget'): ViewDefinition[] {
+  public getByType(type: 'panel' | 'dialog' | 'overlay' | 'widget' | 'dashboard' | 'sidebar'): ViewDefinition[] {
     const results: ViewDefinition[] = [];
     for (const view of this.views.values()) {
         if (view.type === type) {

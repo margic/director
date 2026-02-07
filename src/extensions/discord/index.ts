@@ -47,7 +47,7 @@ function connectToDiscord(token: string, channelId: string, director: ExtensionA
         intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates]
     });
 
-    client.once('ready', async () => {
+    client.once('clientReady', async () => {
         director.log('info', `Discord Bot logged in as ${client?.user?.tag}`);
         try {
             const channel = await client?.channels.fetch(channelId);

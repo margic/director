@@ -1,5 +1,6 @@
 export interface ExtensionManifest {
   name: string;
+  displayName?: string;
   version: string;
   main: string;
   description?: string;
@@ -8,7 +9,7 @@ export interface ExtensionManifest {
     commands?: CommandContribution[];
     events?: EventContribution[];
     settings?: Record<string, any>;
-    views?: ViewContribution[];
+    views?: ViewsContribution | ViewContribution[]; // Object (spec) or Array (legacy)
   };
 }
 
@@ -21,10 +22,26 @@ export interface CommandContribution {
 export interface ViewContribution {
   id: string; // unique relative id e.g. "status-card"
   name: string;
-  type: 'panel' | 'dialog' | 'overlay' | 'widget';
-  path?: string; // e.g. "dist/widget.html"
+  type: 'panel' | 'dialog' | 'overlay' | 'widget' | 'dashboard' | 'sidebar';
+  component?: string; // React component export name (e.g. "StatusWidget")
+  path?: string; // e.g. "dist/widget.html" (legacy HTML views)
   width?: number; // for widgets (cols)
   height?: number; // for widgets (rows)
+  // Sidebar-specific
+  icon?: string; // Lucide icon name
+  label?: string; // Sidebar nav label
+  target?: string; // Target panel id
+}
+
+/**
+ * Spec-compliant views contribution object structure.
+ * Extensions declare views as: { dashboard, sidebar, panels }
+ * See: feature_extension_system.md § 4: Phase 2
+ */
+export interface ViewsContribution {
+  dashboard?: { component: string };
+  sidebar?: { label: string; icon: string; target: string };
+  panels?: Array<{ id: string; component: string; title: string }>;
 }
 
 export interface IntentContribution {

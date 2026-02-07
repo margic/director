@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, Camera, Play, Pause, SkipBack, SkipForward } from 'lucide-react';
-import { CameraConfig } from '../types';
+import { CameraConfig } from '../../../renderer/types';
 
-interface IracingPageProps {
+interface IracingPanelProps {
   cameras?: CameraConfig[];
 }
 
-export const IracingPage = ({ cameras = [] }: IracingPageProps) => {
+export const IracingPanel = ({ cameras = [] }: IracingPanelProps) => {
   const [extActive, setExtActive] = useState(false);
   const [carNumber, setCarNumber] = useState('66');
   const [groupNumber, setGroupNumber] = useState('1');
@@ -67,7 +67,7 @@ export const IracingPage = ({ cameras = [] }: IracingPageProps) => {
   };
 
   return (
-    <div className='p-6 space-y-6'>
+    <div className='space-y-6 h-full'>
       <div className='flex items-center justify-between'>
         <h1 className='text-3xl font-rajdhani font-bold uppercase tracking-wider text-white'>
            iRacing Extension

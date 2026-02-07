@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, Aperture, AlertTriangle } from 'lucide-react';
 
-export const ObsPage = () => {
+export const ObsPanel = () => {
   const [connected, setConnected] = useState(false);
   const [missingScenes, setMissingScenes] = useState<string[]>([]);
   const [availableScenes, setAvailableScenes] = useState<string[]>([]);
@@ -28,7 +28,7 @@ export const ObsPage = () => {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 h-full">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-rajdhani font-bold uppercase tracking-wider text-white">
           OBS Control

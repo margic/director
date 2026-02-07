@@ -18,10 +18,9 @@ The Sim RaceCenter Director is an **Open Source Race Broadcast Orchestrator**. I
 | Feature | Open Source (Core) | Premium (Cloud) |
 | :--- | :--- | :--- |
 | **Execution Engine** | Local Director Loop | n/a |
-| **Native Support** | OBS Studio Integration | n/a |
-| **Integrations** | Community Extensions (Discord, etc) | n/a |
+| **Integrations** | Extensions (OBS, Discord, iRacing) | n/a |
 | **Control** | **"Control Deck"** (Manual Buttons) | **"AI Director"** (Auto-triggering) |
-| **Cost** | Free (Apache/MIT) | Subscription |
+| **Cost** | Free | Subscription |
 
 ---
 
@@ -34,8 +33,7 @@ The "Core" is now a lightweight host responsible for:
 1.  **Extension Lifecycle**: Loading, enabling, disabling, and isolating extensions.
 2.  **The "Director Loop"**: The central heartbeat that processes queued commands.
 3.  **The Sequence Executor**: The engine that executes strict lists of actions (e.g., "Mute Discord" -> "Wait 2s" -> "Switch OBS").
-4.  **OBS Integration**: First-class, native support for OBS Studio control, ensuring maximum reliability for the broadcast's most critical component.
-5.  **The "Control Deck" UI**: A customizable grid of buttons allowing the user to manually trigger sequences.
+4.  **The "Control Deck" UI**: A customizable grid of buttons allowing the user to manually trigger sequences.
 
 ### 2.2 Extension Capabilities
 An extension is a self-contained package (inspired by VS Code extensions) that can interact with the Core via a defined API.
@@ -60,9 +58,11 @@ Extensions contribute functionality to the Core via the `manifest`. Crucially, *
 *   **`commands`**: Internal RPC methods for UI interactivity and Configuration.
     *   **Purpose**: **UI & Configuration**. Used by the Extension's Frontend (Panel/Widget) to trigger Main Process logic (e.g., `system.login`, `settings.save`).
     *   **Isolation**: Commands are **NOT** exposed to the Automator or Cloud AI. They are strictly for User interaction via the Control Deck or Extension Panel.
-*   **`views`**: React components contributed to the Core application.
-    *   **`widget`**: A small summary React component for the Dashboard (e.g., Status Indicator).
-    *   **`panel`**: A full-page React component for the Extension (e.g., "YouTube Studio").
+*   **`views`**: React components contributed to the Core UI.
+    *   **`dashboard`**: Widgets displayed on the home dashboard (e.g., Status Indicator).
+    *   **`sidebar`**: Items added to the main left-hand navigation.
+        *   Properties: `icon` (Lucide name), `label`, `targetViewId`.
+    *   **`panel`**: Full-page components rendered in the main content area.
 *   **`events`**: Triggers that the Core can listen to (e.g., `streamdeck.buttonPressed`, `iracing.flagChanged`).
     *   **Usage**: Enables hardware controllers (Stream Deck, Button Boxes) or external webhooks to initiate Director sequences.
 
@@ -101,14 +101,31 @@ sequenceDiagram
     Exec-->>User: (Sequence Actions Triggered)
 ```
 
-### 2.5 Intent Discovery & Context Sync
-To ensure the Cloud AI can create sequences effectively:
+### 2.5 Intent Discovery & Capability Management (New Architecture)
+To support the Sequence Editor and robust execution, we separate the static definition of capabilities from their runtime execution.
 
-1.  **The Intent Registry**: On load, the Core scans all extension manifests for `intents` and builds a registry.
-2.  **Capabilities Handshake**: When connecting to Race Control Cloud, the Director sends a `CapabilitiesManifest` listing all available **Intents**.
-    *   *Example:* "I have an intent `communication.announceToDrivers` that accepts `text`."
-3.  **The "Black Box" Approach**: The AI decides *what* it wants to achieve (the intent) but delegates the *how* (the implementation details) to the local extension.
-    *   *AI Logic:* "There is a crash. I should `communication.announceToDrivers('Safety Car Deployed')`."
+#### 1. The Capability Catalog (Static / Persistence Layer)
+*   **Source**: Built at startup by scanning the `package.json` manifests of **all installed** extensions (regardless of enabled/disabled state).
+*   **Purpose**: Powers the **Sequence Editor UI**.
+    *   Tells the Editor what intents *exist* (e.g., `obs.switchScene`).
+    *   Provides metadata (Icon, Label, Input Schema) for the UI.
+*   **Persistence**: This data persists as long as the extension is installed.
+*   **Editor Behavior**:
+    *   **Active**: Extension enabled. Step rendered normally.
+    *   **Inactive**: Extension installed but disabled. Step rendered with a "Disabled" warning badge but remains editable.
+    *   **Missing**: Extension uninstalled. Step rendered as a "Missing Capabilities" placeholder (preserving raw JSON) so the user can see what used to be there without breaking the sequence file.
+
+#### 2. The Handler Registry (Dynamic / Execution Layer)
+*   **Source**: Built dynamically at runtime. Entries are added when an extension calls `registerIntentHandler()` during `activate()` and removed on `deactivate()`.
+*   **Purpose**: Powers the **Sequence Executor**.
+*   **Execution Behavior (Soft Failure)**:
+    *   When the Executor encounters a step (e.g., `obs.switchScene`), it looks up the handler.
+    *   **Hit**: The handler function is executed.
+    *   **Miss**: The Executor **skips** the step, logs a warning (`[Warn] Extension for intent 'obs.switchScene' is not active`), and proceeds to the next step. It does **not** fail the entire sequence.
+
+#### 3. Capabilities Handshake (Cloud Sync)
+*   When connecting to Race Control Cloud, the Director sends the **Capability Catalog** (not just the active registry).
+*   This allows the Cloud AI to suggest sequences that *could* be run if the user enabled specific extensions.
 
 ### 2.6 Extension Architecture
 Extensions are built using the following architecture:
@@ -151,9 +168,9 @@ Instead of just waiting for cloud commands, the user is presented with a **Contr
 *   **Example**:
     *   Button: "Race Start"
     *   Sequence:
-        1.  `obs:switch-scene("Race Cam")`
-        2.  `audio:play-file("intro.mp3")`
-        3.  `discord:unmute-all()`
+        1.  `obs.switchScene("Race Cam")`
+        2.  `audio.playFile("intro.mp3")`
+        3.  `discord.unmuteAll()`
 
 ### 3.2 Extension Management
 *   **Marketplace/Browser**: Users can browse available extensions (from a JSON registry or GitHub).
@@ -198,25 +215,27 @@ Create the definition for extension manifests using `package.json`.
         }
       }
     ],
-    "views": [
-      {
-        "id": "status-widget",
-        "name": "Stream Deck Status",
-        "type": "widget"
-      },
-      {
-        "id": "main-panel",
-        "name": "Stream Deck",
-        "type": "panel"
-      }
-    ]
+    "views": {
+      "dashboard": { "component": "StatusWidget" },
+      "sidebar": { "label": "Stream Deck", "icon": "Grid", "target": "main" },
+      "panels": [
+        { "id": "main", "component": "MainPanel", "title": "Configuration" }
+      ]
+    }
   }
 }
 ```
 
-**Note**: The `path` field in views is no longer used. React components are directly imported by the Core based on convention:
-- Widget: `src/extensions/{extensionId}/renderer/Status.tsx`
-- Panel: `src/extensions/{extensionId}/renderer/Panel.tsx`
+**Note**: The `component` field refers to the named export in the extension's renderer entry point (e.g., `src/extensions/{id}/renderer/index.tsx`).
 
-### Phase 3: Public API & Sandbox
+### Phase 3: Dynamic Registry & Routing
+Refactor `App.tsx` and the Extension Host to move away from hardcoded imports.
+
+1.  **Capability Registry**: The Extension Host aggregates all `intents` and `events` into a runtime registry. This registry is the "Source of Truth" for the AI Agent.
+2.  **View Registry**: The Renderer Core builds a dynamic routing table at startup.
+    *   Iterates over enabled extensions.
+    *   Adds Sidebar items based on `contributes.views.sidebar`.
+    *   Routes `/ext/:id` request to a generic `<ExtensionHostView />` which loads the correct React component from the registry.
+
+### Phase 4: Public API & Sandbox
 Ensure extensions cannot crash the main director loop. Implement error boundaries and possibly separate process execution for robust extensions.

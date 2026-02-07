@@ -6,62 +6,41 @@ import { Switch } from '@/components/ui/switch';
 export const SettingsPage = () => {
     const [extensions, setExtensions] = useState({
         'director-iracing': { enabled: true },
-        obs: { enabled: true },
+        'director-obs': { enabled: true },
         'director-youtube': { enabled: true },
         'director-discord': { enabled: true }
     });
 
     useEffect(() => {
         const loadConfig = async () => {
-            if (window.electronAPI?.config) {
+            if (window.electronAPI?.extensions) {
                 try {
-                    const iracing = await window.electronAPI.config.get('director-iracing');
-                    const obs = await window.electronAPI.config.get('obs');
-                    const youtube = await window.electronAPI.config.get('director-youtube');
-                    const discord = await window.electronAPI.config.get('director-discord');
+                    const status = await window.electronAPI.extensions.getStatus();
                     
                     setExtensions({
-                        'director-iracing': iracing || { enabled: true },
-                        obs: obs || { enabled: true },
-                        'director-youtube': youtube || { enabled: true },
-                        'director-discord': discord || { enabled: true }
+                        'director-iracing': { enabled: status['director-iracing']?.active ?? true },
+                        'director-obs': { enabled: status['director-obs']?.active ?? true },
+                        'director-youtube': { enabled: status['director-youtube']?.active ?? true },
+                        'director-discord': { enabled: status['director-discord']?.active ?? true }
                     });
 
                 } catch (e) {
-                    console.error("Failed to load config", e);
+                    console.error("Failed to load extension status", e);
                 }
             }
         };
         loadConfig();
     }, []);
 
-    const toggleExtension = async (id: 'director-iracing' | 'obs' | 'director-youtube' | 'director-discord', enabled: boolean) => {
+    const toggleExtension = async (id: string, enabled: boolean) => {
         setExtensions(prev => ({
             ...prev,
-            [id]: { ...prev[id], enabled }
+            [id]: { ...prev[id as keyof typeof prev], enabled }
         }));
         
-        if (window.electronAPI) {
-            if (id === 'obs') {
-                 // Legacy module handling
-                 await window.electronAPI.config.set(`${id}.enabled`, enabled);
-            } else {
-                 // Extension system handling
-                 await window.electronAPI.extensions.setEnabled(id, enabled);
-                 
-                 // Reload extension status to reflect changes
-                 setTimeout(async () => {
-                     try {
-                         const status = await window.electronAPI.extensions.getStatus();
-                         setExtensions(prev => ({
-                             ...prev,
-                             [id]: { enabled: status[id]?.active || false }
-                         }));
-                     } catch (e) {
-                         console.error('Failed to reload extension status', e);
-                     }
-                 }, 500); // Small delay to allow extension to load/unload
-            }
+        if (window.electronAPI?.extensions) {
+             // Extension system handling
+             await window.electronAPI.extensions.setEnabled(id, enabled);
         }
     };
 
@@ -103,10 +82,10 @@ export const SettingsPage = () => {
                              </div>
                              <div>
                                 <h3 className="font-bold">OBS Studio</h3>
-                                <p className="text-xs text-muted-foreground">Scene switching & status (Legacy Module)</p>
+                                <p className="text-xs text-muted-foreground">Scene switching & status</p>
                              </div>
                         </div>
-                        <Switch id="module-obs" checked={extensions.obs.enabled} onCheckedChange={(c) => toggleExtension('obs', c)} />
+                        <Switch id="module-obs" checked={extensions['director-obs'].enabled} onCheckedChange={(c) => toggleExtension('director-obs', c)} />
                      </div>
 
                      {/* YouTube Toggle */}
