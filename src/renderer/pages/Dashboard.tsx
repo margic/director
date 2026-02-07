@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Activity, User, Play, Square, Loader2, Car, Aperture } from 'lucide-react'
+import { Activity, User, Play, Square, Loader2 } from 'lucide-react'
 import { UserProfile, RaceSession } from '../types'
 import { clientTelemetry } from '../telemetry'
-import { DiscordDashboardCard } from '../../extensions/discord/renderer/DashboardCard'
-import { YouTubeStatus } from '../../extensions/youtube/renderer/Status'
+import { extensionViews } from '../extension-views'
 
 interface DashboardProps {
   user: any;
@@ -17,9 +16,6 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
   const [sessions, setSessions] = useState<RaceSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
-  const [iracingConnected, setIracingConnected] = useState(false);
-  const [obsConnected, setObsConnected] = useState(false);
-  const [obsMissingScenes, setObsMissingScenes] = useState<string[]>([]);
   const [extensionStatus, setExtensionStatus] = useState<Record<string, { active: boolean }>>({});
 
   useEffect(() => {
@@ -47,15 +43,6 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
       if (window.electronAPI.directorStatus) {
         const status = await window.electronAPI.directorStatus();
         setDirectorStatus(status);
-      }
-      if (window.electronAPI.iracingGetStatus) {
-        const status = await window.electronAPI.iracingGetStatus();
-        setIracingConnected(status.connected);
-      }
-      if (window.electronAPI.obsGetStatus) {
-        const status = await window.electronAPI.obsGetStatus();
-        setObsConnected(status.connected);
-        setObsMissingScenes(status.missingScenes);
       }
     };
     
@@ -243,67 +230,17 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
           )}
         </div>
 
-        {/* iRacing Status Card */}
-        <div 
-          onClick={() => setCurrentView('director-iracing')}
-          className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
-        >
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <Car className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-              <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">iRacing Status</h3>
-            </div>
-            <div className={`w-3 h-3 rounded-full ${iracingConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          </div>
-          
-          <div>
-            <div className="text-2xl font-jetbrains font-bold mb-1 text-white">
-              {iracingConnected ? 'CONNECTED' : 'NOT FOUND'}
-            </div>
-            <div className="text-xs text-muted-foreground font-rajdhani">
-              {iracingConnected ? 'Simulator Running' : 'Waiting for Simulator...'}
-            </div>
-          </div>
-
-          <div className="w-full py-3 rounded-lg bg-secondary text-white font-bold flex items-center justify-center gap-2 hover:bg-secondary/90 transition-colors shadow-[0_0_15px_rgba(0,163,224,0.3)]">
-            <span>OPEN CONTROLS</span>
-          </div>
-        </div>
-
-        {/* OBS Status Card */}
-        <div 
-          onClick={() => setCurrentView('director-obs')}
-          className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors cursor-pointer group"
-        >
-          <div className="flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <Aperture className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-              <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">OBS Status</h3>
-            </div>
-            <div className={`w-3 h-3 rounded-full ${obsConnected ? (obsMissingScenes.length > 0 ? 'bg-yellow-500' : 'bg-green-500') : 'bg-red-500'}`} />
-          </div>
-          
-          <div>
-            <div className="text-2xl font-jetbrains font-bold mb-1 text-white">
-              {obsConnected ? 'CONNECTED' : 'DISCONNECTED'}
-            </div>
-            <div className="text-xs text-muted-foreground font-rajdhani">
-              {obsConnected 
-                ? (obsMissingScenes.length > 0 ? `${obsMissingScenes.length} Scenes Missing` : 'Ready to Broadcast') 
-                : 'Waiting for OBS...'}
-            </div>
-          </div>
-          
-          <div className="w-full py-3 rounded-lg bg-secondary text-white font-bold flex items-center justify-center gap-2 hover:bg-secondary/90 transition-colors shadow-[0_0_15px_rgba(0,163,224,0.3)]">
-            <span>OPEN CONTROLS</span>
-          </div>
-        </div>
-
-        {/* Extension Widgets - Direct React Components */}
-        {extensionStatus['director-discord']?.active && (
-          <DiscordDashboardCard onClick={() => setCurrentView('director-discord')} />
-        )}
-        {extensionStatus['director-youtube']?.active && <YouTubeStatus />}
+        {/* Extension Dashboard Widgets — rendered dynamically from the view registry */}
+        {extensionViews.map((view) => {
+          if (!extensionStatus[view.extensionId]?.active || !view.widget) return null;
+          const WidgetComponent = view.widget;
+          return (
+            <WidgetComponent
+              key={view.extensionId}
+              onClick={() => setCurrentView(view.extensionId)}
+            />
+          );
+        })}
 
       </div>
     </div>

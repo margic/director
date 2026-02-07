@@ -229,13 +229,13 @@ Create the definition for extension manifests using `package.json`.
 **Note**: The `component` field refers to the named export in the extension's renderer entry point (e.g., `src/extensions/{id}/renderer/index.tsx`).
 
 ### Phase 3: Dynamic Registry & Routing
-Refactor `App.tsx` and the Extension Host to move away from hardcoded imports.
+Refactor `App.tsx` and the Dashboard to move away from hardcoded imports.
 
-1.  **Capability Registry**: The Extension Host aggregates all `intents` and `events` into a runtime registry. This registry is the "Source of Truth" for the AI Agent.
-2.  **View Registry**: The Renderer Core builds a dynamic routing table at startup.
-    *   Iterates over enabled extensions.
-    *   Adds Sidebar items based on `contributes.views.sidebar`.
-    *   Routes `/ext/:id` request to a generic `<ExtensionHostView />` which loads the correct React component from the registry.
+1.  **Capability Registry**: The Extension Host aggregates all `intents` and `events` into a runtime registry. This is the "Source of Truth" for the AI Agent.
+2.  **View Registry (`src/renderer/extension-views.ts`)**: The Renderer Core uses a central registry file to map Extension IDs to React Components.
+    *   **Implementation**: A typed array `extensionViews` exports the mapping for Sidebar Icons, Main Panels, and Dashboard Widgets.
+    *   **Workflow**: To add a new extension UI, developers must import their component and add an entry to this registry file.
+    *   **Dynamic Rendering**: `App.tsx` and `Dashboard.tsx` iterate over this registry to render Sidebar items and Dashboard Widgets automatically based on the extension's `active` status.
 
 ### Phase 4: Public API & Sandbox
 Ensure extensions cannot crash the main director loop. Implement error boundaries and possibly separate process execution for robust extensions.
