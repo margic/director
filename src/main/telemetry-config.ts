@@ -9,10 +9,10 @@ if (app.isPackaged) {
 }
 
 export const telemetryConfig = {
-  instrumentationKey: process.env.VITE_APPINSIGHTS_INSTRUMENTATION_KEY || 'a3338f9b-48c6-4d3f-b07c-a6e4e4516ea9',
+  instrumentationKey: process.env.VITE_APPINSIGHTS_INSTRUMENTATION_KEY || '',
   ingestionEndpoint: process.env.VITE_APPINSIGHTS_INGESTION_ENDPOINT || 'https://westus3-1.in.applicationinsights.azure.com/',
   liveEndpoint: process.env.VITE_APPINSIGHTS_LIVE_ENDPOINT || 'https://westus3.livediagnostics.monitor.azure.com/',
-  applicationId: process.env.VITE_APPINSIGHTS_APPLICATION_ID || '7fa3a6e8-91ae-4549-b0de-995d0e8b0c7d',
+  applicationId: process.env.VITE_APPINSIGHTS_APPLICATION_ID || '',
   enabled: process.env.VITE_APPINSIGHTS_ENABLED !== 'false', // Default to true
   applicationVersion: app.getVersion(),
   get connectionString() {

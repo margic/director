@@ -9,6 +9,8 @@ console.log('Status:', service.getStatus());
 // 2. Test Connection
 async function testConnection() {
     console.log('\n--- Testing Connection ---');
+    // SECURITY NOTE: This is intentionally a fake/invalid token for testing purposes.
+    // Real Discord bot tokens should never be hardcoded and should be stored securely.
     const mockToken = "MOCK_BOT_TOKEN";
     const mockChannel = "123456789";
     
