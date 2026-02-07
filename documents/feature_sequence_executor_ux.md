@@ -1042,3 +1042,57 @@ The following questions were resolved during specification refinement:
 ## 14. Open Questions
 
 1. **Cloud Sequence Format**: Does the Race Control API already serve sequences in `PortableSequence` format, or do we need an additional normalization layer? **Pending review with Race Control team** — tracked in [racecontrol#136](https://github.com/margic/racecontrol/issues/136).
+
+Here is the response to 136
+
+Summary
+I have successfully implemented the PortableSequence format support for the Race Control API as requested by the Director App Team. Here's what was delivered:
+
+✅ All Requirements Met
+Native PortableSequence Support: The /sequences/next endpoint now supports the modern PortableSequence format via the format=portable query parameter, while maintaining backward compatibility with the legacy format as the default.
+
+Sequence Library Endpoint: Created GET /api/director/v1/sequences to fetch pre-defined sequences with filtering by centerId and category.
+
+Variable Resolution: Implemented the recommended approach where the cloud AI sends sequence ID + variables map, and the Director resolves them locally from live telemetry for temporal accuracy.
+
+EXECUTE_SEQUENCE Command Type: Added new EXECUTE_SEQUENCE to the DirectorCommandType enum to allow cloud AI to reference sequences by ID instead of inlining all steps.
+
+Full Backward Compatibility: The legacy DirectorSequence format remains the default. No breaking changes were introduced.
+
+📋 Changes Made
+API Layer:
+
+Added complete TypeScript type definitions for PortableSequence, SequenceStep, SequenceVariable
+Created new endpoints for listing and retrieving portable sequences
+Enhanced existing next sequence endpoint with format selection
+Implemented conversion logic between legacy and portable formats
+Service Layer:
+
+Added functions to save, retrieve, and list portable sequences
+Implemented filtering by center and category
+Infrastructure:
+
+Added portableSequences Cosmos DB container with composite indexes
+Added pendingCommands container (was referenced but not provisioned)
+Documentation:
+
+Comprehensive feature documentation in docs/features/portable-sequences.md
+Implementation summary in IMPLEMENTATION_SUMMARY.md
+Test script in api/scripts/test-portable-sequences.ts
+Quality Assurance:
+
+✅ All builds pass
+✅ Code review feedback addressed
+✅ Security scan passed (0 vulnerabilities)
+✅ Backward compatibility maintained
+🎯 Key Features
+Semantic Intents: Uses domain.action notation (e.g., broadcast.switchCamera) instead of enums
+Runtime Variables: Supports $var(name) substitution with context-driven resolution
+Temporal Scalars: sessionTime and sessionTick types for idempotent replay
+Priority Flag: Enables concurrent execution with Director Loop
+Rich Metadata: Step labels, timeouts, and execution control
+🚀 Migration Path
+Phase 1 (Current): Director uses local sequences with normalization
+Phase 2 (This PR): API serves PortableSequence format, Director can adopt gradually
+Phase 3 (Future): Cloud AI uses EXECUTE_SEQUENCE for sequence references
+All files have been committed and pushed to the copilot/serve-director-sequences-format branch. The implementation is ready for review and deployment!

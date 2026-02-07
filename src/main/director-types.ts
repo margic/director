@@ -25,6 +25,30 @@ export interface SequenceStep {
 }
 
 /**
+ * Runtime variable definition for parameterised sequences.
+ * Variables use $var(name) substitution-only syntax in step payloads.
+ */
+export interface SequenceVariable {
+  name: string;              // Variable identifier (alphanumeric, camelCase)
+  label: string;             // Human-readable label for UI
+  type: 'string' | 'number' | 'boolean' | 'select' | 'sessionTime' | 'sessionTick';
+  required: boolean;
+  default?: unknown;         // Default value (used if not provided)
+  description?: string;      // Help text shown in UI
+  constraints?: {
+    min?: number;            // For number type
+    max?: number;            // For number type
+    options?: Array<{        // For select type
+      label: string;
+      value: string;
+    }>;
+    pattern?: string;        // Regex for string type
+  };
+  source?: 'user' | 'context';  // Where the value comes from
+  contextKey?: string;       // Dot-path for auto-population from telemetry/session data
+}
+
+/**
  * The portable, headless sequence format. The executor does not care
  * how this was created (Visual Editor, AI, API, manual JSON).
  */
@@ -32,8 +56,83 @@ export interface PortableSequence {
   id: string;
   name?: string;
   version?: string;
+  description?: string;                              // Human-readable description
+  category?: 'built-in' | 'cloud' | 'custom';       // Library category
+  priority?: boolean;                                 // If true, executes immediately even during Director Loop
+  variables?: SequenceVariable[];                     // Runtime variable definitions
   steps: SequenceStep[];
   metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Sequence Execution Types
+// ============================================================================
+
+export interface StepResult {
+  stepId: string;
+  intent: string;
+  status: 'success' | 'skipped' | 'failed';
+  durationMs: number;
+  message?: string;  // Error message or skip reason
+}
+
+export interface ExecutionResult {
+  executionId: string;
+  sequenceId: string;
+  sequenceName: string;
+  status: 'completed' | 'partial' | 'failed' | 'cancelled';
+  source: 'manual' | 'director-loop' | 'ai-agent' | 'stream-deck' | 'webhook';
+  priority: boolean;
+  startedAt: string;
+  completedAt: string;
+  totalDurationMs: number;
+  resolvedVariables: Record<string, unknown>;
+  steps: StepResult[];
+}
+
+export interface SequenceProgress {
+  executionId: string;
+  sequenceId: string;
+  currentStep: number;
+  totalSteps: number;
+  stepIntent: string;
+  stepStatus: 'running' | 'success' | 'skipped' | 'failed';
+  log: string;       // Formatted log line
+}
+
+export interface QueuedSequence {
+  executionId: string;
+  sequence: PortableSequence;
+  variables: Record<string, unknown>;
+  queuedAt: string;
+  position: number;
+  source: string;
+}
+
+export interface ExecutionHistoryConfig {
+  maxEntries: number;  // Default: 25
+}
+
+export interface SequenceFilter {
+  category?: string;
+  search?: string;
+}
+
+export interface IntentCatalogEntry {
+  intentId: string;
+  label?: string;
+  extensionId: string;
+  extensionLabel?: string;
+  inputSchema?: Record<string, unknown>;
+  active: boolean;
+}
+
+export interface EventCatalogEntry {
+  eventId: string;
+  label?: string;
+  extensionId: string;
+  extensionLabel?: string;
+  payloadSchema?: Record<string, unknown>;
 }
 
 // ============================================================================

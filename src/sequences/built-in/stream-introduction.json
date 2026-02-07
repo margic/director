@@ -1,0 +1,28 @@
+{
+  "id": "seq_stream_intro",
+  "name": "Stream Introduction",
+  "version": "1.0.0",
+  "description": "Opens the broadcast with driver overview and scenic cameras, then sends a welcome message to YouTube chat.",
+  "category": "built-in",
+  "variables": [],
+  "steps": [
+    {
+      "id": "step_1",
+      "intent": "obs.switchScene",
+      "payload": { "sceneName": "Driver Overview" },
+      "metadata": { "label": "Switch to Driver Overview" }
+    },
+    {
+      "id": "step_2",
+      "intent": "broadcast.selectCamera",
+      "payload": { "camGroup": "Scenic" },
+      "metadata": { "label": "Select scenic cameras in iRacing" }
+    },
+    {
+      "id": "step_3",
+      "intent": "communication.talkToChat",
+      "payload": { "message": "🏁 Welcome to Sim RaceCenter! The stream is starting now. Get ready for some incredible racing action!" },
+      "metadata": { "label": "Send welcome message to YouTube chat" }
+    }
+  ]
+}

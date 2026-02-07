@@ -3,6 +3,7 @@ import { Activity, User, Play, Square, Loader2 } from 'lucide-react'
 import { UserProfile, RaceSession } from '../types'
 import { clientTelemetry } from '../telemetry'
 import { extensionViews } from '../extension-views'
+import { SequencesDashboardCard } from '../components/sequences/SequencesDashboardCard'
 
 interface DashboardProps {
   user: any;
@@ -229,6 +230,9 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
             <div className="absolute inset-0 bg-green-500/5 animate-pulse pointer-events-none" />
           )}
         </div>
+
+        {/* Sequence Executor Widget — core, always visible */}
+        <SequencesDashboardCard onClick={() => setCurrentView('sequences')} />
 
         {/* Extension Dashboard Widgets — rendered dynamically from the view registry */}
         {extensionViews.map((view) => {

@@ -13,6 +13,9 @@ import { CapabilityCatalog } from './extension-host/capability-catalog';
 import { ExtensionEventBus } from './extension-host/event-bus';
 import { ViewRegistry } from './extension-host/view-registry';
 import { EventMapper } from './event-mapper';
+import { SequenceLibraryService } from './sequence-library-service';
+import { SequenceScheduler } from './sequence-scheduler';
+import { SequenceExecutor } from './sequence-executor';
 
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -31,6 +34,9 @@ let capabilityCatalog: CapabilityCatalog;
 let eventBus: ExtensionEventBus;
 let viewRegistry: ViewRegistry;
 let eventMapper: EventMapper;
+let sequenceLibrary: SequenceLibraryService;
+let sequenceScheduler: SequenceScheduler;
+let sequenceExecutor: SequenceExecutor;
 
 
 
@@ -93,8 +99,23 @@ app.on('ready', () => {
   // Initialize Event Mapper
   eventMapper = new EventMapper(eventBus, directorService);
 
+  // Initialize Sequence Executor & Scheduler
+  sequenceExecutor = new SequenceExecutor(extensionHost);
+  sequenceLibrary = new SequenceLibraryService(capabilityCatalog);
+  sequenceScheduler = new SequenceScheduler(sequenceExecutor);
+
+  // Forward sequence progress to renderer
+  sequenceScheduler.on('progress', (progress) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sequence:progress', progress);
+    }
+  });
+
   // Start extension host (async)
-  extensionHost.start().catch(err => {
+  extensionHost.start().then(() => {
+    // Initialize sequence library after extensions are loaded (needs catalog)
+    return sequenceLibrary.initialize();
+  }).catch(err => {
     console.error('Failed to start extension host:', err);
     telemetryService.trackException(err, { component: 'ExtensionHost' });
   });
@@ -297,6 +318,68 @@ app.on('ready', () => {
   });
   ipcMain.handle('discord:disconnect', async () => discordService.disconnect());
   ipcMain.handle('discord:send-test', async (_, text: string) => discordService.playTts(text));
+
+  // ============================================================================
+  // Sequence Library & Execution IPC Handlers
+  // ============================================================================
+
+  ipcMain.handle('sequence:list', async (_, filter?: any) => {
+    return sequenceLibrary.listSequences(filter);
+  });
+
+  ipcMain.handle('sequence:get', async (_, id: string) => {
+    return sequenceLibrary.getSequence(id);
+  });
+
+  ipcMain.handle('sequence:save', async (_, sequence: any) => {
+    return sequenceLibrary.saveCustomSequence(sequence);
+  });
+
+  ipcMain.handle('sequence:delete', async (_, id: string) => {
+    return sequenceLibrary.deleteCustomSequence(id);
+  });
+
+  ipcMain.handle('sequence:export', async (_, id: string) => {
+    return sequenceLibrary.exportSequence(id);
+  });
+
+  ipcMain.handle('sequence:import', async (_, json: string) => {
+    return sequenceLibrary.importSequence(json);
+  });
+
+  ipcMain.handle('sequence:execute', async (_, id: string, variables?: Record<string, unknown>, options?: any) => {
+    const sequence = await sequenceLibrary.getSequence(id);
+    if (!sequence) throw new Error(`Sequence not found: ${id}`);
+    return sequenceScheduler.enqueue(sequence, variables ?? {}, {
+      source: options?.source ?? 'manual',
+      priority: options?.priority,
+    });
+  });
+
+  ipcMain.handle('sequence:cancel', async () => {
+    return sequenceScheduler.cancelCurrent();
+  });
+
+  ipcMain.handle('sequence:cancel-queued', async (_, executionId: string) => {
+    return sequenceScheduler.cancelQueued(executionId);
+  });
+
+  ipcMain.handle('sequence:queue', async () => {
+    return sequenceScheduler.getQueue();
+  });
+
+  ipcMain.handle('sequence:history', async () => {
+    return sequenceScheduler.getHistory();
+  });
+
+  // Capability Catalog IPC
+  ipcMain.handle('catalog:intents', async () => {
+    return sequenceLibrary.getRegisteredIntents();
+  });
+
+  ipcMain.handle('catalog:events', async () => {
+    return sequenceLibrary.getRegisteredEvents();
+  });
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common

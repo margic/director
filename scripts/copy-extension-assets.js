@@ -60,3 +60,24 @@ extensions.forEach(ext => {
         console.log(`  ${ext} → React-based (no static HTML)`);
     }
 });
+
+// ============================================================================
+// Copy Built-in Sequences
+// ============================================================================
+const seqSrcDir = path.join(__dirname, '../src/sequences/built-in');
+const seqDestDir = path.join(__dirname, '../dist-electron/sequences/built-in');
+
+if (fs.existsSync(seqSrcDir)) {
+    if (!fs.existsSync(seqDestDir)) {
+        fs.mkdirSync(seqDestDir, { recursive: true });
+    }
+
+    const seqFiles = fs.readdirSync(seqSrcDir).filter(f => f.endsWith('.json'));
+    seqFiles.forEach(f => {
+        fs.copyFileSync(path.join(seqSrcDir, f), path.join(seqDestDir, f));
+        console.log(`✓ sequences/built-in/${f}`);
+    });
+    console.log(`Copied ${seqFiles.length} built-in sequences.`);
+} else {
+    console.log('No built-in sequences directory found.');
+}

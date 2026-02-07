@@ -53,5 +53,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
         // Return unsubscribe function
         return () => ipcRenderer.removeListener('extension:event', subscription);
       }
-  }
+  },
+
+  // Sequence Library & Execution API
+  sequences: {
+      list: (filter?: any) => ipcRenderer.invoke('sequence:list', filter),
+      get: (id: string) => ipcRenderer.invoke('sequence:get', id),
+      save: (sequence: any) => ipcRenderer.invoke('sequence:save', sequence),
+      delete: (id: string) => ipcRenderer.invoke('sequence:delete', id),
+      export: (id: string) => ipcRenderer.invoke('sequence:export', id),
+      import: (json: string) => ipcRenderer.invoke('sequence:import', json),
+      execute: (id: string, variables?: Record<string, unknown>, options?: any) =>
+        ipcRenderer.invoke('sequence:execute', id, variables, options),
+      cancel: () => ipcRenderer.invoke('sequence:cancel'),
+      cancelQueued: (executionId: string) => ipcRenderer.invoke('sequence:cancel-queued', executionId),
+      queue: () => ipcRenderer.invoke('sequence:queue'),
+      history: () => ipcRenderer.invoke('sequence:history'),
+      onProgress: (callback: (progress: any) => void) => {
+        const subscription = (_: any, progress: any) => callback(progress);
+        ipcRenderer.on('sequence:progress', subscription);
+        return () => ipcRenderer.removeListener('sequence:progress', subscription);
+      },
+  },
+
+  // Capability Catalog API
+  catalog: {
+      intents: () => ipcRenderer.invoke('catalog:intents'),
+      events: () => ipcRenderer.invoke('catalog:events'),
+  },
 });

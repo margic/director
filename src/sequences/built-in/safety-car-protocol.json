@@ -1,0 +1,50 @@
+{
+  "id": "seq_safety_car",
+  "name": "Safety Car Protocol",
+  "version": "1.0.0",
+  "description": "Deploys the full safety car broadcast protocol: switches to track map, mutes drivers, announces to chat, then returns to normal after a delay.",
+  "category": "built-in",
+  "variables": [
+    {
+      "name": "returnDelayMs",
+      "label": "Return to Normal Delay (ms)",
+      "type": "number",
+      "required": false,
+      "default": 30000,
+      "description": "How long to wait before returning to normal broadcast (in milliseconds)",
+      "constraints": { "min": 5000, "max": 120000 }
+    }
+  ],
+  "steps": [
+    {
+      "id": "step_1",
+      "intent": "obs.switchScene",
+      "payload": { "sceneName": "Track Map" },
+      "metadata": { "label": "Show track map" }
+    },
+    {
+      "id": "step_2",
+      "intent": "communication.announce",
+      "payload": { "message": "⚠️ Safety car deployed. Drivers hold your positions." },
+      "metadata": { "label": "Announce to Discord" }
+    },
+    {
+      "id": "step_3",
+      "intent": "communication.talkToChat",
+      "payload": { "message": "🟡 SAFETY CAR — Full course yellow" },
+      "metadata": { "label": "Announce to YouTube chat" }
+    },
+    {
+      "id": "step_4",
+      "intent": "system.wait",
+      "payload": { "durationMs": "$var(returnDelayMs)" },
+      "metadata": { "label": "Wait before returning to normal" }
+    },
+    {
+      "id": "step_5",
+      "intent": "obs.switchScene",
+      "payload": { "sceneName": "Live Race" },
+      "metadata": { "label": "Return to live race view" }
+    }
+  ]
+}

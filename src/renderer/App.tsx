@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { LayoutDashboard, Settings, User, LogOut, Car, ArrowLeft, Database } from 'lucide-react'
+import { LayoutDashboard, Settings, User, LogOut, Car, ArrowLeft, Database, Zap } from 'lucide-react'
 import RaceCenterIcon from '../../assets/images/icon.png'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
 import { extensionViews, getExtensionView } from './extension-views'
 import { SettingsPage } from './pages/SettingsPage'
 import { Dashboard } from './pages/Dashboard'
+import { SequencesPanel } from './pages/SequencesPanel'
 
 const JsonViewer = ({ data }: { data: any }) => {
   if (data === null || data === undefined) return <span className="text-muted-foreground italic">null</span>;
@@ -169,6 +170,15 @@ function App() {
           >
             <LayoutDashboard className="w-6 h-6" />
           </button>
+
+          {/* Sequences — core view, always visible */}
+          <button
+            onClick={() => setCurrentView('sequences')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'sequences' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="Sequences"
+          >
+            <Zap className="w-6 h-6" />
+          </button>
           
           {/* Extension navigation — generated from the view registry */}
           {extensionViews.map((view) =>
@@ -271,6 +281,10 @@ function App() {
               onLogin={handleLogin}
               onSessionSelect={handleSessionClick}
             />
+          ) : currentView === 'sequences' ? (
+            <div className="w-full max-w-6xl h-full">
+              <SequencesPanel />
+            </div>
           ) : currentView === 'settings' ? (
             <div className="w-full max-w-6xl">
               <SettingsPage />

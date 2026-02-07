@@ -72,8 +72,10 @@ export class SequenceExecutor {
 
   /**
    * Dispatch a single step to the appropriate handler.
+   * Public so that SequenceScheduler can invoke steps individually
+   * for fine-grained progress reporting and cancellation.
    */
-  private async executeStep(step: SequenceStep): Promise<void> {
+  async executeStep(step: SequenceStep): Promise<void> {
     const { intent, payload } = step;
 
     // --- Built-in System Intents ---
