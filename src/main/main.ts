@@ -18,6 +18,7 @@ import { SequenceScheduler } from './sequence-scheduler';
 import { SequenceExecutor } from './sequence-executor';
 import { OverlayBus } from './overlay/overlay-bus';
 import { OverlayServer } from './overlay/overlay-server';
+import { humanizeIntent } from './overlay/intent-humanizer';
 
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -118,11 +119,38 @@ app.on('ready', () => {
   sequenceLibrary = new SequenceLibraryService(capabilityCatalog);
   sequenceScheduler = new SequenceScheduler(sequenceExecutor);
 
-  // Forward sequence progress to renderer
+  // Register sequence executor overlay contribution
+  overlayBus.registerOverlay('sequences', {
+    id: 'director-activity',
+    region: 'lower-third',
+    title: 'Director Activity',
+    template: 'ActivityProgress',
+  });
+
+  // Forward sequence progress to renderer AND overlay
   sequenceScheduler.on('progress', (progress) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('sequence:progress', progress);
     }
+
+    // Update overlay with sequence progress
+    if (progress.currentStep > 0) {
+      const data = {
+        title: progress.sequenceId,
+        step: progress.currentStep,
+        total: progress.totalSteps,
+        label: humanizeIntent(progress.stepIntent),
+      };
+      overlayBus.updateOverlay('sequences', 'director-activity', data);
+      overlayBus.showOverlay('sequences', 'director-activity');
+    }
+  });
+
+  // Auto-hide overlay 3 seconds after sequence completes
+  sequenceScheduler.on('historyChanged', () => {
+    setTimeout(() => {
+      overlayBus.hideOverlay('sequences', 'director-activity');
+    }, 3000);
   });
 
   // Start extension host (async)
