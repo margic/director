@@ -24,7 +24,7 @@ import {
 import { ArrowDown } from 'lucide-react';
 import { SortableStepCard } from './SortableStepCard';
 import { DropZone } from './DropZone';
-import type { SequenceStep } from '@/renderer/types';
+import type { SequenceStep } from '@/types';
 
 export interface BuilderCanvasProps {
   steps: SequenceStep[];

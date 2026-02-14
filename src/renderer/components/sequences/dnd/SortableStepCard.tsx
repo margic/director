@@ -19,8 +19,8 @@ import React from 'react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { GripVertical, X } from 'lucide-react';
-import { getIntentDomain, getIntentDomainIcon, getIntentAction, getDomainStyle } from '@/renderer/lib/intent-utils';
-import type { SequenceStep } from '@/renderer/types';
+import { getIntentDomain, getIntentDomainIcon, getIntentAction, getIntentDomainStyle } from '@/lib/intent-utils';
+import type { SequenceStep } from '@/types';
 
 export interface SortableStepCardProps {
   step: SequenceStep;
@@ -49,7 +49,7 @@ export const SortableStepCard: React.FC<SortableStepCardProps> = ({
   const domain = getIntentDomain(step.intent);
   const action = getIntentAction(step.intent);
   const Icon = getIntentDomainIcon(domain);
-  const style = getDomainStyle(domain);
+  const style = getIntentDomainStyle(domain);
 
   // Format action name
   const displayName = step.metadata?.label || action

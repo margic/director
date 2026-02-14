@@ -17,8 +17,8 @@ import React, { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { DraggableIntentChip } from './DraggableIntentChip';
-import { getIntentDomain, getIntentDomainIcon } from '@/renderer/lib/intent-utils';
-import type { IntentCatalogEntry } from '@/renderer/types';
+import { getIntentDomain, getIntentDomainIcon } from '@/lib/intent-utils';
+import type { IntentCatalogEntry } from '@/types';
 
 export interface IntentPaletteProps {
   intents: IntentCatalogEntry[];

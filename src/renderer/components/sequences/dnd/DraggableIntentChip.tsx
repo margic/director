@@ -18,8 +18,8 @@
 
 import React from 'react';
 import { useDraggable } from '@dnd-kit/core';
-import { getIntentDomain, getIntentDomainIcon, getIntentAction, getDomainStyle } from '@/renderer/lib/intent-utils';
-import type { IntentCatalogEntry } from '@/renderer/types';
+import { getIntentDomain, getIntentDomainIcon, getIntentAction, getIntentDomainStyle } from '@/lib/intent-utils';
+import type { IntentCatalogEntry } from '@/types';
 
 export interface DraggableIntentChipProps {
   intent: IntentCatalogEntry;
@@ -33,7 +33,7 @@ export const DraggableIntentChip: React.FC<DraggableIntentChipProps> = ({
   const domain = getIntentDomain(intent.intentId);
   const action = getIntentAction(intent.intentId);
   const Icon = getIntentDomainIcon(domain);
-  const style = getDomainStyle(domain);
+  const style = getIntentDomainStyle(domain);
 
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `intent-${intent.intentId}`,
