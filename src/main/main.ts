@@ -17,6 +17,7 @@ import { SequenceLibraryService } from './sequence-library-service';
 import { SequenceScheduler } from './sequence-scheduler';
 import { SequenceExecutor } from './sequence-executor';
 import { OverlayBus } from './overlay/overlay-bus';
+import { OverlayServer } from './overlay/overlay-server';
 
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -39,6 +40,7 @@ let sequenceLibrary: SequenceLibraryService;
 let sequenceScheduler: SequenceScheduler;
 let sequenceExecutor: SequenceExecutor;
 let overlayBus: OverlayBus;
+let overlayServer: OverlayServer;
 
 
 
@@ -91,6 +93,13 @@ app.on('ready', () => {
   
   // Initialize Overlay Bus
   overlayBus = new OverlayBus();
+
+  // Initialize Overlay Server (HTTP + WebSocket)
+  const overlayPort = configService.getAny('overlay.port') as number || 9100;
+  overlayServer = new OverlayServer(overlayBus, overlayPort);
+  overlayServer.start().catch((err) => {
+    console.error('[Main] Overlay server failed to start:', err);
+  });
   
   // Use dist-electron/extensions (which is __dirname/../extensions in compiled structure)
   // In development/tsc structure: dist-electron/main/main.js -> dist-electron/extensions
@@ -377,6 +386,15 @@ app.on('ready', () => {
     return sequenceScheduler.getHistory();
   });
 
+  // Overlay IPC
+  ipcMain.handle('overlay:getUrl', () => overlayServer.getUrl());
+  ipcMain.handle('overlay:getOverlays', () => overlayBus.getOverlays());
+  ipcMain.handle('overlay:getRegionAssignments', () => overlayBus.getRegionAssignments());
+  ipcMain.handle('overlay:setRegionOwner', (_, region: string, extensionId: string) => {
+    overlayBus.setRegionOwner(region as any, extensionId);
+    return true;
+  });
+
   // Capability Catalog IPC
   ipcMain.handle('catalog:intents', async () => {
     return sequenceLibrary.getRegisteredIntents();
@@ -399,6 +417,9 @@ app.on('window-all-closed', async () => {
 });
 
 app.on('will-quit', async () => {
+  if (overlayServer) {
+    await overlayServer.stop();
+  }
   if (extensionHost) {
     await extensionHost.stop();
   }
