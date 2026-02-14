@@ -10,6 +10,7 @@
 import React, { useState, useEffect } from 'react';
 import { Zap, Loader2 } from 'lucide-react';
 import { SequenceProgress, PortableSequence, ExecutionResult } from '../../types';
+import { ProgressRing } from './ProgressRing';
 
 interface SequencesDashboardCardProps {
   onClick: () => void;
@@ -93,21 +94,36 @@ export const SequencesDashboardCard: React.FC<SequencesDashboardCardProps> = ({ 
       </div>
 
       {/* Body */}
-      <div className="z-10">
-        <div className="text-2xl font-jetbrains font-bold text-white mb-1">
-          {statusText}
-        </div>
-        <div className="text-xs text-muted-foreground font-rajdhani">
-          {isExecuting ? (
-            <span className="flex items-center gap-1">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Step {currentProgress!.currentStep}/{currentProgress!.totalSteps}: {currentProgress!.stepIntent}
-            </span>
-          ) : lastResult ? (
-            <span>{lastResult.sequenceName} · {lastResult.status}</span>
-          ) : (
-            <span>{sequences.length} sequences · {intentCount} intents</span>
-          )}
+      <div className="z-10 flex items-center gap-4">
+        {/* Progress ring during execution, otherwise text status */}
+        {isExecuting && currentProgress ? (
+          <ProgressRing
+            progress={
+              currentProgress.totalSteps > 0
+                ? Math.round((currentProgress.currentStep / currentProgress.totalSteps) * 100)
+                : 0
+            }
+            size={56}
+            strokeWidth={5}
+            label={`${currentProgress.currentStep}/${currentProgress.totalSteps}`}
+          />
+        ) : null}
+        <div>
+          <div className="text-2xl font-jetbrains font-bold text-white mb-1">
+            {statusText}
+          </div>
+          <div className="text-xs text-muted-foreground font-rajdhani">
+            {isExecuting && currentProgress ? (
+              <span className="flex items-center gap-1">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                {currentProgress.stepIntent}
+              </span>
+            ) : lastResult ? (
+              <span>{lastResult.sequenceName} · {lastResult.status}</span>
+            ) : (
+              <span>{sequences.length} sequences · {intentCount} intents</span>
+            )}
+          </div>
         </div>
       </div>
 

@@ -19,6 +19,7 @@ import { SequenceLibrary } from '../components/sequences/SequenceLibrary';
 import { SequenceDetail } from '../components/sequences/SequenceDetail';
 import { SequenceBuilder } from '../components/sequences/SequenceBuilder';
 import { SequenceExecutionHistory } from '../components/sequences/SequenceExecutionHistory';
+import { ExecutionProgressBar } from '../components/sequences/ExecutionProgressBar';
 import { Zap, History, ChevronDown, ChevronRight } from 'lucide-react';
 
 export const SequencesPanel: React.FC = () => {
@@ -211,6 +212,13 @@ export const SequencesPanel: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* Execution Progress Bar */}
+      <ExecutionProgressBar
+        progress={currentProgress}
+        isExecuting={isExecuting}
+        sequenceName={sequences.find((s) => s.id === executingSequenceId)?.name}
+      />
 
       {/* Two-column layout */}
       <div className="flex-1 flex gap-4 min-h-0">
