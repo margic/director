@@ -84,6 +84,21 @@
         }
       }
     ],
+    "overlays": [
+      {
+        "id": "race-info",
+        "region": "top-bar",
+        "title": "Race Information Bar",
+        "template": "RaceInfoBar"
+      },
+      {
+        "id": "flag-alert",
+        "region": "center-popup",
+        "title": "Flag Change Alert",
+        "template": "FlagAlert",
+        "autoHide": 5000
+      }
+    ],
     "settings": {
       "iracing.enabled": {
         "type": "boolean",

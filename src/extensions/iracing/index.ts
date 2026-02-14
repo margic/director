@@ -6,6 +6,11 @@ interface ExtensionAPI {
   registerIntentHandler(intent: string, handler: (payload: any) => Promise<void>): void;
   emitEvent(event: string, payload: any): void;
   log(level: 'info' | 'warn' | 'error', message: string): void;
+  overlay: {
+    updateOverlay(overlayId: string, data: Record<string, unknown>): Promise<void>;
+    showOverlay(overlayId: string): Promise<void>;
+    hideOverlay(overlayId: string): Promise<void>;
+  };
 }
 
 // Constants
@@ -31,6 +36,7 @@ let FindWindowA: any = null;
 
 let checkInterval: NodeJS.Timeout | null = null;
 let isConnected = false;
+let lastFlagState: string | null = null;
 
 export async function activate(director: ExtensionAPI) {
     directorAPI = director;
@@ -111,10 +117,69 @@ function checkConnection(director: ExtensionAPI) {
             isConnected = running;
             director.log('info', `Sim Connection Status: ${isConnected ? 'Connected' : 'Disconnected'}`);
             director.emitEvent('iracing.connectionStateChanged', { connected: isConnected });
+
+            // Show/hide overlays based on connection state
+            if (isConnected) {
+                // Show race-info overlay with sample data (in production, read from telemetry)
+                director.overlay.updateOverlay('race-info', {
+                    lap: 'Lap 12/25',
+                    flag: 'green',
+                    leader: 'John Smith',
+                    leaderCarNum: '42',
+                    gap: 'Leader',
+                }).catch(err => director.log('error', `Failed to update race-info overlay: ${err.message}`));
+                director.overlay.showOverlay('race-info').catch(err => director.log('error', `Failed to show race-info overlay: ${err.message}`));
+            } else {
+                // Hide overlays when disconnected
+                director.overlay.hideOverlay('race-info').catch(err => director.log('error', `Failed to hide race-info overlay: ${err.message}`));
+                director.overlay.hideOverlay('flag-alert').catch(err => director.log('error', `Failed to hide flag-alert overlay: ${err.message}`));
+                lastFlagState = null;
+            }
+        }
+
+        // Poll session data if connected (placeholder — production would read iRacing shared memory)
+        if (isConnected) {
+            pollSessionData(director);
         }
     } catch (error: any) {
         director.log('error', `Error checking connection: ${error.message}`);
     }
+}
+
+/**
+ * Placeholder for telemetry polling.
+ * In production, this would read iRacing shared memory via IRSDK to get:
+ * - Current lap count
+ * - Total laps
+ * - Session flag state
+ * - Leader car number
+ * - Leader driver name
+ * - Gap to leader (for non-leaders)
+ */
+function pollSessionData(director: ExtensionAPI) {
+    // Simulate flag change detection (in production, read from telemetry)
+    // For demo purposes, randomly change flag every 30 seconds
+    const flags = ['green', 'yellow', 'white', 'checkered'];
+    const currentFlag = flags[Math.floor(Date.now() / 30000) % flags.length];
+    
+    if (currentFlag !== lastFlagState && lastFlagState !== null) {
+        // Flag changed — show alert
+        director.overlay.updateOverlay('flag-alert', {
+            flag: currentFlag,
+            message: currentFlag === 'yellow' ? 'Caution' : currentFlag === 'green' ? 'Race Restarted' : 'Last Lap',
+        }).catch(err => director.log('error', `Failed to update flag-alert: ${err.message}`));
+        director.overlay.showOverlay('flag-alert').catch(err => director.log('error', `Failed to show flag-alert: ${err.message}`));
+    }
+    lastFlagState = currentFlag;
+
+    // Update race-info bar with current data
+    director.overlay.updateOverlay('race-info', {
+        lap: `Lap ${Math.floor(Date.now() / 5000) % 25 + 1}/25`,
+        flag: currentFlag,
+        leader: 'John Smith',
+        leaderCarNum: '42',
+        gap: 'Leader',
+    }).catch(err => director.log('error', `Failed to update race-info: ${err.message}`));
 }
 
 function handleShowLiveCam(payload: { carNum: string, camGroup?: string, camNum?: string }) {
