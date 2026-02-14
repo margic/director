@@ -1,0 +1,249 @@
+/**
+ * Overlay CSS — OBS-specific styles for the broadcast overlay SPA.
+ *
+ * Transparent canvas, region positioning, enter/exit animations.
+ * Uses the same brand tokens as the main Electron app.
+ *
+ * See: documents/design_sequence_ux_enhancements.md §6.6
+ * See: documents/implementation_plan_ux_enhancements.md §Sprint 2.4
+ */
+
+/* ─── Fonts ────────────────────────────────────────────────────────── */
+
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* ─── Canvas ───────────────────────────────────────────────────────── */
+
+.overlay-canvas {
+  position: relative;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: transparent;
+  font-family: 'Rajdhani', sans-serif;
+  color: #ffffff;
+}
+
+/* ─── Region Positions ─────────────────────────────────────────────── */
+
+.overlay-region {
+  position: absolute;
+  pointer-events: none;
+}
+
+/* Top bar: full width, anchored to top */
+.overlay-region-top-bar {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: auto;
+}
+
+/* Lower third: centered, bottom third of screen */
+.overlay-region-lower-third {
+  bottom: 80px;
+  left: 120px;
+  right: 120px;
+  height: auto;
+}
+
+/* Ticker: full width, very bottom edge */
+.overlay-region-ticker {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  overflow: hidden;
+}
+
+/* Center popup: centered on screen */
+.overlay-region-center-popup {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: auto;
+  height: auto;
+}
+
+/* Corner: top-left */
+.overlay-region-corner-top-left {
+  top: 24px;
+  left: 24px;
+  width: auto;
+  height: auto;
+}
+
+/* Corner: top-right */
+.overlay-region-corner-top-right {
+  top: 24px;
+  right: 24px;
+  width: auto;
+  height: auto;
+}
+
+/* ─── Overlay Animations ───────────────────────────────────────────── */
+
+.overlay-enter {
+  animation: overlay-slide-in 400ms ease-out forwards;
+}
+
+.overlay-exit {
+  animation: overlay-slide-out 300ms ease-in forwards;
+}
+
+@keyframes overlay-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlay-slide-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+/* ─── Region-specific animations ───────────────────────────────────── */
+
+/* Top bar slides down */
+.overlay-region-top-bar .overlay-enter {
+  animation-name: overlay-slide-down;
+}
+
+.overlay-region-top-bar .overlay-exit {
+  animation-name: overlay-slide-up;
+}
+
+@keyframes overlay-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes overlay-slide-up {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+/* Ticker slides left (scroll) */
+.overlay-region-ticker .overlay-enter {
+  animation-name: overlay-slide-left-in;
+}
+
+@keyframes overlay-slide-left-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Center popup scales in */
+.overlay-region-center-popup .overlay-enter {
+  animation-name: overlay-scale-in;
+  animation-duration: 300ms;
+}
+
+.overlay-region-center-popup .overlay-exit {
+  animation-name: overlay-scale-out;
+  animation-duration: 200ms;
+}
+
+@keyframes overlay-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes overlay-scale-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+}
+
+/* ─── Connection Indicator ─────────────────────────────────────────── */
+
+.overlay-connection-indicator {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  padding: 4px 12px;
+  background: rgba(255, 95, 31, 0.8);
+  color: #fff;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  border-radius: 4px;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* ─── Common Template Styles ───────────────────────────────────────── */
+
+.overlay-panel {
+  background: rgba(9, 11, 16, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(40, 42, 48, 0.6);
+  border-radius: 8px;
+  padding: 12px 20px;
+}
+
+.overlay-panel-accent {
+  border-left: 3px solid #FF5F1F;
+}
+
+.overlay-text-primary {
+  font-family: 'Rajdhani', sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.overlay-text-data {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+}
+
+.overlay-text-muted {
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
