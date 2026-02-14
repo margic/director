@@ -10,7 +10,18 @@ export interface ExtensionManifest {
     events?: EventContribution[];
     settings?: Record<string, any>;
     views?: ViewsContribution | ViewContribution[]; // Object (spec) or Array (legacy)
+    overlays?: OverlayManifestContribution[];
   };
+}
+
+/** Overlay contribution declared in an extension's package.json manifest. */
+export interface OverlayManifestContribution {
+  id: string;
+  region: string;
+  title: string;
+  template: string;
+  autoHide?: number;
+  priority?: number;
 }
 
 export interface CommandContribution {
@@ -88,6 +99,11 @@ export interface ExtensionAPI {
   
   // Log to the Director console
   log(level: 'info' | 'warn' | 'error', message: string): void;
+
+  // Overlay API — update, show, hide overlays declared in contributes.overlays
+  updateOverlay(overlayId: string, data: Record<string, unknown>): void;
+  showOverlay(overlayId: string): void;
+  hideOverlay(overlayId: string): void;
 }
 
 // IPC Messages
