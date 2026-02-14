@@ -373,86 +373,228 @@ The ring is an SVG circle with `stroke-dasharray` animated to show progress perc
 
 ---
 
-## 6. Architectural Constraint: OBS Browser Source Overlay
+## 6. Architectural Constraint: OBS Broadcast Overlay System
 
 ### 6.1 Requirement
 
-Sequence Executor UI components must be **reusable as OBS overlays** via OBS Browser Source. This means a subset of the sequence UI (primarily execution progress visualization) must render in a **standalone web page** served over HTTP, with **no dependency on Electron APIs**.
+The Director app must serve a **broadcast overlay** via OBS Browser Source that shows **what the Director is doing** in human-readable, broadcast-quality graphics. This is **not** the sequence editor — viewers never see intent IDs, payloads, or technical internals. They see a cinematic representation of Director activity.
 
-OBS Browser Sources load a URL and composite it over the video output. This enables:
-- **Live broadcast viewers** see what sequence is running (e.g., "Safety Car Protocol — Step 3/5")
-- **Production value** — cinematic lower-third graphics showing automation activity
-- **Transparency** — viewers can see what the Director AI is doing in real time
+**Critical distinction:**
 
-### 6.2 Current Architecture Gap
+| Audience | Sees | Example |
+|:---|:---|:---|
+| **Director operator** (Electron app) | Intent IDs, payload key-values, variable references, execution logs | `obs.switchScene` → `sceneName: "Track Map"` |
+| **Broadcast viewers** (OBS overlay) | Human-readable activity labels, progress, race info | "Switching to Track Overview" · Step 3/5 |
 
-| Requirement | Current State |
+Additionally, the overlay must be **extensible** — not hardcoded to sequence progress. Any extension should be able to contribute its own overlay graphics:
+
+| Extension | Could Contribute |
 |:---|:---|
-| HTTP server to serve overlay HTML | **Does not exist** — must be created |
-| WebSocket server for real-time push | **Does not exist** — need `ws` package |
-| Components without `window.electronAPI` | **All components call IPC directly** — must be decoupled |
-| Transparent background page | **Does not exist** — need standalone overlay SPA |
-| Overlay view type | Type exists in `ViewRegistry` but has zero infrastructure |
+| **Sequence Executor** | "Safety Car Protocol — Step 3/5" activity indicator |
+| **iRacing** | Lap counter, flag status, leader board, timing gaps |
+| **Discord** | Voice channel status, who's speaking |
+| **YouTube** | Live chat ticker, viewer count |
+| **OBS** | Current scene name, recording/streaming status |
 
-### 6.3 Solution: Dual Transport Architecture
+### 6.2 Design: Extensible Overlay Host
 
-The key insight is a **Data Provider abstraction** that decouples UI components from their data transport.
+The overlay is **not** a UI component reuse play. It's a dedicated **broadcast graphics system** with its own architecture:
 
-#### Data Provider Interface
+#### 6.2.1 Region-Based Layout
+
+The 1920×1080 overlay canvas is divided into **named regions** — fixed screen areas that extensions claim:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ corner-top-left         top-bar                   corner-top-right  │
+│ ┌────────────┐  ┌──────────────────────────────┐  ┌─────────────┐  │
+│ │            │  │                              │  │             │  │
+│ └────────────┘  └──────────────────────────────┘  └─────────────┘  │
+│                                                                     │
+│                        center-popup                                 │
+│                  ┌──────────────────────┐                           │
+│                  │                      │                           │
+│                  └──────────────────────┘                           │
+│                                                                     │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  ticker (full-width, scrolling)                             │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  lower-third (full-width)                                   │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+| Region | Position | Typical Use |
+|:---|:---|:---|
+| `top-bar` | Top center, full width | Race info: lap, flag, leader |
+| `corner-top-left` | Top left | Logo, session name |
+| `corner-top-right` | Top right | Voice status, viewer count |
+| `lower-third` | Bottom, full width | Director activity, sequence progress |
+| `ticker` | Above lower third, full width | Chat feed, news ticker |
+| `center-popup` | Center, modal | Alerts: safety car, red flag, winner |
+
+Regions are **empty by default** — completely transparent until an extension sends content. Multiple extensions cannot claim the same region simultaneously; the most recent update wins, or priority is configurable.
+
+#### 6.2.2 Extension Manifest: `contributes.overlays`
+
+Extensions declare overlay contributions in their `package.json` manifest, following the existing `contributes` pattern:
+
+```json
+{
+  "name": "director-iracing",
+  "contributes": {
+    "intents": [ ... ],
+    "events": [ ... ],
+    "overlays": [
+      {
+        "id": "race-info",
+        "region": "top-bar",
+        "title": "Race Information Bar",
+        "description": "Shows lap count, flag status, leader, and timing gaps",
+        "template": "race-info"
+      },
+      {
+        "id": "flag-alert",
+        "region": "center-popup",
+        "title": "Flag Change Alert",
+        "description": "Full-screen flag change announcement",
+        "template": "flag-alert",
+        "autoHide": 5000
+      }
+    ]
+  }
+}
+```
+
+#### 6.2.3 Extension API: Overlay Methods
+
+Extensions get three new methods on their API surface during `activate()`:
 
 ```typescript
-interface SequenceDataProvider {
-  // Queries
-  listSequences(filter?: SequenceFilter): Promise<PortableSequence[]>;
-  getSequence(id: string): Promise<PortableSequence | null>;
-  getHistory(): Promise<ExecutionResult[]>;
-  getIntents(): Promise<IntentCatalogEntry[]>;
-  getEvents(): Promise<EventCatalogEntry[]>;
+interface ExtensionOverlayAPI {
+  /**
+   * Send data to update the overlay region.
+   * The overlay host renders this data using the declared template.
+   */
+  updateOverlay(overlayId: string, data: Record<string, unknown>): void;
 
-  // Commands
-  execute(id: string, variables?: Record<string, unknown>): Promise<void>;
-  cancel(): Promise<void>;
+  /**
+   * Show the overlay (trigger enter animation).
+   * Called automatically on first updateOverlay() if not already visible.
+   */
+  showOverlay(overlayId: string): void;
 
-  // Subscriptions
-  onProgress(callback: (progress: SequenceProgress) => void): () => void;
-  onQueueChanged(callback: (queue: QueuedSequence[]) => void): () => void;
+  /**
+   * Hide the overlay (trigger exit animation).
+   */
+  hideOverlay(overlayId: string): void;
 }
 ```
 
-#### Two Implementations
+Usage in an extension:
 
-| Provider | Transport | Used By |
+```typescript
+// In iracing extension activate()
+export function activate(context: ExtensionContext) {
+  // ... existing intent handler registration ...
+
+  // When telemetry updates arrive:
+  iracingSDK.on('telemetry', (data) => {
+    context.updateOverlay('race-info', {
+      lap: `${data.currentLap}/${data.totalLaps}`,
+      flag: data.flagState,            // "green" | "yellow" | "red" | "white" | "checkered"
+      leader: data.leaderName,
+      leaderCarNum: data.leaderCarNum,
+      gap: data.gapToLeader,
+    });
+  });
+
+  iracingSDK.on('flagChanged', (flag) => {
+    context.showOverlay('flag-alert');
+    context.updateOverlay('flag-alert', {
+      flag: flag.type,
+      message: flag.description,    // "YELLOW FLAG — Caution on track"
+    });
+    // autoHide: 5000 in manifest handles the exit
+  });
+}
+```
+
+#### 6.2.4 Templates: How Data Becomes Graphics
+
+Extensions send **structured data** — not HTML. The overlay host maps data to visual templates. This separation means:
+
+- Extensions don't need to know about CSS, animations, or broadcast aesthetics
+- Templates can be themed/branded consistently
+- The overlay host controls layout, timing, and transitions
+
+**Built-in templates:**
+
+| Template ID | Renders | Data Shape |
 |:---|:---|:---|
-| `ElectronDataProvider` | `window.electronAPI` (IPC) | Electron renderer (main app) |
-| `WebSocketDataProvider` | WebSocket + REST on `:9100` | OBS Browser Source overlay |
+| `race-info` | Horizontal bar with key stats | `{ lap, flag, leader, gap }` |
+| `status-badge` | Small corner badge with icon + text | `{ icon, label, detail }` |
+| `ticker` | Scrolling horizontal text feed | `{ messages: [{ text, author?, time }] }` |
+| `activity-progress` | Progress bar with label + step count | `{ title, step, total, label }` |
+| `flag-alert` | Full-width centered alert with flag color | `{ flag, message }` |
+| `standings` | Mini leaderboard table | `{ positions: [{ pos, name, gap }] }` |
 
-#### React Context Delivery
+Extensions can also provide **custom templates** as HTML files in their package, referenced by path instead of built-in ID:
 
-```tsx
-const SequenceDataContext = React.createContext<SequenceDataProvider | null>(null);
-
-// In Electron renderer:
-<SequenceDataContext.Provider value={new ElectronDataProvider()}>
-  <App />
-</SequenceDataContext.Provider>
-
-// In OBS overlay:
-<SequenceDataContext.Provider value={new WebSocketDataProvider('ws://localhost:9100/ws')}>
-  <OverlayApp />
-</SequenceDataContext.Provider>
+```json
+{
+  "overlays": [{
+    "id": "custom-timing",
+    "region": "top-bar",
+    "templatePath": "overlay/timing-tower.html"
+  }]
+}
 ```
 
-Components use `useSequenceData()` hook instead of calling `window.electronAPI` directly:
+### 6.3 Sequence Executor Overlay Contribution
 
-```tsx
-function useSequenceData(): SequenceDataProvider {
-  const ctx = React.useContext(SequenceDataContext);
-  if (!ctx) throw new Error('SequenceDataProvider not found');
-  return ctx;
+The Sequence Executor registers as an overlay contributor using the same system — it's not special-cased:
+
+```typescript
+// In sequence-scheduler.ts or main.ts initialization
+overlayBus.registerOverlay('sequences', {
+  id: 'director-activity',
+  region: 'lower-third',
+  title: 'Director Activity',
+  template: 'activity-progress',
+});
+
+// On progress events:
+sequenceScheduler.on('progress', (progress: SequenceProgress) => {
+  overlayBus.updateOverlay('sequences.director-activity', {
+    title: progress.sequenceName,             // "Safety Car Protocol"
+    step: progress.currentStep,                // 3
+    total: progress.totalSteps,                // 5
+    label: progress.stepLabel || progress.stepIntent,  // "Switching to Track Overview" (label) or fallback to intent ID
+  });
+});
+
+// On sequence complete:
+sequenceScheduler.on('complete', (result) => {
+  // Auto-hide after 3 seconds
+  setTimeout(() => overlayBus.hideOverlay('sequences.director-activity'), 3000);
+});
+```
+
+**Key detail:** The overlay shows `progress.stepLabel` — the human-readable label from `step.metadata.label` — **not** the intent ID. If no label exists, a human-readable fallback is generated from the intent:
+
+```typescript
+function humanizeIntent(intent: string): string {
+  // "obs.switchScene" → "Switching Scene"
+  // "broadcast.muteDrivers" → "Muting Drivers"  
+  // "communication.talkToChat" → "Sending Chat Message"
+  const [domain, action] = intent.split('.');
+  return action
+    .replace(/([A-Z])/g, ' $1')     // camelCase → spaced
+    .replace(/^./, c => c.toUpperCase())
+    .trim();
 }
-
-// In any sequence component:
-const { listSequences, onProgress } = useSequenceData();
 ```
 
 ### 6.4 Overlay Server (Main Process)
@@ -461,14 +603,10 @@ A lightweight HTTP + WebSocket server running in the Electron main process on po
 
 | Endpoint | Method | Purpose |
 |:---|:---|:---|
-| `/overlay` | GET | Serves the standalone overlay SPA (HTML + JS + CSS) |
-| `/overlay?theme=lower-third` | GET | Query param selects overlay variant |
-| `/overlay?theme=minimal` | GET | Compact status-only overlay |
-| `/overlay?theme=timeline` | GET | Full horizontal timeline rail |
-| `/api/sequences` | GET | REST: list sequences |
-| `/api/sequences/:id` | GET | REST: get sequence detail |
-| `/api/history` | GET | REST: execution history |
-| `/ws` | WS | WebSocket: real-time progress, queue, and state events |
+| `/overlay` | GET | Serves the overlay host SPA (HTML + JS + CSS) |
+| `/overlay?regions=lower-third,top-bar` | GET | Optional: only render specified regions |
+| `/api/overlays` | GET | REST: list registered overlay slots + current state |
+| `/ws` | WS | WebSocket: real-time overlay updates |
 
 **Technology**: Node.js built-in `http` module + `ws` package (no Express needed — minimal surface area).
 
@@ -476,120 +614,67 @@ A lightweight HTTP + WebSocket server running in the Electron main process on po
 
 ```typescript
 // Server → Client messages
-type OverlayMessage =
-  | { type: 'connected'; sequences: PortableSequence[]; intents: IntentCatalogEntry[] }
-  | { type: 'progress'; data: SequenceProgress }
-  | { type: 'queue-changed'; data: QueuedSequence[] }
-  | { type: 'history-changed'; data: ExecutionResult[] }
-  | { type: 'complete'; data: ExecutionResult }
-  | { type: 'error'; message: string };
+type OverlayServerMessage =
+  | { type: 'connected'; overlays: OverlaySlot[] }           // Initial state on connect
+  | { type: 'overlay:registered'; overlay: OverlaySlot }     // New overlay added
+  | { type: 'overlay:update'; id: string; data: Record<string, unknown> }  // Data update
+  | { type: 'overlay:show'; id: string }                     // Trigger enter animation
+  | { type: 'overlay:hide'; id: string }                     // Trigger exit animation
+  | { type: 'overlay:unregistered'; id: string }             // Extension deactivated
 
-// Client → Server messages (for bidirectional future use)
-type OverlayCommand =
-  | { type: 'subscribe'; topics: ('progress' | 'queue' | 'history')[] }
-  | { type: 'execute'; sequenceId: string; variables?: Record<string, unknown> };
+// Overlay slot definition
+interface OverlaySlot {
+  id: string;              // "iracing.race-info"
+  extensionId: string;     // "director-iracing"
+  region: OverlayRegion;
+  title: string;
+  template: string;
+  autoHide?: number;       // ms before auto-exit animation
+  data?: Record<string, unknown>;  // Current state (for late-joining clients)
+  visible: boolean;
+}
+
+type OverlayRegion =
+  | 'top-bar'
+  | 'lower-third'
+  | 'ticker'
+  | 'center-popup'
+  | 'corner-top-left'
+  | 'corner-top-right';
 ```
 
-### 6.5 Overlay Themes
+### 6.5 Overlay Host SPA
 
-The overlay SPA supports multiple visual themes via query parameter, all sharing the same components but with different layouts:
+The overlay host is a standalone web page that:
 
-#### Lower Third (`?theme=lower-third`)
-
-Positioned at the bottom of the 1920×1080 canvas. Shows during sequence execution, auto-hides after completion.
-
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│                                                                       │
-│                    (transparent — live video shows through)            │
-│                                                                       │
-│                                                                       │
-│                                                                       │
-├───────────────────────────────────────────────────────────────────────┤
-│ ⚡ SAFETY CAR PROTOCOL                                      Step 3/5 │
-│ ●━━━━━━━●━━━━━━━●━━━━━━━◉━━━━━━━○━━━━━━━○                           │
-│ Switch   Mute    Announce Wait    Return                    ⏱️ 1.2s  │
-│ ██████████████████████████░░░░░░░░░░░░░░░  60%                       │
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-- **Horizontal timeline rail** (not vertical — broadcast-appropriate)
-- Semi-transparent dark background (`#090B10CC`)
-- Auto-enter on execution start (slide up), auto-exit on complete (slide down)
-- Domain-colored step nodes on the rail
-
-#### Minimal (`?theme=minimal`)
-
-Corner badge — small, unobtrusive. Good for "always-on" status.
+1. Connects to `ws://localhost:9100/ws`
+2. Receives the initial overlay slot registry
+3. Renders each region as an absolutely-positioned `<div>` on a transparent 1920×1080 canvas
+4. Listens for `overlay:update` messages and re-renders the appropriate region using the declared template
+5. Applies enter/exit CSS animations on `overlay:show` / `overlay:hide`
 
 ```
-                                            ┌──────────────────────┐
-                                            │ ⚡ Safety Car  3/5   │
-                                            │ ██████████░░░░  60%  │
-                                            └──────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                                                                     │
+│  top-bar: 🏁 Lap 12/45 · GREEN · Leader: #63 Verstappen · +1.234s │
+│                                        corner-tr: 🎙️ 3 connected  │
+│                                                                     │
+│                                                                     │
+│           (transparent — live video shows through)                  │
+│                                                                     │
+│                                                                     │
+│  ticker: 💬 RaceFan42: Great battle!  ·  SpeedKing: Go #63!        │
+│                                                                     │
+│  lower-third: 🏁 RACE DIRECTOR · Safety Car Protocol               │
+│               Announcing Safety Car in chat · Step 3/5              │
+│               ████████████████████░░░░░░░░  60%                     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-- Fixed top-right position
-- Shows sequence name + progress
-- Fades in/out on execution start/end
+Extensions are **completely unaware** of overlay rendering, CSS, or OBS. They only call `updateOverlay(id, data)` — the host does the rest.
 
-#### Timeline (`?theme=timeline`)
-
-Full horizontal timeline for dedicated "director cam" views:
-
-```
-┌───────────────────────────────────────────────────────────────────────┐
-│                                                                       │
-│  ⚡ SAFETY CAR PROTOCOL — v1.0.0 — EXECUTING                        │
-│                                                                       │
-│  ✅━━━━━━━━✅━━━━━━━━⏳━━━━━━━━○━━━━━━━━○                            │
-│  Switch    Mute     Announce  Wait      Return                       │
-│  Scene     Drivers  Chat      30s       Live                         │
-│  42ms      15ms     running…  pending   pending                      │
-│                                                                       │
-│  ██████████████████████████████░░░░░░░░░░░░░░░░░░  60% · 1.2s       │
-│                                                                       │
-└───────────────────────────────────────────────────────────────────────┘
-```
-
-### 6.6 Build Architecture
-
-Vite multi-entry configuration to produce two bundles from one source tree:
-
-```typescript
-// vite.config.ts — overlay build
-export default defineConfig({
-  build: {
-    rollupOptions: {
-      input: {
-        main: 'index.html',           // Electron renderer
-        overlay: 'overlay/index.html', // OBS Browser Source
-      },
-    },
-  },
-});
-```
-
-**Shared source** (`src/renderer/components/sequences/*`) imports no Electron APIs directly — all data access goes through the `SequenceDataProvider` context.
-
-**Overlay entry** (`src/overlay/main.tsx`) imports only the subset of components needed for broadcast overlays + the `WebSocketDataProvider`.
-
-### 6.7 Component Reuse Matrix
-
-| Component | Electron App | OBS Overlay | Notes |
-|:---|:---|:---|:---|
-| `SequenceStepCard` | ✅ Detail view | ✅ Timeline theme | Core reusable unit |
-| `IntentBadge` / `IntentDomainBadge` | ✅ Everywhere | ✅ Timeline labels | Pure display |
-| `SequenceExecutionLog` | ✅ Detail view | ❌ Not overlay-appropriate | Too text-heavy for broadcast |
-| `SequenceLibrary` | ✅ Panel | ❌ No browsing in overlay | Not relevant |
-| `SequenceBuilder` | ✅ Panel | ❌ Not overlay-appropriate | Author-side only |
-| `SequenceVariablesForm` | ✅ Detail view | ❌ No input in overlay | Author-side only |
-| `ProgressBar` (new) | ✅ Detail + Dashboard | ✅ All themes | New shared component |
-| `TimelineRail` (new) | ✅ Detail view (vertical) | ✅ Overlay (horizontal) | Orientation prop |
-| `ProgressRing` (new) | ✅ Dashboard widget | ✅ Minimal theme | New shared component |
-| `SequencesDashboardCard` | ✅ Dashboard | ❌ Wrong form factor | Electron-only |
-
-### 6.8 CSS Considerations for OBS
+### 6.6 CSS Considerations for OBS
 
 OBS Browser Sources require specific CSS patterns:
 
@@ -599,38 +684,108 @@ body {
   background: transparent !important;
   overflow: hidden;
   margin: 0;
+  width: 1920px;
+  height: 1080px;
 }
 
 /* Semi-transparent containers for readability over video */
-.overlay-panel {
+.overlay-region {
+  position: absolute;
   background: rgba(9, 11, 16, 0.85);        /* --background at 85% opacity */
   backdrop-filter: blur(8px);                 /* Glass effect */
   border: 1px solid rgba(40, 42, 48, 0.6);   /* --border at 60% opacity */
 }
 
-/* Animations must be CSS-only (no JS requestAnimationFrame) for OBS performance */
-.overlay-enter { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-.overlay-exit  { animation: slideDown 0.3s cubic-bezier(0.7, 0, 0.84, 0); }
+/* Region positions */
+.region-top-bar       { top: 0; left: 10%; right: 10%; }
+.region-lower-third   { bottom: 0; left: 5%; right: 5%; }
+.region-corner-top-right { top: 16px; right: 16px; }
+.region-corner-top-left  { top: 16px; left: 16px; }
+.region-center-popup  { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.region-ticker        { bottom: 120px; left: 5%; right: 5%; }
+
+/* Animations — CSS-only for OBS performance */
+.overlay-enter { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.overlay-exit  { animation: slideDown 0.3s cubic-bezier(0.7, 0, 0.84, 0) forwards; }
 
 @keyframes slideUp {
   from { transform: translateY(100%); opacity: 0; }
   to   { transform: translateY(0); opacity: 1; }
 }
+@keyframes slideDown {
+  from { transform: translateY(0); opacity: 1; }
+  to   { transform: translateY(100%); opacity: 0; }
+}
+```
+
+### 6.7 Component Relationship: Electron App vs Overlay
+
+The Electron app (sequence editor) and the OBS overlay are **completely separate UI surfaces** with no shared React components:
+
+| Concern | Electron App | OBS Overlay |
+|:---|:---|:---|
+| **Purpose** | Operator tool — edit, inspect, execute | Broadcast graphic — show activity to viewers |
+| **Audience** | Director operator on rig PC | Stream viewers on Twitch/YouTube |
+| **Data detail** | Full: intent IDs, payloads, variables, logs | Minimal: human labels, progress, status |
+| **Interactivity** | Full: click, type, drag, execute | Read-only: no mouse/keyboard interaction |
+| **Layout** | Two-panel responsive layout | Absolute-positioned 1920×1080 regions |
+| **React components** | SequenceEditor, Builder, Library, etc. | Overlay templates (race-info, activity-progress, etc.) |
+| **Data transport** | `window.electronAPI` (Electron IPC) | WebSocket → template rendering |
+| **Background** | `bg-background` (#090B10) solid | `transparent` for OBS compositing |
+
+**What IS shared:**
+- Design tokens (colors, fonts, brand identity)
+- TypeScript types (`SequenceProgress`, `OverlaySlot`, etc.)
+- Tailwind config (so overlay templates match the brand aesthetic)
+
+**What is NOT shared:**
+- React components — the overlay templates are purpose-built for broadcast
+- Data providers — no `SequenceDataProvider` abstraction needed since the surfaces serve entirely different purposes
+- Layout patterns — fixed 1920×1080 absolute positioning vs responsive flex layout
+
+### 6.8 Build Architecture
+
+```
+src/
+  renderer/           → Electron app (existing)
+  overlay/            → OBS overlay host (new)
+    main.tsx          → Overlay SPA entry
+    OverlayHost.tsx   → Region layout + WebSocket connection
+    templates/        → Built-in overlay templates
+      RaceInfoBar.tsx
+      ActivityProgress.tsx
+      StatusBadge.tsx
+      ChatTicker.tsx
+      FlagAlert.tsx
+      Standings.tsx
+```
+
+Vite multi-entry build:
+
+```typescript
+// vite.config.ts
+build: {
+  rollupOptions: {
+    input: {
+      main: 'index.html',           // Electron renderer
+      overlay: 'overlay/index.html', // OBS Browser Source
+    },
+  },
+}
 ```
 
 ### 6.9 Impact on Phase 2 Implementation
 
-This constraint **elevates several P1 items** and adds new work:
-
-| Item | Original Priority | New Priority | Reason |
-|:---|:---|:---|:---|
-| Timeline Rail (§2.2) | P1 | **P0** | Core overlay component — must support both vertical (app) and horizontal (overlay) |
-| Progress Bar (§2.5) | P1 | **P0** | Required for every overlay theme |
-| Domain Icon System (§2.1) | P1 | P1 | Used in overlay timeline labels |
-| Data Provider abstraction | N/A | **P0** | Must decouple all components from `window.electronAPI` before any visual work |
-| Overlay Server | N/A | **P0** | HTTP + WebSocket server in main process |
-| Overlay entry point + themes | N/A | **P1** | Standalone SPA with theme selector |
-| `@dnd-kit` Drag & Drop (§2.3) | P2 | P2 | Electron-only, not affected by overlay constraint |
+| Item | Priority | Reason |
+|:---|:---|:---|
+| Overlay Bus + Extension API (`registerOverlay`, `updateOverlay`, `hideOverlay`) | **P0** | Core infrastructure — all overlays depend on this |
+| Overlay Server (HTTP + WebSocket) | **P0** | Serves the overlay to OBS |
+| Overlay Host SPA + region layout | **P0** | The canvas that renders everything |
+| `activity-progress` template (Sequence Executor) | **P1** | First overlay contributor |
+| `race-info` template + iRacing overlay registration | **P1** | Highest-value broadcast graphic |
+| Extension manifest `contributes.overlays` parsing | **P1** | Enables declarative overlay registration |
+| Additional templates (ticker, badge, flag-alert) | **P2** | Expand as extensions need them |
+| Custom template support (extension-provided HTML) | **P3** | Future extensibility |
 
 ### 6.10 New Dependency
 
@@ -639,19 +794,15 @@ npm install ws
 npm install -D @types/ws
 ```
 
-`ws` is the standard Node.js WebSocket library (~50KB). It runs in the main process only — the overlay client uses the browser-native `WebSocket` API.
-
 ### 6.11 OBS Setup Instructions (User-Facing)
 
-When implemented, users add the overlay in OBS via:
-
 1. **Sources** → **+** → **Browser**
-2. **URL**: `http://localhost:9100/overlay?theme=lower-third`
+2. **URL**: `http://localhost:9100/overlay`
 3. **Width**: `1920`, **Height**: `1080`
-4. **Custom CSS**: *(none needed — transparency handled internally)*
-5. **FPS**: `30` (sufficient for status updates)
+4. **Custom CSS**: *(none — transparency built in)*
+5. **FPS**: `30`
 
-The overlay connects automatically when Director is running and reconnects on disconnection.
+Optional: filter to specific regions: `http://localhost:9100/overlay?regions=lower-third,top-bar`
 
 ---
 
@@ -659,15 +810,20 @@ The overlay connects automatically when Director is running and reconnects on di
 
 | Priority | Enhancement | Effort | Impact |
 |:---|:---|:---|:---|
-| **P0** | Data Provider abstraction + React Context | Medium | **Critical** — unblocks all component sharing |
-| **P0** | Overlay Server (HTTP + WebSocket) | Medium | **Critical** — enables OBS Browser Source |
-| **P0** | Timeline Rail component (vertical + horizontal) | Medium | High — core visual for both app and overlay |
-| **P0** | Progress Bar component | Small | High — required for all overlay themes |
-| **P1** | Domain Icon System (§2.1) | Small | High — used in overlay timeline labels |
-| **P1** | Overlay SPA entry point + 3 themes | Medium | High — the deliverable overlay |
-| **P1** | Enhanced Library Cards (§2.4) | Medium | Medium — Electron app only |
-| **P2** | Drag & Drop Builder (§2.3) | Large | High — Electron app only, not overlay-affected |
-| **P3** | Micro-Interactions (§2.6) | Small each | Medium — polish |
+| **P0** | Overlay Bus + Extension API (`registerOverlay`, `updateOverlay`, `hideOverlay`) | Medium | **Critical** — core infrastructure for all overlay contributions |
+| **P0** | Overlay Server (HTTP + WebSocket on `:9100`) | Medium | **Critical** — serves overlay to OBS |
+| **P0** | Overlay Host SPA + region layout | Medium | **Critical** — the canvas that renders everything |
+| **P1** | `activity-progress` template (Sequence Executor contribution) | Small | High — first overlay contributor |
+| **P1** | `race-info` template + iRacing overlay registration | Small | High — highest-value broadcast graphic |
+| **P1** | Extension manifest `contributes.overlays` parsing in Extension Host | Medium | High — enables declarative overlay registration |
+| **P1** | Domain Icon System (§2.1) — Electron app | Small | High — instant visual improvement in operator UI |
+| **P1** | Vertical Timeline Rail (§2.2) — Electron app | Medium | High — transforms step list in operator UI |
+| **P1** | Progress Bar (§2.5) — Electron app | Small | High — execution feedback in operator UI |
+| **P2** | Enhanced Library Cards (§2.4) — Electron app | Medium | Medium — better scanning |
+| **P2** | Drag & Drop Builder (§2.3) — Electron app | Large | High — flagship builder feature |
+| **P2** | Additional overlay templates (ticker, badge, flag-alert, standings) | Medium | Medium — expand as extensions need them |
+| **P3** | Micro-Interactions (§2.6) — Electron app | Small each | Medium — polish |
+| **P3** | Custom template support (extension-provided HTML) | Medium | Low — future extensibility |
 
 ---
 
@@ -680,5 +836,6 @@ The overlay connects automatically when Director is running and reconnects on di
 | 3 | Should collapsed step cards be the default in Detail view, expanding on click? | A) All expanded (current) / B) Collapsed, expand on click / C) Smart: collapse payload if > 3 fields |
 | 4 | Should the progress ring SVG live in the Dashboard widget or use a shared component? | A) Dashboard-only / B) Shared `<ProgressRing>` component |
 | 5 | Should the overlay server port be configurable or fixed at `9100`? | A) Fixed `9100` / B) Configurable via Settings page |
-| 6 | Should the overlay support bidirectional control (execute sequences from OBS)? | A) Read-only (progress display) / B) Bidirectional (allow triggering from overlay) |
-| 7 | Should overlay themes be bundled or user-creatable (custom HTML/CSS templates)? | A) Bundled only / B) Allow custom themes from a themes directory |
+| 6 | What happens when two extensions claim the same overlay region? | A) Last-write-wins / B) Priority number in manifest / C) User picks in Settings |
+| 7 | Should overlay templates be bundled-only or support user-creatable HTML templates? | A) Bundled only / B) Allow custom themes from a themes directory |
+| 8 | Should the overlay host include an admin panel for toggling regions on/off from the Electron app? | A) Yes, in Settings / B) No, manage via OBS URL params |
