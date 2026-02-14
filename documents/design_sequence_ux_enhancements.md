@@ -823,19 +823,22 @@ Optional: filter to specific regions: `http://localhost:9100/overlay?regions=low
 | **P2** | Drag & Drop Builder (§2.3) — Electron app | Large | High — flagship builder feature |
 | **P2** | Additional overlay templates (ticker, badge, flag-alert, standings) | Medium | Medium — expand as extensions need them |
 | **P3** | Micro-Interactions (§2.6) — Electron app | Small each | Medium — polish |
-| **P3** | Custom template support (extension-provided HTML) | Medium | Low — future extensibility |
+
+> Note: Custom template support has been promoted from P3 to P1 per Decision Q7 — see implementation plan.
 
 ---
 
-## 8. Open Questions
+## 8. Open Questions — RESOLVED
 
-| # | Question | Options |
+All questions resolved on 2026-02-14. See `documents/implementation_plan_ux_enhancements.md` §0 for full rationale.
+
+| # | Question | Decision |
 |:---|:---|:---|
-| 1 | Should the three-panel builder layout replace the current two-panel layout globally, or only activate in "edit" mode? | A) Always three-panel / B) Two-panel for viewing, three-panel for editing |
-| 2 | Should `@dnd-kit` be added now or deferred to avoid scope creep? | A) Add in Phase 2 / B) Defer to Phase 3 |
-| 3 | Should collapsed step cards be the default in Detail view, expanding on click? | A) All expanded (current) / B) Collapsed, expand on click / C) Smart: collapse payload if > 3 fields |
-| 4 | Should the progress ring SVG live in the Dashboard widget or use a shared component? | A) Dashboard-only / B) Shared `<ProgressRing>` component |
-| 5 | Should the overlay server port be configurable or fixed at `9100`? | A) Fixed `9100` / B) Configurable via Settings page |
-| 6 | What happens when two extensions claim the same overlay region? | A) Last-write-wins / B) Priority number in manifest / C) User picks in Settings |
-| 7 | Should overlay templates be bundled-only or support user-creatable HTML templates? | A) Bundled only / B) Allow custom themes from a themes directory |
-| 8 | Should the overlay host include an admin panel for toggling regions on/off from the Electron app? | A) Yes, in Settings / B) No, manage via OBS URL params |
+| 1 | Three-panel builder: always or edit-mode only? | **A) Always three-panel** |
+| 2 | Add `@dnd-kit` now or defer? | **A) Add in Phase 2** |
+| 3 | Step cards default expanded or collapsed? | **B) All collapsed, expand on click** |
+| 4 | Progress ring: dashboard-only or shared? | **B) Shared `<ProgressRing>` component** |
+| 5 | Overlay server port: fixed or configurable? | **B) Configurable via Settings, default 9100** |
+| 6 | Region conflict resolution? | **C) User picks in Settings** |
+| 7 | Overlay templates: bundled or extension-provided? | **Extension-provided HTML (no sandboxing — trusted codebase)** |
+| 8 | Admin panel for overlay regions? | **A) Yes, in Settings** |

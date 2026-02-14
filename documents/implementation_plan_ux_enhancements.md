@@ -1,6 +1,6 @@
 # Implementation Plan: Sequence UX Enhancements + Broadcast Overlay System
 
-## Status: PLAN — Ready for Review
+## Status: PLAN — Decisions Finalized
 
 **Date**: 2026-02-14
 **Branch**: `extensions`
@@ -12,17 +12,17 @@
 
 ## 0. Pre-Implementation Decisions
 
-These open questions from the design doc **must be resolved before coding begins**. Each has a recommended default.
+All 8 decisions have been resolved. These are **final** and should not be revisited without new information.
 
-| # | Question | Recommendation | Rationale |
+| # | Question | Decision | Rationale |
 |:---|:---|:---|:---|
-| 1 | Three-panel builder: always or edit-mode only? | **B) Two-panel viewing, three-panel editing** | Avoids empty Properties panel when just viewing a sequence |
-| 2 | Add `@dnd-kit` now or defer? | **A) Add in Phase 2** | DnD builder is Phase 2 work; install the dep when we build it |
-| 3 | Step card default: expanded or collapsed? | **C) Smart collapse: collapse if > 3 payload fields** | Best of both worlds; small payloads stay visible |
+| 1 | Three-panel builder: always or edit-mode only? | **A) Always three-panel** | Consistent layout — no mode switching, palette always available for discovery |
+| 2 | Add `@dnd-kit` now or defer? | **A) Add in Phase 2** | Earlier prototyping; install the dep when we build the UI enhancements |
+| 3 | Step card default: expanded or collapsed? | **B) All collapsed, expand on click** | Maximum timeline density; users click to drill into payload detail |
 | 4 | Progress ring: dashboard-only or shared? | **B) Shared `<ProgressRing>` component** | Reusable in dashboard widget + execution header + overlay template |
 | 5 | Overlay server port: fixed or configurable? | **B) Configurable via Settings**, default `9100` | Allows conflict resolution without code changes |
-| 6 | Region conflict resolution? | **B) Priority number in manifest** | Predictable, declarative; fallback to last-write-wins for equal priority |
-| 7 | Custom templates: bundled-only or user-creatable? | **A) Bundled only (for now)** | Ship V1 with built-in templates; extension-provided HTML is P3 |
+| 6 | Region conflict resolution? | **C) User picks in Settings** | Most flexible — operator controls which extension owns each region |
+| 7 | Custom templates: bundled or extension-provided? | **Extension-provided HTML templates (no sandboxing)** | Extensions are part of the codebase and vetted before merge; full creative control without security overhead |
 | 8 | Admin panel for overlay regions? | **A) Yes, in Settings** | Operators need visibility into what's being broadcast |
 
 ---
@@ -128,7 +128,7 @@ Phase 4: DnD Builder + Polish                   ← Depends on Phase 1
      - Skipped: hollow yellow
    - Renders step content to the right of the rail (step number, domain icon, intent, duration)
    - Expand/collapse: collapsed shows intent + status only; expanded shows payload key-values
-   - Smart collapse default: expand if ≤ 3 payload fields, collapse if > 3
+   - **Default: all collapsed** (Decision Q3). User clicks to expand any step.
 
 2. **Create `TimelineRail.tsx`**
    - Props: `steps: SequenceStep[]`, `stepResultMap: Map<number, StepResult>`, `currentStepIndex?: number`, `isExecuting: boolean`
@@ -318,13 +318,13 @@ After Sprints 1.1–1.4, the Sequences panel is visually transformed:
      - `hideOverlay(extensionId: string, overlayId: string): void` — sets visible=false, handles autoHide timer, emits `'hide'`
      - `getOverlays(): OverlaySlot[]` — returns all slots (for initial state on WS connect)
      - `getOverlaysByRegion(region: OverlayRegion): OverlaySlot[]` — filtered by region
-   - Region conflict handling: when two overlays target the same region, the one with higher `priority` wins; equal priority = last-write-wins
+   - Region conflict handling: **user picks region owner in Settings** (Decision Q6). OverlayBus stores a `regionAssignments: Map<OverlayRegion, string>` mapping each region to the extension ID the user has chosen. When multiple overlays target the same region, only the user-assigned extension's overlay is active. Default assignment: first extension to register wins until the user changes it. The Settings admin panel (Sprint 3.5) provides the UI for reassignment.
    - AutoHide: `setTimeout` → `hideOverlay()` after `autoHide` ms, cleared on new `updateOverlay`
 
 **Acceptance Criteria:**
 - OverlayBus manages overlay slot lifecycle (register/update/show/hide/unregister)
 - Events emitted for every state change
-- Region conflict resolution works with priority
+- Region ownership is user-configurable; only the assigned extension renders in a contested region
 - AutoHide timers work correctly (cleared on update, fire on timeout)
 
 ---
@@ -594,8 +594,10 @@ After Sprints 2.1–2.5, the overlay infrastructure is complete:
 **Tasks:**
 
 1. **Create template registry** (`index.ts`)
-   - Export `getTemplate(templateId: string): React.ComponentType<{ data: Record<string, unknown> }>` 
-   - Maps template ID → component
+   - Export `getTemplate(templateId: string): React.ComponentType<{ data: Record<string, unknown> }> | null` 
+   - Maps built-in template ID → component
+   - Also supports extension-provided HTML templates (Decision Q7): if `templateId` is a path (contains `/`), load from the extension's overlay directory. Extensions are part of the codebase and vetted before merge, so no sandboxing is needed.
+   - Built-in templates are React components; extension-provided templates are HTML files rendered in an `<iframe>` or injected via `dangerouslySetInnerHTML` (safe because extensions are trusted code)
 
 2. **Create `ActivityProgress.tsx`** (P1 — First template)
    - Data shape: `{ title: string, step: number, total: number, label: string }`
@@ -906,10 +908,11 @@ After Sprints 3.1–3.5:
      - **JSON Preview**: collapsible raw JSON for entire sequence or selected step
 
 2. **Rewrite `SequenceBuilder.tsx`** (234 lines → ~150 lines)
-   - Three-panel layout:
-     - Left: `<IntentPalette>` (w-56)
-     - Center: `<BuilderCanvas>` (flex-1)
-     - Right: `<PropertiesPanel>` (w-72)
+   - **Always three-panel layout** (Decision Q1) — the same layout is used for both viewing and editing. This means `SequencesPanel.tsx` also needs updating: instead of toggling between Detail/Builder, it always renders the three-panel layout with the palette, canvas, and properties. When viewing (not editing), the palette and canvas are read-only; the properties panel shows sequence metadata and step details.
+   - Layout:
+     - Left: `<IntentPalette>` (w-56) — read-only when viewing, interactive when editing
+     - Center: `<BuilderCanvas>` (flex-1) — shows timeline steps; drop-enabled only in edit mode
+     - Right: `<PropertiesPanel>` (w-72) — shows metadata/step detail in view mode, editable in edit mode
    - Wrap all three in `<DndContext>` with `<DndOverlay>`
    - Handle drop events at this level → dispatch to canvas
    - Keyboard shortcuts: `Ctrl+S` save, `Escape` cancel
@@ -991,7 +994,9 @@ After Sprints 4.1–4.5:
 | 4 | `src/renderer/components/sequences/dnd/DropZone.tsx` | Drop indicator |
 | 4 | `src/renderer/components/sequences/dnd/PropertiesPanel.tsx` | Properties editor |
 
-### Modified Files (17)
+### Modified Files (18)
+
+> Note: `SequencesPanel.tsx` is modified in Phase 1 (progress bar) and again in Phase 4 (three-panel layout rewrite per Decision Q1).
 
 | Phase | File | Change |
 |:---|:---|:---|
@@ -1011,7 +1016,8 @@ After Sprints 4.1–4.5:
 | 3 | `src/extensions/iracing/package.json` | Add `contributes.overlays` |
 | 3 | `src/extensions/iracing/src/index.ts` | Add overlay update calls |
 | 3 | `src/renderer/pages/SettingsPage.tsx` | Add overlay admin section |
-| 4 | `src/renderer/components/sequences/SequenceBuilder.tsx` | Rewrite to three-panel DnD |
+| 4 | `src/renderer/components/sequences/SequenceBuilder.tsx` | Rewrite to always-three-panel DnD |
+| 4 | `src/renderer/pages/SequencesPanel.tsx` | Rewrite to always-three-panel layout |
 | 4 | `package.json` | Add `@dnd-kit` dependencies |
 
 ---
