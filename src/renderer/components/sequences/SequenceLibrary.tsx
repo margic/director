@@ -187,11 +187,11 @@ export const SequenceLibrary: React.FC<SequenceLibraryProps> = ({
                             const Icon = getIntentDomainIcon(domain);
                             const style = getIntentDomainStyle(domain);
                             return (
-                              <Icon
-                                key={domain}
-                                className={`w-3 h-3 ${style.text}`}
-                                title={style.label}
-                              />
+                              <span key={domain} title={style.label}>
+                                <Icon
+                                  className={`w-3 h-3 ${style.text}`}
+                                />
+                              </span>
                             );
                           })}
                         </div>

@@ -15,6 +15,7 @@ import {
   StepResult,
 } from '../../types';
 import { SequenceStepCard } from './SequenceStepCard';
+import { TimelineRail } from './TimelineRail';
 import { SequenceVariablesForm } from './SequenceVariablesForm';
 import { SequenceExecutionLog } from './SequenceExecutionLog';
 import {
@@ -179,27 +180,22 @@ export const SequenceDetail: React.FC<SequenceDetailProps> = ({
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-        {/* Steps */}
+        {/* Steps — Vertical Timeline Rail */}
         <div>
           <h3 className="text-xs font-rajdhani uppercase tracking-widest text-muted-foreground font-bold mb-2">
             Steps
           </h3>
-          <div className="space-y-2">
-            {sequence.steps.map((step, i) => (
-              <SequenceStepCard
-                key={step.id}
-                step={step}
-                index={i}
-                result={stepResultMap.get(step.id)}
-                isRunning={
-                  isExecuting &&
-                  currentProgress?.sequenceId === sequence.id &&
-                  currentProgress.currentStep === i + 1 &&
-                  currentProgress.stepStatus === 'running'
-                }
-              />
-            ))}
-          </div>
+          <TimelineRail
+            steps={sequence.steps}
+            stepResultMap={stepResultMap}
+            currentStepIndex={
+              isExecuting && currentProgress?.sequenceId === sequence.id
+                ? currentProgress.currentStep
+                : undefined
+            }
+            isExecuting={isExecuting && currentProgress?.sequenceId === sequence.id}
+            currentProgress={currentProgress}
+          />
         </div>
 
         {/* Runtime Variables */}
