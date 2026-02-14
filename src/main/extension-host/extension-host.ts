@@ -9,6 +9,8 @@ import { ExtensionEventBus } from './event-bus';
 import { IpcMessage, ExecuteIntentPayload, LoadExtensionPayload, InvokePayload, ViewsContribution, ViewContribution } from './extension-types';
 import { configService } from '../config-service';
 import { AuthService } from '../auth-service';
+import { OverlayBus } from '../overlay/overlay-bus';
+import { OverlayRegistration, OverlayRegion } from '../overlay/overlay-types';
 
 class ScraperManager {
   private scrapers: Map<string, { window: BrowserWindow, extensionId: string }> = new Map();
@@ -84,6 +86,7 @@ export class ExtensionHostService {
   // commandId -> extensionId
   private commandHandlers: Map<string, string> = new Map();
   private pendingCommandExecutions: Map<string, { resolve: (res: any) => void; reject: (err: Error) => void }> = new Map();
+  private overlayBus: OverlayBus | null = null;
   
   // Track if we are ready
   private isReady: boolean = false;
@@ -94,10 +97,12 @@ export class ExtensionHostService {
     eventBus: ExtensionEventBus,
     viewRegistry: ViewRegistry,
     authService: AuthService,
-    capabilityCatalog?: CapabilityCatalog
+    capabilityCatalog?: CapabilityCatalog,
+    overlayBus?: OverlayBus
   ) {
     this.scanner = new ExtensionScanner(extensionsPath);
     this.intentRegistry = intentRegistry;
+    this.overlayBus = overlayBus ?? null;
     this.capabilityCatalog = capabilityCatalog || new CapabilityCatalog();
     this.eventBus = eventBus;
     this.viewRegistry = viewRegistry;
@@ -328,6 +333,20 @@ export class ExtensionHostService {
         }
     }
 
+    // Register overlays declared in manifest
+    if (ext.manifest.contributes?.overlays && this.overlayBus) {
+      for (const overlay of ext.manifest.contributes.overlays) {
+        this.overlayBus.registerOverlay(ext.id, {
+          id: overlay.id,
+          region: overlay.region as OverlayRegion,
+          title: overlay.title,
+          template: overlay.template,
+          autoHide: overlay.autoHide,
+          priority: overlay.priority,
+        });
+      }
+    }
+
     // Collect Settings
     const settings: Record<string, any> = {};
     if (ext.manifest.contributes?.settings) {
@@ -370,6 +389,11 @@ export class ExtensionHostService {
       
       // 2. Unregister Views
       this.viewRegistry.unregisterViews(extensionId);
+
+      // 2b. Unregister Overlays
+      if (this.overlayBus) {
+        this.overlayBus.unregisterAllForExtension(extensionId);
+      }
       
       // 3. Notify Child Process
       if (this.isReady && this.child) {
@@ -451,6 +475,21 @@ export class ExtensionHostService {
                  } else {
                      configService.set(key, value);
                  }
+            }
+        } else if (payload.method === 'updateOverlay') {
+            const [overlayId, data] = payload.args || [];
+            if (this.overlayBus && payload.extensionId) {
+                this.overlayBus.updateOverlay(payload.extensionId, overlayId, data);
+            }
+        } else if (payload.method === 'showOverlay') {
+            const [overlayId] = payload.args || [];
+            if (this.overlayBus && payload.extensionId) {
+                this.overlayBus.showOverlay(payload.extensionId, overlayId);
+            }
+        } else if (payload.method === 'hideOverlay') {
+            const [overlayId] = payload.args || [];
+            if (this.overlayBus && payload.extensionId) {
+                this.overlayBus.hideOverlay(payload.extensionId, overlayId);
             }
         } else {
             throw new Error(`Unknown method: ${payload.method}`);

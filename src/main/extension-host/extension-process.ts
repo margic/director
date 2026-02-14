@@ -63,6 +63,18 @@ class ExtensionApiImpl implements ExtensionAPI {
       payload: { level, message, extensionId: this.extensionId }
     });
   }
+
+  updateOverlay(overlayId: string, data: Record<string, unknown>): void {
+    ExtensionProcess.invoke('updateOverlay', [overlayId, data], this.extensionId);
+  }
+
+  showOverlay(overlayId: string): void {
+    ExtensionProcess.invoke('showOverlay', [overlayId], this.extensionId);
+  }
+
+  hideOverlay(overlayId: string): void {
+    ExtensionProcess.invoke('hideOverlay', [overlayId], this.extensionId);
+  }
 }
 
 // Global state for the process

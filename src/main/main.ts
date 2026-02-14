@@ -16,6 +16,7 @@ import { EventMapper } from './event-mapper';
 import { SequenceLibraryService } from './sequence-library-service';
 import { SequenceScheduler } from './sequence-scheduler';
 import { SequenceExecutor } from './sequence-executor';
+import { OverlayBus } from './overlay/overlay-bus';
 
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -37,6 +38,7 @@ let eventMapper: EventMapper;
 let sequenceLibrary: SequenceLibraryService;
 let sequenceScheduler: SequenceScheduler;
 let sequenceExecutor: SequenceExecutor;
+let overlayBus: OverlayBus;
 
 
 
@@ -87,10 +89,13 @@ app.on('ready', () => {
   eventBus = new ExtensionEventBus();
   viewRegistry = new ViewRegistry();
   
+  // Initialize Overlay Bus
+  overlayBus = new OverlayBus();
+  
   // Use dist-electron/extensions (which is __dirname/../extensions in compiled structure)
   // In development/tsc structure: dist-electron/main/main.js -> dist-electron/extensions
   const extensionsPath = path.join(__dirname, '../extensions');
-  extensionHost = new ExtensionHostService(extensionsPath, intentRegistry, eventBus, viewRegistry, authService, capabilityCatalog);
+  extensionHost = new ExtensionHostService(extensionsPath, intentRegistry, eventBus, viewRegistry, authService, capabilityCatalog, overlayBus);
 
   // Initialize Director Service — no longer depends on ObsService directly.
   // OBS scene switching is now handled by the obs extension via intents.
