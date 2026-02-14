@@ -203,6 +203,12 @@ export interface IElectronAPI {
       intents: () => Promise<IntentCatalogEntry[]>;
       events: () => Promise<EventCatalogEntry[]>;
   };
+  overlay: {
+      getUrl: () => Promise<string>;
+      getOverlays: () => Promise<any[]>;
+      getRegionAssignments: () => Promise<Record<string, string>>;
+      setRegionOwner: (region: string, extensionId: string) => Promise<boolean>;
+  };
 }
 
 declare global {

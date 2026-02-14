@@ -81,4 +81,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       intents: () => ipcRenderer.invoke('catalog:intents'),
       events: () => ipcRenderer.invoke('catalog:events'),
   },
+
+  // Overlay API
+  overlay: {
+      getUrl: () => ipcRenderer.invoke('overlay:getUrl'),
+      getOverlays: () => ipcRenderer.invoke('overlay:getOverlays'),
+      getRegionAssignments: () => ipcRenderer.invoke('overlay:getRegionAssignments'),
+      setRegionOwner: (region: string, extensionId: string) =>
+        ipcRenderer.invoke('overlay:setRegionOwner', region, extensionId),
+  },
 });
