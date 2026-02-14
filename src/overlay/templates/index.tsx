@@ -10,6 +10,12 @@
  */
 
 import React from 'react';
+import { ActivityProgress } from './ActivityProgress';
+import { RaceInfoBar } from './RaceInfoBar';
+import { StatusBadge } from './StatusBadge';
+import { FlagAlert } from './FlagAlert';
+import { ChatTicker } from './ChatTicker';
+import { Standings } from './Standings';
 
 /** Props interface for all overlay templates. */
 export interface OverlayTemplateProps {
@@ -41,13 +47,12 @@ const PlaceholderTemplate: React.FC<OverlayTemplateProps> = ({ data }) => (
 
 /** Template registry — maps template IDs to React components. */
 const templates: Record<string, React.FC<OverlayTemplateProps>> = {
-  // Built-in templates will be registered in Phase 3 (Sprint 3.1):
-  // 'ActivityProgress': ActivityProgressTemplate,
-  // 'RaceInfoBar': RaceInfoBarTemplate,
-  // 'StatusBadge': StatusBadgeTemplate,
-  // 'FlagAlert': FlagAlertTemplate,
-  // 'ChatTicker': ChatTickerTemplate,
-  // 'Standings': StandingsTemplate,
+  'ActivityProgress': ActivityProgress,
+  'RaceInfoBar': RaceInfoBar,
+  'StatusBadge': StatusBadge,
+  'FlagAlert': FlagAlert,
+  'ChatTicker': ChatTicker,
+  'Standings': Standings,
 };
 
 /**
