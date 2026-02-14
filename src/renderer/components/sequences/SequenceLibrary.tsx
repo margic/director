@@ -16,6 +16,11 @@ import {
 import { IntentsCatalog } from './IntentsCatalog';
 import { EventsCatalog } from './EventsCatalog';
 import { Search, Package, Cloud, User, Plus, Clock } from 'lucide-react';
+import {
+  getUniqueDomains,
+  getIntentDomainIcon,
+  getIntentDomainStyle,
+} from '../../lib/intent-utils';
 
 interface SequenceLibraryProps {
   sequences: PortableSequence[];
@@ -176,6 +181,20 @@ export const SequenceLibrary: React.FC<SequenceLibraryProps> = ({
                       }`}
                     >
                       <div className="flex items-center gap-2">
+                        {/* Domain icons */}
+                        <div className="flex items-center gap-0.5 shrink-0">
+                          {getUniqueDomains(seq.steps).map((domain) => {
+                            const Icon = getIntentDomainIcon(domain);
+                            const style = getIntentDomainStyle(domain);
+                            return (
+                              <Icon
+                                key={domain}
+                                className={`w-3 h-3 ${style.text}`}
+                                title={style.label}
+                              />
+                            );
+                          })}
+                        </div>
                         <span className="text-sm font-medium text-foreground truncate flex-1">
                           {seq.name ?? seq.id}
                         </span>

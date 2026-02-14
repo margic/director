@@ -1,15 +1,20 @@
 /**
  * SequenceStepCard — Visual representation of a single SequenceStep.
  *
- * Shows step number, intent badge, payload key-value pairs,
- * and handler status indicator.
+ * Shows step number, domain icon, intent badge, payload key-value pairs,
+ * domain-colored left border, and handler status indicator.
  *
- * See: documents/feature_sequence_executor_ux.md §4.3
+ * See: documents/implementation_plan_ux_enhancements.md §Sprint 1.1
  */
 
 import React from 'react';
 import { SequenceStep, StepResult } from '../../types';
 import { IntentDomainBadge } from './IntentBadge';
+import {
+  getIntentDomain,
+  getIntentDomainIcon,
+  getIntentDomainStyle,
+} from '../../lib/intent-utils';
 import { CheckCircle, AlertTriangle, XCircle, Loader2 } from 'lucide-react';
 
 interface SequenceStepCardProps {
@@ -31,13 +36,18 @@ export const SequenceStepCard: React.FC<SequenceStepCardProps> = ({
     (v) => typeof v === 'string' && v.includes('$var(')
   );
 
+  const domain = getIntentDomain(step.intent);
+  const domainStyle = getIntentDomainStyle(domain);
+  const DomainIcon = getIntentDomainIcon(domain);
+
   return (
-    <div className="bg-background border border-border rounded-lg p-3 group hover:border-primary/30 transition-colors">
+    <div className={`bg-background border border-border rounded-lg p-3 group hover:border-primary/30 transition-colors border-l-[3px] ${domainStyle.border}`}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <span className="text-xs font-jetbrains text-muted-foreground w-6">
             {index + 1}.
           </span>
+          <DomainIcon className={`w-4 h-4 ${domainStyle.text}`} />
           <span className="font-jetbrains text-sm text-foreground font-medium">
             {step.intent}
           </span>

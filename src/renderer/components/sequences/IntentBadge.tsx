@@ -1,45 +1,40 @@
 /**
- * IntentBadge — Domain-colored chip for intent IDs.
+ * IntentBadge — Domain-colored chip for intent IDs with icon.
  *
- * Color coding by intent namespace:
- * - system.*       → muted/grey
- * - broadcast.*    → primary (orange)
- * - obs.*          → secondary (blue)
- * - communication.* → green
- * - other          → default border
+ * Color coding + icon by intent namespace:
+ * - system.*       → Settings gear / muted grey
+ * - broadcast.*    → Flag / primary orange
+ * - obs.*          → Monitor / secondary blue
+ * - communication.* → MessageSquare / green
+ * - discord.*      → Headphones / indigo
+ * - youtube.*      → Youtube / red
+ * - other          → Puzzle / muted
  *
- * See: documents/feature_sequence_executor_ux.md §12
+ * See: documents/implementation_plan_ux_enhancements.md §Sprint 1.1
  */
 
 import React from 'react';
+import {
+  getIntentDomain,
+  getIntentDomainIcon,
+  getIntentDomainStyle,
+} from '../../lib/intent-utils';
 
 interface IntentBadgeProps {
   intent: string;
   className?: string;
 }
 
-function getIntentStyle(intent: string): { bg: string; text: string; label: string } {
-  const domain = intent.split('.')[0];
-  switch (domain) {
-    case 'system':
-      return { bg: 'bg-muted', text: 'text-muted-foreground', label: 'SYS' };
-    case 'broadcast':
-      return { bg: 'bg-primary/20', text: 'text-primary', label: 'iRace' };
-    case 'obs':
-      return { bg: 'bg-secondary/20', text: 'text-secondary', label: 'OBS' };
-    case 'communication':
-      return { bg: 'bg-green-500/20', text: 'text-green-400', label: 'COMMS' };
-    default:
-      return { bg: 'bg-white/5', text: 'text-muted-foreground', label: domain.toUpperCase() };
-  }
-}
-
 export const IntentBadge: React.FC<IntentBadgeProps> = ({ intent, className = '' }) => {
-  const style = getIntentStyle(intent);
+  const domain = getIntentDomain(intent);
+  const style = getIntentDomainStyle(domain);
+  const DomainIcon = getIntentDomainIcon(domain);
+
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-bold font-rajdhani uppercase tracking-wider ${style.bg} ${style.text} ${className}`}
     >
+      <DomainIcon className="w-3 h-3" />
       <span className="opacity-70">[{style.label}]</span>
       <span>{intent}</span>
     </span>
@@ -47,14 +42,18 @@ export const IntentBadge: React.FC<IntentBadgeProps> = ({ intent, className = ''
 };
 
 /**
- * Compact version showing only the domain badge (no intent ID).
+ * Compact version showing only the domain badge with icon (no intent ID).
  */
 export const IntentDomainBadge: React.FC<{ intent: string; className?: string }> = ({ intent, className = '' }) => {
-  const style = getIntentStyle(intent);
+  const domain = getIntentDomain(intent);
+  const style = getIntentDomainStyle(domain);
+  const DomainIcon = getIntentDomainIcon(domain);
+
   return (
     <span
-      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold font-rajdhani uppercase tracking-wider ${style.bg} ${style.text} ${className}`}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold font-rajdhani uppercase tracking-wider ${style.bg} ${style.text} ${className}`}
     >
+      <DomainIcon className="w-3 h-3" />
       {style.label}
     </span>
   );
