@@ -7,7 +7,7 @@
  * See: documents/feature_sequence_executor_ux.md §4.3
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   PortableSequence,
   SequenceProgress,
@@ -66,6 +66,16 @@ export const SequenceDetail: React.FC<SequenceDetailProps> = ({
     return defaults;
   });
   const [priorityOverride, setPriorityOverride] = useState(sequence.priority ?? false);
+  const [shakeError, setShakeError] = useState(false);
+
+  // Trigger shake when execution fails
+  useEffect(() => {
+    if (lastResult && lastResult.sequenceId === sequence.id && lastResult.status === 'error') {
+      setShakeError(true);
+      const t = setTimeout(() => setShakeError(false), 500);
+      return () => clearTimeout(t);
+    }
+  }, [lastResult, sequence.id]);
 
   // Reset variable defaults when sequence changes
   React.useEffect(() => {
@@ -80,8 +90,17 @@ export const SequenceDetail: React.FC<SequenceDetailProps> = ({
   }, [sequence.id]);
 
   const handleExecute = useCallback(() => {
+    // Check required variables
+    const missing = (sequence.variables ?? []).filter(
+      (v) => v.required && (variables[v.name] === undefined || variables[v.name] === '')
+    );
+    if (missing.length > 0) {
+      setShakeError(true);
+      setTimeout(() => setShakeError(false), 500);
+      return;
+    }
     onExecute(sequence.id, variables, priorityOverride);
-  }, [onExecute, sequence.id, variables, priorityOverride]);
+  }, [onExecute, sequence.id, sequence.variables, variables, priorityOverride]);
 
   // Estimate duration
   let estimatedMs = 0;
@@ -249,7 +268,7 @@ export const SequenceDetail: React.FC<SequenceDetailProps> = ({
             <button
               onClick={handleExecute}
               disabled={isExecuting}
-              className="flex-1 py-3 rounded-lg font-bold flex items-center justify-center gap-2 bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`flex-1 py-3 rounded-lg font-bold flex items-center justify-center gap-2 bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)] transition-all disabled:opacity-50 disabled:cursor-not-allowed ${shakeError ? 'animate-shake' : ''}`}
             >
               <Play className="w-4 h-4 fill-current" />
               <span className="font-rajdhani uppercase tracking-wider">Execute Sequence</span>

@@ -18,6 +18,7 @@ import {
   getIntentDomain,
   getIntentDomainIcon,
   getIntentDomainStyle,
+  humanizeIntent,
 } from '../../lib/intent-utils';
 import { Clock, Variable } from 'lucide-react';
 
@@ -76,9 +77,21 @@ export const SequenceLibraryCard: React.FC<SequenceLibraryCardProps> = ({
 
   const varCount = sequence.variables?.length ?? 0;
 
+  // Hover preview: first 3 step intents
+  const hoverPreview = useMemo(() => {
+    const preview = sequence.steps.slice(0, 3).map(
+      (s, i) => `${i + 1}. ${humanizeIntent(s.intent)}`
+    );
+    if (sequence.steps.length > 3) {
+      preview.push(`... +${sequence.steps.length - 3} more`);
+    }
+    return preview.join('\n');
+  }, [sequence.steps]);
+
   return (
     <button
       onClick={onClick}
+      title={hoverPreview}
       className={`w-full text-left rounded-lg overflow-hidden transition-all duration-200 group ${
         isSelected
           ? 'ring-1 ring-primary/50 bg-card/80'

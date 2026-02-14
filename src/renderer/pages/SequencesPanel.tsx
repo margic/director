@@ -42,6 +42,7 @@ export const SequencesPanel: React.FC = () => {
   const [executionLogs, setExecutionLogs] = useState<string[]>([]);
   const [lastResult, setLastResult] = useState<ExecutionResult | null>(null);
   const [executingSequenceId, setExecutingSequenceId] = useState<string | null>(null);
+  const [successFlash, setSuccessFlash] = useState(false);
 
   // Load data
   const loadData = useCallback(async () => {
@@ -81,6 +82,9 @@ export const SequencesPanel: React.FC = () => {
       if (progress.stepIntent === 'sequence.end') {
         setIsExecuting(false);
         setExecutingSequenceId(null);
+        // Trigger success flash
+        setSuccessFlash(true);
+        setTimeout(() => setSuccessFlash(false), 800);
         // Refresh history
         window.electronAPI.sequences.history().then(setHistory).catch(console.error);
       }
@@ -236,27 +240,33 @@ export const SequencesPanel: React.FC = () => {
         </div>
 
         {/* Right Panel — Detail / Builder */}
-        <div className="flex-1 bg-card border border-border rounded-xl p-6 flex flex-col overflow-hidden">
+        <div className={`flex-1 bg-card border border-border rounded-xl p-6 flex flex-col overflow-hidden transition-all duration-200 ${
+          successFlash ? 'animate-success-flash' : ''
+        }`}>
           {isBuilderOpen ? (
-            <SequenceBuilder
-              initial={editingSequence}
-              intents={intents}
-              onSave={handleBuilderSave}
-              onCancel={handleBuilderCancel}
-            />
+            <div className="h-full animate-in fade-in duration-200">
+              <SequenceBuilder
+                initial={editingSequence}
+                intents={intents}
+                onSave={handleBuilderSave}
+                onCancel={handleBuilderCancel}
+              />
+            </div>
           ) : selectedSequence ? (
-            <SequenceDetail
-              sequence={selectedSequence}
-              onExecute={handleExecute}
-              onCancel={handleCancel}
-              onDelete={selectedSequence.category === 'custom' ? handleDelete : undefined}
-              onEdit={selectedSequence.category === 'custom' ? handleEdit : undefined}
-              onExport={handleExport}
-              isExecuting={isExecuting}
-              currentProgress={currentProgress}
-              executionLogs={executionLogs}
-              lastResult={lastResult}
-            />
+            <div key={selectedSequence.id} className="h-full animate-in fade-in duration-200">
+              <SequenceDetail
+                sequence={selectedSequence}
+                onExecute={handleExecute}
+                onCancel={handleCancel}
+                onDelete={selectedSequence.category === 'custom' ? handleDelete : undefined}
+                onEdit={selectedSequence.category === 'custom' ? handleEdit : undefined}
+                onExport={handleExport}
+                isExecuting={isExecuting}
+                currentProgress={currentProgress}
+                executionLogs={executionLogs}
+                lastResult={lastResult}
+              />
+            </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground">
               <Zap className="w-12 h-12 mb-4 opacity-20" />
