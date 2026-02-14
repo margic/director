@@ -15,12 +15,8 @@ import {
 } from '../../types';
 import { IntentsCatalog } from './IntentsCatalog';
 import { EventsCatalog } from './EventsCatalog';
-import { Search, Package, Cloud, User, Plus, Clock } from 'lucide-react';
-import {
-  getUniqueDomains,
-  getIntentDomainIcon,
-  getIntentDomainStyle,
-} from '../../lib/intent-utils';
+import { SequenceLibraryCard } from './SequenceLibraryCard';
+import { Search, Package, Cloud, User, Plus } from 'lucide-react';
 
 interface SequenceLibraryProps {
   sequences: PortableSequence[];
@@ -82,18 +78,6 @@ export const SequenceLibrary: React.FC<SequenceLibraryProps> = ({
   }, [filtered]);
 
   const categoryOrder = ['built-in', 'cloud', 'custom'];
-
-  // Estimate duration from system.wait steps
-  const estimateDuration = (seq: PortableSequence): string => {
-    let totalMs = 0;
-    for (const step of seq.steps) {
-      if (step.intent === 'system.wait' && typeof step.payload.durationMs === 'number') {
-        totalMs += step.payload.durationMs;
-      }
-    }
-    if (totalMs === 0) return `${seq.steps.length} steps`;
-    return `~${(totalMs / 1000).toFixed(0)}s`;
-  };
 
   return (
     <div className="flex flex-col h-full">
@@ -166,56 +150,15 @@ export const SequenceLibrary: React.FC<SequenceLibraryProps> = ({
               </div>
 
               <div className="space-y-1">
-                {items.map((seq) => {
-                  const isSelected = seq.id === selectedId;
-                  const isExecuting = seq.id === executingId;
-
-                  return (
-                    <button
-                      key={seq.id}
-                      onClick={() => onSelect(seq)}
-                      className={`w-full text-left px-3 py-2 rounded-lg transition-colors ${
-                        isSelected
-                          ? 'bg-primary/10 border border-primary/30'
-                          : 'hover:bg-white/5 border border-transparent'
-                      }`}
-                    >
-                      <div className="flex items-center gap-2">
-                        {/* Domain icons */}
-                        <div className="flex items-center gap-0.5 shrink-0">
-                          {getUniqueDomains(seq.steps).map((domain) => {
-                            const Icon = getIntentDomainIcon(domain);
-                            const style = getIntentDomainStyle(domain);
-                            return (
-                              <span key={domain} title={style.label}>
-                                <Icon
-                                  className={`w-3 h-3 ${style.text}`}
-                                />
-                              </span>
-                            );
-                          })}
-                        </div>
-                        <span className="text-sm font-medium text-foreground truncate flex-1">
-                          {seq.name ?? seq.id}
-                        </span>
-                        {isExecuting && (
-                          <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-[10px] text-muted-foreground mt-0.5">
-                        <span>{seq.steps.length} steps</span>
-                        <span>·</span>
-                        <span>{estimateDuration(seq)}</span>
-                        {seq.variables && seq.variables.length > 0 && (
-                          <>
-                            <span>·</span>
-                            <span>{seq.variables.length} vars</span>
-                          </>
-                        )}
-                      </div>
-                    </button>
-                  );
-                })}
+                {items.map((seq) => (
+                  <SequenceLibraryCard
+                    key={seq.id}
+                    sequence={seq}
+                    isSelected={seq.id === selectedId}
+                    isExecuting={seq.id === executingId}
+                    onClick={() => onSelect(seq)}
+                  />
+                ))}
               </div>
             </div>
           );
