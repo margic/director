@@ -1,14 +1,18 @@
 import React, { useState } from 'react';
+import { Play } from 'lucide-react';
 import { YouTubeStatus } from './Status';
 import { YouTubeSettings } from './Settings';
+import { useSetPageHeader } from '../../../renderer/contexts/PageHeaderContext';
 
 export const YouTubePanel = () => {
     const [activeTab, setActiveTab] = useState<'status' | 'settings'>('status');
 
+    // Push header into the global app bar
+    useSetPageHeader({ title: 'YouTube', icon: Play });
+
     return (
         <div className="h-full flex flex-col space-y-6 p-8">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-bold uppercase tracking-widest text-primary">YouTube Integration</h1>
+            <div className="flex items-center justify-end">
                 <div className="flex space-x-2 bg-card border border-border rounded-lg p-1">
                     <button
                         onClick={() => setActiveTab('status')}

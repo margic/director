@@ -3,10 +3,14 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
-import { Copy, ExternalLink, CheckCircle2 } from 'lucide-react';
+import { Copy, ExternalLink, CheckCircle2, Settings } from 'lucide-react';
 import type { OverlaySlot } from '@/src/main/overlay/overlay-types';
+import { useSetPageHeader } from '../contexts/PageHeaderContext';
 
 export const SettingsPage = () => {
+    // Push header into the global app bar
+    useSetPageHeader({ title: 'System Configuration', icon: Settings });
+
     const [extensions, setExtensions] = useState({
         'director-iracing': { enabled: true },
         'director-obs': { enabled: true },
@@ -80,8 +84,6 @@ export const SettingsPage = () => {
 
     return (
         <div className="p-8 space-y-8 animate-in fade-in duration-500">
-            <h1 className="text-4xl font-bold uppercase tracking-widest mb-8">System Configuration</h1>
-
             {/* Extensions Toggle Section */}
              <Card className="bg-card border-border">
                 <CardHeader>

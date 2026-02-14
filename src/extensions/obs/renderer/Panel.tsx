@@ -1,10 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, Aperture, AlertTriangle } from 'lucide-react';
+import { useSetPageHeader } from '../../../renderer/contexts/PageHeaderContext';
 
 export const ObsPanel = () => {
   const [connected, setConnected] = useState(false);
   const [missingScenes, setMissingScenes] = useState<string[]>([]);
   const [availableScenes, setAvailableScenes] = useState<string[]>([]);
+
+  // Push header into the global app bar
+  useSetPageHeader({
+    title: 'OBS Control',
+    icon: Aperture,
+    subtitle: connected ? 'Connected' : 'Disconnected',
+    subtitleVariant: connected ? 'success' : 'danger',
+  });
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -29,18 +38,6 @@ export const ObsPanel = () => {
 
   return (
     <div className="space-y-6 h-full">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-rajdhani font-bold uppercase tracking-wider text-white">
-          OBS Control
-        </h1>
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${connected ? 'bg-green-900/20 border-green-500/50 text-green-500' : 'bg-red-900/20 border-red-500/50 text-red-500'}`}>
-          <Activity className="w-4 h-4" />
-          <span className="font-jetbrains text-sm font-bold uppercase">
-            {connected ? 'Connected' : 'Disconnected'}
-          </span>
-        </div>
-      </div>
-
       {/* Missing Scenes Warning */}
       {missingScenes.length > 0 && (
         <div className="bg-yellow-900/20 border border-yellow-500/50 rounded-lg p-4 flex items-start gap-3">

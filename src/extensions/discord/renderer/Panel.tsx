@@ -1,15 +1,19 @@
 import React, { useState } from 'react';
+import { Mic } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { DiscordSettings } from './Settings';
 import { DiscordStatus } from './Status';
+import { useSetPageHeader } from '../../../renderer/contexts/PageHeaderContext';
 
 export const DiscordPanel = () => {
     const [activeTab, setActiveTab] = useState<'status' | 'settings'>('status');
 
+    // Push header into the global app bar
+    useSetPageHeader({ title: 'Discord / Voice', icon: Mic });
+
     return (
         <div className="h-full flex flex-col space-y-6">
-            <div className="flex items-center justify-between">
-                <h1 className="text-4xl font-bold uppercase tracking-widest text-primary">Discord Integration</h1>
+            <div className="flex items-center justify-end">
                 <div className="flex space-x-2 bg-card border border-border rounded-lg p-1">
                     <button
                         onClick={() => setActiveTab('status')}

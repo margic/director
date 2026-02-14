@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, Camera, Play, Pause, SkipBack, SkipForward } from 'lucide-react';
+import { Activity, Camera, Play, Pause, SkipBack, SkipForward, Car } from 'lucide-react';
 import { CameraConfig } from '../../../renderer/types';
+import { useSetPageHeader } from '../../../renderer/contexts/PageHeaderContext';
 
 interface IracingPanelProps {
   cameras?: CameraConfig[];
@@ -10,6 +11,14 @@ export const IracingPanel = ({ cameras = [] }: IracingPanelProps) => {
   const [extActive, setExtActive] = useState(false);
   const [carNumber, setCarNumber] = useState('66');
   const [groupNumber, setGroupNumber] = useState('1');
+
+  // Push header into the global app bar
+  useSetPageHeader({
+    title: 'iRacing',
+    icon: Car,
+    subtitle: extActive ? 'Active' : 'Inactive',
+    subtitleVariant: extActive ? 'success' : 'danger',
+  });
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -68,18 +77,6 @@ export const IracingPanel = ({ cameras = [] }: IracingPanelProps) => {
 
   return (
     <div className='space-y-6 h-full'>
-      <div className='flex items-center justify-between'>
-        <h1 className='text-3xl font-rajdhani font-bold uppercase tracking-wider text-white'>
-           iRacing Extension
-        </h1>
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-full border ${extActive ? 'bg-green-900/20 border-green-500/50 text-green-500' : 'bg-red-900/20 border-red-500/50 text-red-500'}`}>
-          <Activity className='w-4 h-4' />
-          <span className='font-jetbrains text-sm font-bold uppercase'>
-            {extActive ? 'Active' : 'Inactive'}
-          </span>
-        </div>
-      </div>
-
       <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
         {/* Camera Control Card */}
         <div className='bg-[#111317] border border-[#282A30] rounded-lg p-6'>

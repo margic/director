@@ -21,6 +21,7 @@ import { SequenceBuilder } from '../components/sequences/SequenceBuilder';
 import { SequenceExecutionHistory } from '../components/sequences/SequenceExecutionHistory';
 import { ExecutionProgressBar } from '../components/sequences/ExecutionProgressBar';
 import { Zap, History, ChevronDown, ChevronRight } from 'lucide-react';
+import { useSetPageHeader } from '../contexts/PageHeaderContext';
 
 export const SequencesPanel: React.FC = () => {
   // Data state
@@ -43,6 +44,15 @@ export const SequencesPanel: React.FC = () => {
   const [lastResult, setLastResult] = useState<ExecutionResult | null>(null);
   const [executingSequenceId, setExecutingSequenceId] = useState<string | null>(null);
   const [successFlash, setSuccessFlash] = useState(false);
+
+  // Push header into the global app bar
+  useSetPageHeader({
+    title: 'Sequence Executor',
+    icon: Zap,
+    subtitle: sequences.length || intents.length
+      ? `${sequences.length} sequences \u00b7 ${intents.length} intents`
+      : undefined,
+  });
 
   // Load data
   const loadData = useCallback(async () => {
@@ -204,19 +214,6 @@ export const SequencesPanel: React.FC = () => {
 
   return (
     <div className="w-full h-full flex flex-col">
-      {/* Panel Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <Zap className="w-6 h-6 text-primary" />
-          <h1 className="text-2xl font-rajdhani font-bold uppercase tracking-wider text-white">
-            Sequence Executor
-          </h1>
-          <span className="text-xs text-muted-foreground font-jetbrains">
-            {sequences.length} sequences · {intents.length} intents
-          </span>
-        </div>
-      </div>
-
       {/* Execution Progress Bar */}
       <ExecutionProgressBar
         progress={currentProgress}

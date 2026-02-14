@@ -7,6 +7,7 @@ import { extensionViews, getExtensionView } from './extension-views'
 import { SettingsPage } from './pages/SettingsPage'
 import { Dashboard } from './pages/Dashboard'
 import { SequencesPanel } from './pages/SequencesPanel'
+import { PageHeaderProvider, usePageHeader, useSetPageHeader } from './contexts/PageHeaderContext'
 
 const JsonViewer = ({ data }: { data: any }) => {
   if (data === null || data === undefined) return <span className="text-muted-foreground italic">null</span>;
@@ -51,6 +52,14 @@ const JsonViewer = ({ data }: { data: any }) => {
 
   return <span>{String(data)}</span>;
 };
+
+import type { PageHeaderState } from './contexts/PageHeaderContext'
+
+/** Renders nothing — just sets the page header from inline views. */
+function SetPageHeader(props: PageHeaderState) {
+  useSetPageHeader(props);
+  return null;
+}
 
 function App() {
   const [user, setUser] = useState<any>(null);
@@ -226,61 +235,33 @@ function App() {
       </aside>
 
       {/* Main Content */}
+      <PageHeaderProvider>
       <main className="flex-1 flex flex-col relative">
-        {/* Header */}
-        <header className="h-16 border-b border-border flex items-center justify-between px-8 bg-background/50 backdrop-blur">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold uppercase tracking-widest text-white">
-              Race Control <span className="text-primary">Director</span>
-            </h1>
-            <span className="px-2 py-0.5 rounded text-xs font-bold bg-green-500/10 text-green-500 border border-green-500/20">
-              SYSTEM ONLINE
-            </span>
-          </div>
+        {/* Header — dynamic title driven by PageHeaderContext */}
+        <AppHeader
+          user={user}
+          userProfile={userProfile}
+          activeMenu={activeMenu}
+          setActiveMenu={setActiveMenu}
+          headerRef={headerRef}
+          onLogout={handleLogout}
+        />
           
-          {user && (
-            <div className="relative" ref={headerRef}>
-              <button 
-                onClick={() => setActiveMenu(activeMenu === 'header' ? null : 'header')}
-                className="flex items-center gap-3 hover:bg-white/5 p-2 rounded-lg transition-colors"
-              >
-                <div className="text-right">
-                  <p className="text-sm font-bold text-white leading-none">{user.name}</p>
-                  <p className="text-xs text-muted-foreground">{user.username}</p>
-                  {(userProfile?.centerId || userProfile?.center?.id) && (
-                    <p className="text-xs text-primary">Center: {userProfile.center?.name || userProfile.centerId || userProfile.center?.id}</p>
-                  )}
-                </div>
-                <div className="w-8 h-8 rounded bg-secondary/20 border border-secondary/50 flex items-center justify-center text-secondary font-bold">
-                  {user.name.charAt(0)}
-                </div>
-              </button>
 
-              {activeMenu === 'header' && (
-                <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50">
-                  <button
-                    onClick={handleLogout}
-                    className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 text-muted-foreground hover:text-destructive transition-colors"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    <span className="font-medium">Log Out</span>
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-        </header>
 
         {/* Dashboard Area */}
-        <div className="flex-1 p-8 overflow-y-auto flex flex-col items-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-secondary/5 via-background to-background">
+        <div className="flex-1 p-6 overflow-y-auto flex flex-col items-center bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-secondary/5 via-background to-background">
           {currentView === 'dashboard' ? (
-            <Dashboard 
-              user={user}
-              userProfile={userProfile}
-              setCurrentView={setCurrentView}
-              onLogin={handleLogin}
-              onSessionSelect={handleSessionClick}
-            />
+            <>
+              <SetPageHeader title="" />
+              <Dashboard 
+                user={user}
+                userProfile={userProfile}
+                setCurrentView={setCurrentView}
+                onLogin={handleLogin}
+                onSessionSelect={handleSessionClick}
+              />
+            </>
           ) : currentView === 'sequences' ? (
             <div className="w-full max-w-6xl h-full">
               <SequencesPanel />
@@ -291,18 +272,7 @@ function App() {
             </div>
           ) : currentView === 'session-details' && selectedSession ? (
             <div className="w-full max-w-6xl space-y-6">
-              <div className="flex items-center gap-4 mb-6">
-                <button 
-                  onClick={() => setCurrentView('dashboard')}
-                  className="p-2 rounded-full bg-card border border-border hover:border-primary text-muted-foreground hover:text-primary transition-colors"
-                >
-                  <ArrowLeft className="w-6 h-6" />
-                </button>
-                <h2 className="text-3xl font-bold uppercase tracking-wider text-white">
-                  Session Details: <span className="text-primary">{selectedSession.name}</span>
-                </h2>
-              </div>
-
+              <SetPageHeader title={`Session: ${selectedSession.name}`} icon={Database} />
               <div className="bg-card border border-border rounded-xl p-6 shadow-lg overflow-hidden">
                 <div className="flex items-center justify-between mb-6">
                    <h3 className="text-xl font-bold uppercase tracking-wider text-white flex items-center gap-2">
@@ -350,8 +320,98 @@ function App() {
           })()}
         </div>
       </main>
+      </PageHeaderProvider>
     </div>
   )
+}
+
+/* ------------------------------------------------------------------ */
+/*  AppHeader — Extracted header consuming PageHeaderContext            */
+/* ------------------------------------------------------------------ */
+
+interface AppHeaderProps {
+  user: any;
+  userProfile: UserProfile | null;
+  activeMenu: 'sidebar' | 'header' | null;
+  setActiveMenu: (menu: 'sidebar' | 'header' | null) => void;
+  headerRef: React.RefObject<HTMLDivElement | null>;
+  onLogout: () => void;
+}
+
+function AppHeader({ user, userProfile, activeMenu, setActiveMenu, headerRef, onLogout }: AppHeaderProps) {
+  const { title, icon: Icon, subtitle, subtitleVariant } = usePageHeader();
+
+  // Subtitle pill styling based on variant
+  const subtitleClass =
+    subtitleVariant === 'success'
+      ? 'bg-green-500/10 text-green-500 border border-green-500/20'
+      : subtitleVariant === 'danger'
+        ? 'bg-red-500/10 text-red-500 border border-red-500/20'
+        : 'text-muted-foreground';
+
+  return (
+    <header className="h-14 border-b border-border flex items-center justify-between px-6 bg-background/50 backdrop-blur shrink-0">
+      <div className="flex items-center gap-3">
+        {/* Dynamic icon */}
+        {Icon && <Icon className="w-5 h-5 text-primary" />}
+
+        {/* Title — branded fallback when no page has set the header */}
+        {title ? (
+          <h1 className="text-xl font-rajdhani font-bold uppercase tracking-widest text-white">
+            {title}
+          </h1>
+        ) : (
+          <h1 className="text-xl font-bold uppercase tracking-widest text-white">
+            Race Control <span className="text-primary">Director</span>
+          </h1>
+        )}
+
+        {/* Subtitle pill / metadata */}
+        {subtitle && (
+          <span className={`px-2 py-0.5 rounded text-xs font-bold font-jetbrains ${subtitleClass}`}>
+            {subtitle}
+          </span>
+        )}
+
+        {/* System status */}
+        <span className="px-2 py-0.5 rounded text-xs font-bold bg-green-500/10 text-green-500 border border-green-500/20">
+          ONLINE
+        </span>
+      </div>
+
+      {user && (
+        <div className="relative" ref={headerRef}>
+          <button
+            onClick={() => setActiveMenu(activeMenu === 'header' ? null : 'header')}
+            className="flex items-center gap-3 hover:bg-white/5 p-2 rounded-lg transition-colors"
+          >
+            <div className="text-right">
+              <p className="text-sm font-bold text-white leading-none">{user.name}</p>
+              <p className="text-xs text-muted-foreground">{user.username}</p>
+              {(userProfile?.centerId || userProfile?.center?.id) && (
+                <p className="text-xs text-primary">Center: {userProfile.center?.name || userProfile.centerId || userProfile.center?.id}</p>
+              )}
+            </div>
+            <div className="w-8 h-8 rounded bg-secondary/20 border border-secondary/50 flex items-center justify-center text-secondary font-bold">
+              {user.name.charAt(0)}
+            </div>
+          </button>
+
+          {activeMenu === 'header' && (
+            <div className="absolute right-0 top-full mt-2 w-48 bg-card border border-border rounded-lg shadow-xl overflow-hidden z-50">
+              <button
+                onClick={onLogout}
+                className="w-full px-4 py-3 flex items-center gap-3 hover:bg-white/5 text-muted-foreground hover:text-destructive transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="font-medium">Log Out</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </header>
+  );
 }
 
 export default App
