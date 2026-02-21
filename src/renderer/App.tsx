@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { LayoutDashboard, Settings, User, LogOut, Car, ArrowLeft, Database, Zap } from 'lucide-react'
+import { LayoutDashboard, Settings, User, LogOut, Car, ArrowLeft, Database, Zap, Layers } from 'lucide-react'
 import RaceCenterIcon from '../../assets/images/icon.png'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
@@ -7,6 +7,7 @@ import { extensionViews, getExtensionView } from './extension-views'
 import { SettingsPage } from './pages/SettingsPage'
 import { Dashboard } from './pages/Dashboard'
 import { SequencesPanel } from './pages/SequencesPanel'
+import { OverlayPanel } from './pages/OverlayPanel'
 import { PageHeaderProvider, usePageHeader, useSetPageHeader } from './contexts/PageHeaderContext'
 
 const JsonViewer = ({ data }: { data: any }) => {
@@ -188,6 +189,15 @@ function App() {
           >
             <Zap className="w-6 h-6" />
           </button>
+
+          {/* Broadcast Overlay — core view, always visible */}
+          <button
+            onClick={() => setCurrentView('overlay')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'overlay' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="Broadcast Overlay"
+          >
+            <Layers className="w-6 h-6" />
+          </button>
           
           {/* Extension navigation — generated from the view registry */}
           {extensionViews.map((view) =>
@@ -263,15 +273,19 @@ function App() {
               />
             </>
           ) : currentView === 'sequences' ? (
-            <div className="w-full max-w-6xl h-full">
+            <div className="w-full h-full">
               <SequencesPanel />
             </div>
+          ) : currentView === 'overlay' ? (
+            <div className="w-full h-full">
+              <OverlayPanel />
+            </div>
           ) : currentView === 'settings' ? (
-            <div className="w-full max-w-6xl">
+            <div className="w-full">
               <SettingsPage />
             </div>
           ) : currentView === 'session-details' && selectedSession ? (
-            <div className="w-full max-w-6xl space-y-6">
+            <div className="w-full space-y-6">
               <SetPageHeader title={`Session: ${selectedSession.name}`} icon={Database} />
               <div className="bg-card border border-border rounded-xl p-6 shadow-lg overflow-hidden">
                 <div className="flex items-center justify-between mb-6">
@@ -305,7 +319,7 @@ function App() {
                 viewProps.cameras = selectedSession?.settings?.cameras;
               }
               return (
-                <div className="w-full max-w-6xl">
+                <div className="w-full">
                   <div className="animate-in fade-in duration-500 h-full">
                     <ViewComponent {...viewProps} />
                   </div>
@@ -313,7 +327,7 @@ function App() {
               );
             }
             return (
-              <div className="w-full max-w-6xl text-center text-muted-foreground">
+              <div className="w-full text-center text-muted-foreground">
                 View not found: {currentView}
               </div>
             );

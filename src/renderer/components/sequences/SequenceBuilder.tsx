@@ -100,13 +100,33 @@ export const SequenceBuilder: React.FC<SequenceBuilderProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [readonly, handleSave, onCancel]);
 
-  // Create a new step from an intent
+  // Create a new step from an intent, pre-populating payload from schema
   const createStepFromIntent = useCallback(
     (intentId: string, atIndex?: number): void => {
+      // Scaffold payload keys from intent schema so fields appear immediately
+      const catalogEntry = intents.find((i) => i.intentId === intentId);
+      const schema = catalogEntry?.inputSchema as
+        | { properties?: Record<string, { type?: string; default?: unknown }> }
+        | undefined;
+      const payload: Record<string, unknown> = {};
+      if (schema?.properties) {
+        for (const [key, prop] of Object.entries(schema.properties)) {
+          if (prop.default !== undefined) {
+            payload[key] = prop.default;
+          } else if (prop.type === 'number') {
+            payload[key] = 0;
+          } else if (prop.type === 'boolean') {
+            payload[key] = false;
+          } else {
+            payload[key] = '';
+          }
+        }
+      }
+
       const newStep: SequenceStep = {
         id: `step_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         intent: intentId,
-        payload: {},
+        payload,
       };
       if (atIndex !== undefined && atIndex >= 0) {
         const newSteps = [...steps];
@@ -272,6 +292,7 @@ export const SequenceBuilder: React.FC<SequenceBuilderProps> = ({
               sequence={builtSequence}
               selectedStep={selectedStep}
               selectedStepIndex={selectedStepIndex}
+              intents={intents}
               onSequenceChange={handleSequenceChange}
               onStepChange={handleStepChange}
               onVariableChange={setVariables}

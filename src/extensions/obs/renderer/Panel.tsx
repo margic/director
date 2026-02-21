@@ -12,6 +12,7 @@ export const ObsPanel = () => {
   const [connected, setConnected] = useState(false);
   const [missingScenes, setMissingScenes] = useState<string[]>([]);
   const [availableScenes, setAvailableScenes] = useState<string[]>([]);
+  const [currentScene, setCurrentScene] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
 
   // Settings state
@@ -39,6 +40,7 @@ export const ObsPanel = () => {
           setConnected(status.connected);
           setMissingScenes(status.missingScenes || []);
           setAvailableScenes(status.availableScenes || []);
+          setCurrentScene(status.currentScene || '');
         } catch (e) {
           console.error('Failed to get OBS status', e);
         }
@@ -91,6 +93,7 @@ export const ObsPanel = () => {
 
   const handleSwitchScene = async (sceneName: string) => {
     if (window.electronAPI?.obsSetScene) {
+      setCurrentScene(sceneName);
       await window.electronAPI.obsSetScene(sceneName);
     }
   };
@@ -231,7 +234,11 @@ export const ObsPanel = () => {
                       <button
                         key={scene}
                         onClick={() => handleSwitchScene(scene)}
-                        className="bg-[#282A30] hover:bg-primary hover:text-white text-muted-foreground p-3 rounded transition-colors text-sm font-bold uppercase font-rajdhani tracking-wider truncate"
+                        className={`p-3 rounded transition-colors text-sm font-bold uppercase font-rajdhani tracking-wider truncate ${
+                          currentScene === scene
+                            ? 'bg-primary text-white ring-1 ring-primary/50 shadow-[0_0_12px_rgba(255,95,31,0.3)]'
+                            : 'bg-[#282A30] hover:bg-primary hover:text-white text-muted-foreground'
+                        }`}
                         title={scene}
                       >
                         {scene}

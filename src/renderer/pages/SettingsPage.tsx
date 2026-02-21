@@ -2,9 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { Button } from '@/components/ui/button';
-import { Copy, ExternalLink, CheckCircle2, Settings } from 'lucide-react';
-import type { OverlaySlot } from '@/src/main/overlay/overlay-types';
+import { Settings } from 'lucide-react';
 import { useSetPageHeader } from '../contexts/PageHeaderContext';
 
 export const SettingsPage = () => {
@@ -17,10 +15,6 @@ export const SettingsPage = () => {
         'director-youtube': { enabled: true },
         'director-discord': { enabled: true }
     });
-
-    const [overlayUrl, setOverlayUrl] = useState<string>('');
-    const [overlaySlots, setOverlaySlots] = useState<OverlaySlot[]>([]);
-    const [copiedUrl, setCopiedUrl] = useState(false);
 
     useEffect(() => {
         const loadConfig = async () => {
@@ -39,19 +33,6 @@ export const SettingsPage = () => {
                     console.error("Failed to load extension status", e);
                 }
             }
-
-            // Load overlay configuration
-            if (window.electronAPI?.overlay) {
-                try {
-                    const url = await window.electronAPI.overlay.getUrl();
-                    setOverlayUrl(url);
-
-                    const slots = await window.electronAPI.overlay.getOverlays();
-                    setOverlaySlots(slots);
-                } catch (e) {
-                    console.error("Failed to load overlay config", e);
-                }
-            }
         };
         loadConfig();
     }, []);
@@ -65,20 +46,6 @@ export const SettingsPage = () => {
         if (window.electronAPI?.extensions) {
              // Extension system handling
              await window.electronAPI.extensions.setEnabled(id, enabled);
-        }
-    };
-
-    const copyOverlayUrl = async () => {
-        if (overlayUrl) {
-            await navigator.clipboard.writeText(overlayUrl);
-            setCopiedUrl(true);
-            setTimeout(() => setCopiedUrl(false), 2000);
-        }
-    };
-
-    const openOverlayPreview = () => {
-        if (overlayUrl) {
-            window.open(overlayUrl, '_blank');
         }
     };
 
@@ -152,115 +119,6 @@ export const SettingsPage = () => {
                         <Switch id="module-discord" checked={extensions['director-discord'].enabled} onCheckedChange={(c) => toggleExtension('director-discord', c)} />
                      </div>
 
-                </CardContent>
-            </Card>
-
-            {/* Broadcast Overlay Section */}
-            <Card className="bg-card border-border">
-                <CardHeader>
-                    <CardTitle className="text-muted-foreground text-sm uppercase font-rajdhani tracking-widest">
-                        Broadcast Overlay
-                    </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                    <p className="text-sm text-muted-foreground">
-                        The overlay server provides broadcast graphics for OBS Browser Source integration.
-                        Copy the URL below and add it as a Browser Source in OBS Studio.
-                    </p>
-
-                    {/* Overlay URL */}
-                    <div className="space-y-3">
-                        <label className="text-xs font-rajdhani uppercase tracking-wider text-muted-foreground">
-                            Overlay URL
-                        </label>
-                        <div className="flex gap-2">
-                            <div className="flex-1 font-jetbrains text-sm bg-background border border-border rounded px-4 py-2">
-                                {overlayUrl || 'http://localhost:9100/overlay'}
-                            </div>
-                            <Button
-                                onClick={copyOverlayUrl}
-                                variant="secondary"
-                                size="sm"
-                                className="gap-2"
-                            >
-                                {copiedUrl ? (
-                                    <>
-                                        <CheckCircle2 className="w-4 h-4" />
-                                        Copied
-                                    </>
-                                ) : (
-                                    <>
-                                        <Copy className="w-4 h-4" />
-                                        Copy
-                                    </>
-                                )}
-                            </Button>
-                            <Button
-                                onClick={openOverlayPreview}
-                                variant="outline"
-                                size="sm"
-                                className="gap-2"
-                            >
-                                <ExternalLink className="w-4 h-4" />
-                                Preview
-                            </Button>
-                        </div>
-                    </div>
-
-                    {/* OBS Setup Instructions */}
-                    <div className="bg-background/50 border border-border/50 rounded-lg p-4 space-y-2">
-                        <h4 className="font-rajdhani font-bold uppercase tracking-wider text-xs text-muted-foreground">
-                            OBS Browser Source Setup
-                        </h4>
-                        <ol className="text-sm space-y-1 list-decimal list-inside text-muted-foreground">
-                            <li>In OBS, add a new <strong>Browser</strong> source</li>
-                            <li>Paste the Overlay URL above</li>
-                            <li>Set Width: <code className="font-jetbrains bg-background px-2 py-0.5 rounded">1920</code>, Height: <code className="font-jetbrains bg-background px-2 py-0.5 rounded">1080</code></li>
-                            <li>Check "Shutdown source when not visible" and "Refresh browser when scene becomes active"</li>
-                            <li>Click OK — overlay graphics will appear during sequences/races</li>
-                        </ol>
-                    </div>
-
-                    {/* Registered Overlays */}
-                    <div className="space-y-3">
-                        <label className="text-xs font-rajdhani uppercase tracking-wider text-muted-foreground">
-                            Registered Overlays ({overlaySlots.length})
-                        </label>
-                        {overlaySlots.length === 0 ? (
-                            <p className="text-sm text-muted-foreground italic">
-                                No overlays registered yet. Overlays are contributed by extensions and the sequence executor.
-                            </p>
-                        ) : (
-                            <div className="space-y-2">
-                                {overlaySlots.map((slot) => (
-                                    <div
-                                        key={`${slot.extensionId}.${slot.id}`}
-                                        className="flex items-center justify-between p-3 border border-border/50 rounded-lg bg-background/50"
-                                    >
-                                        <div className="space-y-1">
-                                            <div className="flex items-center gap-2">
-                                                <h4 className="font-rajdhani font-bold text-sm">
-                                                    {slot.title}
-                                                </h4>
-                                                {slot.visible && (
-                                                    <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded font-jetbrains">
-                                                        VISIBLE
-                                                    </span>
-                                                )}
-                                            </div>
-                                            <div className="flex gap-3 text-xs text-muted-foreground font-jetbrains">
-                                                <span>Region: <strong>{slot.region}</strong></span>
-                                                <span>•</span>
-                                                <span>Template: <strong>{slot.template}</strong></span>
-                                                <span>•</span>
-                                                <span>Extension: <strong>{slot.extensionId}</strong></span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                    </div>
                 </CardContent>
             </Card>
         </div>

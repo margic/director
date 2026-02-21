@@ -221,23 +221,27 @@ export const SequencesPanel: React.FC = () => {
         sequenceName={sequences.find((s) => s.id === executingSequenceId)?.name}
       />
 
-      {/* Two-column layout */}
+      {/* Layout: Library + Detail (runtime) or full-width Builder (design) */}
       <div className="flex-1 flex gap-4 min-h-0">
-        {/* Left Panel — Library */}
-        <div className="w-72 shrink-0 bg-card border border-border rounded-xl p-4 flex flex-col overflow-hidden">
-          <SequenceLibrary
-            sequences={sequences}
-            selectedId={selectedSequence?.id ?? null}
-            onSelect={handleSelectSequence}
-            onCreateNew={handleCreateNew}
-            intents={intents}
-            events={events}
-            executingId={executingSequenceId}
-          />
-        </div>
+        {/* Left Panel — Library (hidden during editing/creating) */}
+        {!isBuilderOpen && (
+          <div className="w-72 shrink-0 bg-card border border-border rounded-xl p-4 flex flex-col overflow-hidden">
+            <SequenceLibrary
+              sequences={sequences}
+              selectedId={selectedSequence?.id ?? null}
+              onSelect={handleSelectSequence}
+              onCreateNew={handleCreateNew}
+              intents={intents}
+              events={events}
+              executingId={executingSequenceId}
+            />
+          </div>
+        )}
 
-        {/* Right Panel — Detail / Builder */}
-        <div className={`flex-1 bg-card border border-border rounded-xl p-6 flex flex-col overflow-hidden transition-all duration-200 ${
+        {/* Main Panel — Detail (runtime) or Builder (design) */}
+        <div className={`flex-1 bg-card border border-border rounded-xl flex flex-col overflow-hidden transition-all duration-200 ${
+          isBuilderOpen ? '' : 'p-6'
+        } ${
           successFlash ? 'animate-success-flash' : ''
         }`}>
           {isBuilderOpen ? (
@@ -271,26 +275,28 @@ export const SequencesPanel: React.FC = () => {
             </div>
           )}
 
-          {/* Execution History (collapsible footer) */}
-          <div className="border-t border-border mt-4 pt-3">
-            <button
-              onClick={() => setShowHistory(!showHistory)}
-              className="flex items-center gap-2 text-xs font-rajdhani uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors w-full"
-            >
-              {showHistory ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-              <History className="w-3.5 h-3.5" />
-              Execution History ({history.length})
-            </button>
-            {showHistory && (
-              <div className="mt-2 max-h-48 overflow-y-auto">
-                <SequenceExecutionHistory
-                  history={history}
-                  onSelect={handleHistorySelect}
-                  selectedId={selectedHistoryResult?.executionId}
-                />
-              </div>
-            )}
-          </div>
+          {/* Execution History — runtime only (hidden during design) */}
+          {!isBuilderOpen && (
+            <div className="border-t border-border mt-4 pt-3">
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className="flex items-center gap-2 text-xs font-rajdhani uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors w-full"
+              >
+                {showHistory ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                <History className="w-3.5 h-3.5" />
+                Execution History ({history.length})
+              </button>
+              {showHistory && (
+                <div className="mt-2 max-h-48 overflow-y-auto">
+                  <SequenceExecutionHistory
+                    history={history}
+                    onSelect={handleHistorySelect}
+                    selectedId={selectedHistoryResult?.executionId}
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>

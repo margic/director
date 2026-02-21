@@ -150,10 +150,53 @@ export class SequenceLibraryService {
   /**
    * Get all registered intents from the Capability Catalog,
    * formatted for the renderer's Intents Browser.
+   * Includes built-in system intents (system.wait, system.log).
    */
   getRegisteredIntents(): IntentCatalogEntry[] {
-    const allIntents = this.capabilityCatalog.getAllIntents();
-    return allIntents.map((entry) => ({
+    // Built-in system intents handled directly by SequenceExecutor
+    const systemIntents: IntentCatalogEntry[] = [
+      {
+        intentId: 'system.wait',
+        label: 'Wait / Delay',
+        extensionId: 'system',
+        extensionLabel: 'System',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            durationMs: {
+              type: 'number',
+              description: 'Duration to wait in milliseconds.',
+            },
+          },
+          required: ['durationMs'],
+        },
+        active: true,
+      },
+      {
+        intentId: 'system.log',
+        label: 'Log Message',
+        extensionId: 'system',
+        extensionLabel: 'System',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            message: {
+              type: 'string',
+              description: 'Message to log.',
+            },
+            level: {
+              type: 'string',
+              description: 'Log level.',
+              enum: ['INFO', 'WARN', 'ERROR'],
+            },
+          },
+          required: ['message'],
+        },
+        active: true,
+      },
+    ];
+
+    const extensionIntents = this.capabilityCatalog.getAllIntents().map((entry) => ({
       intentId: entry.intent.intent,
       label: entry.intent.title,
       extensionId: entry.extensionId,
@@ -161,6 +204,8 @@ export class SequenceLibraryService {
       inputSchema: entry.intent.schema as Record<string, unknown> | undefined,
       active: entry.enabled,
     }));
+
+    return [...systemIntents, ...extensionIntents];
   }
 
   /**

@@ -9,6 +9,7 @@ export class ObsService {
     private reconnectInterval: NodeJS.Timeout | null = null;
     private missingScenes: string[] = [];
     private availableScenes: string[] = [];
+    private currentScene: string = '';
     private currentHost: string | undefined;
     private currentPassword: string | undefined;
 
@@ -130,7 +131,8 @@ export class ObsService {
         try {
             const response = await this.obs.call('GetSceneList');
             this.availableScenes = (response.scenes as any[]).map((s: any) => s.sceneName) as string[];
-            console.log('[ObsService] Fetched scenes', this.availableScenes);
+            this.currentScene = (response as any).currentProgramSceneName || '';
+            console.log('[ObsService] Fetched scenes', this.availableScenes, 'current:', this.currentScene);
         } catch (error) {
             console.error('[ObsService] Failed to fetch scenes', error);
         }
@@ -143,6 +145,7 @@ export class ObsService {
 
         try {
             await this.obs.call('SetCurrentProgramScene', { sceneName });
+            this.currentScene = sceneName;
             telemetryService.trackEvent('OBS.SwitchScene', { sceneName });
         } catch (error) {
             console.error(`[ObsService] Failed to switch to scene ${sceneName}`, error);
@@ -155,6 +158,7 @@ export class ObsService {
             connected: this.connected,
             missingScenes: this.missingScenes,
             availableScenes: this.availableScenes,
+            currentScene: this.currentScene,
             host: this.currentHost || '',
             autoConnect: !!configService.get('obs')?.autoConnect,
         };

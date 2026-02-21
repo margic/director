@@ -60,8 +60,9 @@ const createWindow = () => {
   });
 
   // In production, load the index.html of the app.
+  // __dirname = dist-electron/main/ → need ../../dist/index.html
   if (app.isPackaged) {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    mainWindow.loadFile(path.join(__dirname, '../../dist/index.html'));
   } else {
     // In development, load the vite dev server
     mainWindow.loadURL('http://localhost:5173');
@@ -137,7 +138,7 @@ app.on('ready', () => {
     // Update overlay with sequence progress
     if (progress.currentStep > 0) {
       const data = {
-        title: progress.sequenceId,
+        title: progress.sequenceName,
         step: progress.currentStep,
         total: progress.totalSteps,
         label: humanizeIntent(progress.stepIntent),

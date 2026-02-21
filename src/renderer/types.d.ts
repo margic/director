@@ -123,6 +123,7 @@ export interface ExecutionResult {
 export interface SequenceProgress {
   executionId: string;
   sequenceId: string;
+  sequenceName: string;
   currentStep: number;
   totalSteps: number;
   stepIntent: string;
@@ -165,7 +166,7 @@ export interface IElectronAPI {
   directorStop: () => Promise<any>;
   directorStatus: () => Promise<any>;
   directorListSessions: (centerId?: string) => Promise<RaceSession[]>;
-  obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[]; host: string; autoConnect: boolean }>;
+  obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[]; currentScene: string; host: string; autoConnect: boolean }>;
   obsGetScenes: () => Promise<string[]>;
   obsSetScene: (sceneName: string) => Promise<void>;
   obsConnect: () => Promise<void>;

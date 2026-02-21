@@ -4,6 +4,7 @@ import { UserProfile, RaceSession } from '../types'
 import { clientTelemetry } from '../telemetry'
 import { extensionViews } from '../extension-views'
 import { SequencesDashboardCard } from '../components/sequences/SequencesDashboardCard'
+import { OverlayDashboardCard } from '../components/overlay/OverlayDashboardCard'
 
 interface DashboardProps {
   user: any;
@@ -157,7 +158,7 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
 
   // Dashboard View
   return (
-    <div className="w-full max-w-6xl space-y-6">
+    <div className="w-full space-y-6">
       {/* Sessions List */}
       <div className="bg-card border border-border rounded-xl p-6">
         <div className="flex justify-between items-center mb-4">
@@ -260,6 +261,9 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
 
         {/* Sequence Executor Widget — core, always visible */}
         <SequencesDashboardCard onClick={() => setCurrentView('sequences')} />
+
+        {/* Broadcast Overlay Widget — core, always visible */}
+        <OverlayDashboardCard onClick={() => setCurrentView('overlay')} />
 
         {/* Extension Dashboard Widgets — rendered dynamically from the view registry */}
         {extensionViews.map((view) => {

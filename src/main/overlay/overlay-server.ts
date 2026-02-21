@@ -37,15 +37,22 @@ export class OverlayServer {
   private port: number;
   private overlayBus: OverlayBus;
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null;
-  private staticDir: string;
+  /** Root of the Vite build output (dist/). */
+  private distRoot: string;
+  /** Overlay HTML lives in dist/src/overlay/ (Vite multi-page output). */
+  private overlayDir: string;
 
   constructor(overlayBus: OverlayBus, port: number = 9100) {
     this.overlayBus = overlayBus;
     this.port = port;
 
-    // Resolve static directory: dist/overlay in production, src/overlay in dev
-    // In compiled structure: dist-electron/main/overlay-server.js -> ../../dist/overlay
-    this.staticDir = path.join(__dirname, '../../dist/overlay');
+    // At runtime __dirname is dist-electron/main/overlay/
+    // The Vite output root is at ../../../dist relative to that.
+    this.distRoot = path.join(__dirname, '../../../dist');
+    this.overlayDir = path.join(this.distRoot, 'src/overlay');
+
+    console.log(`[OverlayServer] Static root: ${this.distRoot} (exists: ${fs.existsSync(this.distRoot)})`);
+    console.log(`[OverlayServer] Overlay dir: ${this.overlayDir} (exists: ${fs.existsSync(this.overlayDir)})`);
   }
 
   /**
@@ -148,9 +155,15 @@ export class OverlayServer {
       return;
     }
 
-    // Static files: /overlay and /overlay/*
+    // Static assets referenced by the overlay HTML (../../assets/ resolves to /assets/)
+    if (url.pathname.startsWith('/assets/')) {
+      this.serveFile(path.join(this.distRoot, url.pathname), res);
+      return;
+    }
+
+    // Overlay SPA: /overlay and /overlay/*
     if (url.pathname === '/overlay' || url.pathname.startsWith('/overlay/')) {
-      this.serveStatic(url.pathname, res);
+      this.serveOverlay(url.pathname, res);
       return;
     }
 
@@ -166,38 +179,60 @@ export class OverlayServer {
     res.end('Not Found');
   }
 
-  private serveStatic(pathname: string, res: http.ServerResponse): void {
-    // Strip /overlay prefix to get relative path
-    let relativePath = pathname.replace(/^\/overlay\/?/, '') || 'index.html';
+  /**
+   * Serve files from the overlay subdirectory (dist/src/overlay/).
+   * Falls back to index.html for SPA client-side routing.
+   */
+  private serveOverlay(pathname: string, res: http.ServerResponse): void {
+    const relativePath = pathname.replace(/^\/overlay\/?/, '') || 'index.html';
+    const filePath = path.join(this.overlayDir, relativePath);
 
-    const filePath = path.join(this.staticDir, relativePath);
+    console.log(`[OverlayServer] serveOverlay: pathname='${pathname}' → file='${filePath}' exists=${fs.existsSync(filePath)}`);
 
     // Security: prevent directory traversal
-    if (!filePath.startsWith(this.staticDir)) {
+    if (!filePath.startsWith(this.overlayDir)) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
       res.end('Forbidden');
       return;
     }
 
-    // Check if file exists
-    if (!fs.existsSync(filePath)) {
-      // SPA fallback: serve index.html for client-side routing
-      const indexPath = path.join(this.staticDir, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(fs.readFileSync(indexPath));
-        return;
-      }
+    // Try the exact file first
+    if (fs.existsSync(filePath)) {
+      return this.serveFile(filePath, res);
+    }
 
-      // If the static dir doesn't exist yet (before first build), serve a placeholder
+    // SPA fallback: serve index.html for client-side routing
+    const indexPath = path.join(this.overlayDir, 'index.html');
+    if (fs.existsSync(indexPath)) {
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end(this.getPlaceholderHtml());
+      res.end(fs.readFileSync(indexPath));
+      return;
+    }
+
+    // Before first build, serve a placeholder
+    res.writeHead(200, { 'Content-Type': 'text/html' });
+    res.end(this.getPlaceholderHtml());
+  }
+
+  /**
+   * Serve a single file by absolute path with correct MIME type.
+   */
+  private serveFile(filePath: string, res: http.ServerResponse): void {
+    // Security: must be within dist root
+    if (!filePath.startsWith(this.distRoot)) {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('Forbidden');
+      return;
+    }
+
+    if (!fs.existsSync(filePath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Not Found');
       return;
     }
 
     const ext = path.extname(filePath);
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
     res.writeHead(200, { 'Content-Type': contentType });
     res.end(fs.readFileSync(filePath));
   }

@@ -262,6 +262,7 @@ export class SequenceScheduler extends EventEmitter {
       this.emitProgress({
         executionId,
         sequenceId: sequence.id,
+        sequenceName: sequence.name ?? sequence.id,
         currentStep: 0,
         totalSteps: sequence.steps.length,
         stepIntent: 'system.error',
@@ -288,6 +289,7 @@ export class SequenceScheduler extends EventEmitter {
     this.emitProgress({
       executionId,
       sequenceId: sequence.id,
+      sequenceName: sequence.name ?? sequence.id,
       currentStep: 0,
       totalSteps,
       stepIntent: 'sequence.start',
@@ -307,6 +309,7 @@ export class SequenceScheduler extends EventEmitter {
       this.emitProgress({
         executionId,
         sequenceId: sequence.id,
+        sequenceName: sequence.name ?? sequence.id,
         currentStep: i + 1,
         totalSteps,
         stepIntent: step.intent,
@@ -329,6 +332,7 @@ export class SequenceScheduler extends EventEmitter {
         this.emitProgress({
           executionId,
           sequenceId: sequence.id,
+          sequenceName: sequence.name ?? sequence.id,
           currentStep: i + 1,
           totalSteps,
           stepIntent: step.intent,
@@ -351,6 +355,7 @@ export class SequenceScheduler extends EventEmitter {
         this.emitProgress({
           executionId,
           sequenceId: sequence.id,
+          sequenceName: sequence.name ?? sequence.id,
           currentStep: i + 1,
           totalSteps,
           stepIntent: step.intent,
@@ -379,6 +384,7 @@ export class SequenceScheduler extends EventEmitter {
     this.emitProgress({
       executionId,
       sequenceId: sequence.id,
+      sequenceName: sequence.name ?? sequence.id,
       currentStep: totalSteps,
       totalSteps,
       stepIntent: 'sequence.end',

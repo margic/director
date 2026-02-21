@@ -93,6 +93,7 @@ export interface ExecutionResult {
 export interface SequenceProgress {
   executionId: string;
   sequenceId: string;
+  sequenceName: string;
   currentStep: number;
   totalSteps: number;
   stepIntent: string;
