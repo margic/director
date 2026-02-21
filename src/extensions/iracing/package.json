@@ -82,6 +82,88 @@
             "connected": { "type": "boolean" }
           }
         }
+      },
+      {
+        "event": "iracing.driversChanged",
+        "title": "Drivers Changed",
+        "description": "Emitted when the driver list changes (session load, driver join/leave).",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "drivers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "carIdx": { "type": "number" },
+                  "carNumber": { "type": "string" },
+                  "userName": { "type": "string" },
+                  "teamName": { "type": "string" },
+                  "carName": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "event": "iracing.cameraGroupsChanged",
+        "title": "Camera Groups Changed",
+        "description": "Emitted when the list of available camera groups changes (session load/change).",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "groups": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "groupNum": { "type": "number" },
+                  "groupName": { "type": "string" },
+                  "isScenic": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "event": "iracing.raceStateChanged",
+        "title": "Race State Changed",
+        "description": "Emitted at 4Hz with live telemetry: car positions, gaps, lap times, pit status, and session flags.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "cars": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "carIdx": { "type": "number" },
+                  "carNumber": { "type": "string" },
+                  "driverName": { "type": "string" },
+                  "carClass": { "type": "string" },
+                  "position": { "type": "number" },
+                  "classPosition": { "type": "number" },
+                  "lapDistPct": { "type": "number" },
+                  "gapToLeader": { "type": "number" },
+                  "gapToCarAhead": { "type": "number" },
+                  "onPitRoad": { "type": "boolean" },
+                  "lapsCompleted": { "type": "number" },
+                  "lastLapTime": { "type": "number" },
+                  "bestLapTime": { "type": "number" }
+                }
+              }
+            },
+            "focusedCarIdx": { "type": "number" },
+            "sessionFlags": { "type": "number" },
+            "sessionLapsRemain": { "type": "number" },
+            "sessionTimeRemain": { "type": "number" },
+            "leaderLap": { "type": "number" },
+            "totalSessionLaps": { "type": "number" },
+            "trackName": { "type": "string" }
+          }
+        }
       }
     ],
     "overlays": [

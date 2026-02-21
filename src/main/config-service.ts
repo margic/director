@@ -12,6 +12,7 @@ interface AppConfig {
     enabled: boolean;
     host?: string;
     password?: string;
+    autoConnect?: boolean;
   };
   iracing: {
     enabled: boolean;
@@ -38,7 +39,8 @@ const schema = {
     properties: {
       enabled: { type: 'boolean', default: true },
       host: { type: 'string' },
-      password: { type: 'string' }
+      password: { type: 'string' },
+      autoConnect: { type: 'boolean', default: false }
     },
     default: {}
   },

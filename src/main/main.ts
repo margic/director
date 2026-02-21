@@ -85,7 +85,8 @@ app.on('ready', () => {
   discordService.setTelemetryService(telemetryService);
 
   obsService = new ObsService();
-  obsService.start('ws://localhost:4455');
+  // OBS auto-connect is deferred until extension host starts.
+  // See extensionHost.start().then(...) below.
   // Initialize Extension Host with Two-Tier Registry
   intentRegistry = new IntentRegistry();
   capabilityCatalog = new CapabilityCatalog();
@@ -157,16 +158,33 @@ app.on('ready', () => {
   extensionHost.start().then(() => {
     // Initialize sequence library after extensions are loaded (needs catalog)
     return sequenceLibrary.initialize();
+  }).then(() => {
+    // Auto-connect OBS only if the extension is enabled AND autoConnect is on
+    const extStatus = extensionHost.getStatus();
+    const obsExtEnabled = extStatus['director-obs']?.active ?? false;
+    const obsConfig = configService.get('obs');
+    if (obsExtEnabled && obsConfig?.autoConnect) {
+      console.log('[Main] OBS extension enabled with autoConnect — connecting...');
+      obsService.connect();
+    } else {
+      console.log(`[Main] OBS auto-connect skipped (enabled=${obsExtEnabled}, autoConnect=${!!obsConfig?.autoConnect})`);
+    }
   }).catch(err => {
     console.error('Failed to start extension host:', err);
     telemetryService.trackException(err, { component: 'ExtensionHost' });
   });
 
-  // Forward extension events to Renderer
-  eventBus.on('*', (data) => {
+  // Forward extension events to Renderer, caching last event per eventName
+  const extensionEventCache = new Map<string, { extensionId: string; eventName: string; payload: any }>();
+  eventBus.on('*', (data: { extensionId: string; eventName: string; payload: any }) => {
+    extensionEventCache.set(data.eventName, data);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('extension:event', data);
     }
+  });
+
+  ipcMain.handle('extensions:get-last-event', (_event, eventName: string) => {
+    return extensionEventCache.get(eventName) ?? null;
   });
 
   createWindow();
@@ -228,6 +246,22 @@ app.on('ready', () => {
   
   ipcMain.handle('extensions:set-enabled', async (event, extensionId, enabled) => {
       await extensionHost.setExtensionEnabled(extensionId, enabled);
+
+      // Lifecycle hook: stop/start core services tied to extensions
+      if (extensionId === 'director-obs') {
+        if (!enabled) {
+          console.log('[Main] OBS extension disabled — stopping ObsService.');
+          obsService.stop();
+        } else {
+          // Only auto-connect if preference says so
+          const obsConfig = configService.get('obs');
+          if (obsConfig?.autoConnect) {
+            console.log('[Main] OBS extension enabled — auto-connecting ObsService.');
+            obsService.connect();
+          }
+        }
+      }
+
       return true;
   });
 
@@ -243,9 +277,14 @@ app.on('ready', () => {
         // TODO: Disable extension
       }
     } else if (key === 'obs.enabled') {
+      // OBS lifecycle is managed through extensions:set-enabled for director-obs.
+      // This path kept for backward compatibility but delegates to extension host.
       if (value) {
-        obsService.start();
+        await extensionHost.setExtensionEnabled('director-obs', true);
+        const obsConfig = configService.get('obs');
+        if (obsConfig?.autoConnect) obsService.connect();
       } else {
+        await extensionHost.setExtensionEnabled('director-obs', false);
         obsService.stop();
       }
     }
@@ -274,6 +313,23 @@ app.on('ready', () => {
 
   ipcMain.handle('obs:set-scene', async (event, sceneName) => {
     return await obsService.switchScene(sceneName);
+  });
+
+  ipcMain.handle('obs:connect', async () => {
+    return obsService.connect();
+  });
+
+  ipcMain.handle('obs:disconnect', async () => {
+    return obsService.stop();
+  });
+
+  ipcMain.handle('obs:get-config', () => {
+    return obsService.getConfig();
+  });
+
+  ipcMain.handle('obs:save-settings', async (event, settings: { host: string; password?: string; autoConnect: boolean }) => {
+    obsService.saveConfig(settings.host, settings.password, settings.autoConnect);
+    return true;
   });
 
   // Director IPC Handlers

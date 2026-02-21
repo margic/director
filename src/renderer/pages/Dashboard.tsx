@@ -54,29 +54,56 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
     }
   }, [user]);
 
-  // Poll for available sessions
+  // Poll for available sessions with exponential backoff (5s → 3min)
   useEffect(() => {
+    const BASE_INTERVAL = 5_000;   // 5 seconds
+    const MAX_INTERVAL  = 180_000; // 3 minutes
+    let currentInterval = BASE_INTERVAL;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastSessionSignature = '';
+    let cancelled = false;
+
     const fetchSessions = async () => {
       const centerId = userProfile?.centerId || userProfile?.center?.id;
-      if (centerId && window.electronAPI?.directorListSessions) {
-        setLoadingSessions(true);
-        try {
-          const sessionList = await window.electronAPI.directorListSessions(centerId);
-          setSessions(sessionList);
-        } catch (error) {
-          console.error('Failed to fetch sessions:', error);
-        } finally {
+      if (!centerId || !window.electronAPI?.directorListSessions) return;
+
+      setLoadingSessions(true);
+      try {
+        const sessionList = await window.electronAPI.directorListSessions(centerId);
+        if (cancelled) return;
+
+        // Build a signature to detect data changes
+        const sig = sessionList.map(s => `${s.raceSessionId}:${s.status ?? ''}`).join('|');
+        if (sig !== lastSessionSignature) {
+          // Data changed — reset backoff
+          currentInterval = BASE_INTERVAL;
+          lastSessionSignature = sig;
+        } else {
+          // No change — increase interval with exponential backoff
+          currentInterval = Math.min(currentInterval * 2, MAX_INTERVAL);
+        }
+
+        setSessions(sessionList);
+      } catch (error) {
+        console.error('Failed to fetch sessions:', error);
+        // On error, still back off (don't hammer a failing endpoint)
+        currentInterval = Math.min(currentInterval * 2, MAX_INTERVAL);
+      } finally {
+        if (!cancelled) {
           setLoadingSessions(false);
+          timer = setTimeout(fetchSessions, currentInterval);
         }
       }
     };
 
     if (userProfile) {
       fetchSessions();
-      // Poll every 10 seconds for session updates
-      const interval = setInterval(fetchSessions, 10000);
-      return () => clearInterval(interval);
     }
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [userProfile]);
 
   const toggleDirector = async () => {

@@ -165,9 +165,13 @@ export interface IElectronAPI {
   directorStop: () => Promise<any>;
   directorStatus: () => Promise<any>;
   directorListSessions: (centerId?: string) => Promise<RaceSession[]>;
-  obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[] }>;
+  obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[]; host: string; autoConnect: boolean }>;
   obsGetScenes: () => Promise<string[]>;
   obsSetScene: (sceneName: string) => Promise<void>;
+  obsConnect: () => Promise<void>;
+  obsDisconnect: () => Promise<void>;
+  obsGetConfig: () => Promise<{ host: string; passwordSet: boolean; autoConnect: boolean }>;
+  obsSaveSettings: (settings: { host: string; password?: string; autoConnect: boolean }) => Promise<boolean>;
   discordGetStatus: () => Promise<{ connected: boolean; channelName?: string; lastMessage?: string; messagesSent: number }>;
   discordConnect: (token?: string, channelId?: string) => Promise<void>;
   discordDisconnect: () => Promise<void>;
@@ -180,9 +184,10 @@ export interface IElectronAPI {
   };
   extensions: {
       getStatus: () => Promise<Record<string, { active: boolean; version?: string }>>;
+      setEnabled: (id: string, enabled: boolean) => Promise<void>;
       getViews: (type?: 'panel' | 'dialog' | 'overlay' | 'widget') => Promise<any[]>;
       executeIntent: (intent: string, data: any) => Promise<any>;
-      executeCommand: (command: string, args?: any) => Promise<any>;
+      getLastEvent: (eventName: string) => Promise<{ extensionId: string; eventName: string; payload: any } | null>;
       onExtensionEvent: (callback: (data: { extensionId: string; eventName: string; payload: any }) => void) => () => void;
   };
   sequences: {

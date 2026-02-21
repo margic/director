@@ -9,22 +9,31 @@ export const IracingDashboardCard = ({ onClick }: IracingDashboardCardProps) => 
     const [connected, setConnected] = useState(false);
 
     useEffect(() => {
-        const pollStatus = async () => {
+        // Query the cached connection state on mount
+        const init = async () => {
             if (window.electronAPI?.extensions) {
                 try {
-                    const statuses = await window.electronAPI.extensions.getStatus();
-                    const iracing = statuses['director-iracing'];
-                    // Use extension-level active state as proxy for connection
-                    setConnected(iracing?.active || false);
+                    const lastEvent = await window.electronAPI.extensions.getLastEvent('iracing.connectionStateChanged');
+                    if (lastEvent?.payload?.connected !== undefined) {
+                        setConnected(lastEvent.payload.connected);
+                    }
                 } catch (e) {
-                    console.error('Failed to get iracing status', e);
+                    console.error('Failed to get iracing connection state', e);
                 }
             }
         };
+        init();
 
-        pollStatus();
-        const interval = setInterval(pollStatus, 2000);
-        return () => clearInterval(interval);
+        // Subscribe to live connection state changes
+        let unsub: (() => void) | undefined;
+        if (window.electronAPI?.extensions) {
+            unsub = window.electronAPI.extensions.onExtensionEvent((data) => {
+                if (data.eventName === 'iracing.connectionStateChanged') {
+                    setConnected(!!data.payload?.connected);
+                }
+            });
+        }
+        return () => unsub?.();
     }, []);
 
     return (

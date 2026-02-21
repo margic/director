@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obsGetStatus: () => ipcRenderer.invoke('obs:get-status'),
   obsGetScenes: () => ipcRenderer.invoke('obs:get-scenes'),
   obsSetScene: (sceneName: string) => ipcRenderer.invoke('obs:set-scene', sceneName),
+  obsConnect: () => ipcRenderer.invoke('obs:connect'),
+  obsDisconnect: () => ipcRenderer.invoke('obs:disconnect'),
+  obsGetConfig: () => ipcRenderer.invoke('obs:get-config'),
+  obsSaveSettings: (settings: { host: string; password?: string; autoConnect: boolean }) => ipcRenderer.invoke('obs:save-settings', settings),
   
   // Discord API
   discordGetStatus: () => ipcRenderer.invoke('discord:get-status'),
@@ -47,6 +51,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       setEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke('extensions:set-enabled', id, enabled),
       getViews: (type?: string) => ipcRenderer.invoke('extensions:get-views', type),
       executeIntent: (intent: string, data: any) => ipcRenderer.invoke('extensions:execute-intent', intent, data),
+      getLastEvent: (eventName: string) => ipcRenderer.invoke('extensions:get-last-event', eventName),
       onExtensionEvent: (callback: (data: any) => void) => {
         const subscription = (_: any, data: any) => callback(data);
         ipcRenderer.on('extension:event', subscription);
