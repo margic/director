@@ -1,7 +1,8 @@
 # Feature: Talk to Drivers (Communication System)
 
-> **Status:** Active (Implemented via Discord Extension)
+> **Status:** Active (Implemented via Discord Extension + DiscordService)
 > **Extension Location:** `src/extensions/discord`
+> **Core Service:** `src/main/discord-service.ts`
 > **Primary Intent:** `communication.announce`
 
 ## 1. Feature Overview
@@ -19,68 +20,153 @@ The feature contributes the following intents to the Director ecosystem:
 #### `communication.announce`
 Broadcasting a message to the entire field.
 *   **Parameters**:
-    *   `message` (string, optional): Text to be converted to speech.
-    *   `audioUrl` (string, optional): Path or URL to a pre-recorded audio file (e.g., a siren or recorded briefing).
-    *   `priority` (enum: `low`, `normal`, `critical`): Determines if other audio should be ducked or interrupted.
-*   **Behavior**: The active communication provider takes the input and broadcasts it to the configured "All Drivers" channel.
+    *   `message` (string, required): Text to be converted to speech via the Race Control TTS API.
+*   **Behavior**: The active communication provider takes the input and broadcasts it to the configured voice channel.
 
 #### `communication.direct` (Future)
 Talking to a specific driver or team.
 *   **Parameters**: `driverId`, `message`.
 
-## 3. Current Implementation: Discord Bot
-The reference implementation for this feature is the **Discord Extension**. It fulfills the "Talk to Drivers" requirement by acting as a bot that joins a Discord Voice Channel.
+## 3. Architecture
 
-### 3.1 Why Discord?
-Most Sim Racing leagues use Discord for race control and driver briefings. It provides high-quality, low-latency voice capabilities and is ubiquitous in the community.
+The Discord integration follows a **split-responsibility** pattern consistent with other Director integrations (e.g., OBS):
 
-### 3.2 Technical Architecture
-The Discord Extension operates as an adaptor in the Extension Host:
+| Layer | Component | Responsibility |
+|:------|:----------|:---------------|
+| **Main Process** | `DiscordService` (`discord-service.ts`) | Owns the single `discord.js` Client, voice connection, audio player, FFmpeg bridge, TTS API calls, and connection status. |
+| **Extension** | `director-discord` (`extensions/discord/index.ts`) | Lightweight adapter — registers the `communication.announce` intent handler and delegates TTS playback to `DiscordService` via the `invoke()` bridge. |
+| **Renderer** | Status & Settings panels (`extensions/discord/renderer/`) | UI for connection status, manual TTS testing, and configuration (token, channel ID, auto-connect). |
 
-1.  **Configuration**:
-    *   The extension manages its own settings (Bot Token, Guild ID, Target Voice Channel ID).
-    *   These are configured via the Extension Panel UI.
+### 3.1 Why a Single Client?
 
-2.  **Execution Flow**:
-    *   **Trigger**: A Sequence (e.g., "Full Course Yellow") contains a `communication.announce` step.
-    *   **Routing**: The Director Core routes this intent to the enabled `director-discord` extension.
-    *   **Action**:
-        1.  The Extension receives the payload.
-        2.  If `message` is provided, it uses a TTS engine (e.g., Google TTS or OS Native) to generate an MP3 stream.
-        3.  The Discord Bot joins the configured Voice Channel.
-        4.  The Audio Stream is played into the channel.
-        5.  The Bot remains connected or disconnects based on "Keep Alive" settings.
+An earlier revision had the extension spawn its own `discord.js` Client in the Extension Host child process, while `DiscordService` maintained a separate Client in the main process for the panel UI. This caused:
 
-### 3.3 Manifest Definition
-The extension `package.json` declares:
+- **Status mismatch**: The panel polled `DiscordService.getStatus()` which never reflected the extension's connection.
+- **Double login**: Two bot clients consumed resources and could conflict.
+- **FFmpeg duplication**: The packaged-app FFmpeg workaround (asar-unpack + prism-media monkey-patch) only existed in `DiscordService`.
+
+The current architecture unifies everything under `DiscordService`. The extension is a thin intent-routing layer — no networking dependencies of its own.
+
+### 3.2 Invoke Bridge
+
+Extensions run in an Electron `utilityProcess` and cannot directly import main-process singletons. The `invoke()` bridge solves this:
+
+```
+Extension (child process)                    Main Process
+─────────────────────────                    ─────────────
+director.invoke('discordPlayTts', text)  →   extensionHost.handleInvoke()
+                                              → customInvokeHandlers['discordPlayTts']
+                                              → discordService.playTts(text)
+```
+
+The handler is registered in `main.ts` at startup:
+```ts
+extensionHost.registerInvokeHandler('discordPlayTts', async ([text]) => {
+  return discordService.playTts(text);
+});
+```
+
+## 4. Connection Lifecycle
+
+### 4.1 Auto-Connect
+Discord auto-connect mirrors the OBS pattern and is controlled by the `discord.autoConnect` config setting:
+
+```
+App Start → Extension Host starts → Extensions loaded → Sequence Library initialized
+  → Check: discord extension enabled? AND discord.autoConnect === true?
+    → Yes: Read token (secure store) + channelId (config)
+      → discordService.connect(token, channelId)
+    → No: Skip (user can connect manually from the panel)
+```
+
+### 4.2 Manual Connect / Disconnect
+The panel's Connect and Disconnect buttons invoke `discord:connect` / `discord:disconnect` IPC handlers in `main.ts`, which call `discordService.connect()` / `discordService.disconnect()`.
+
+### 4.3 Extension Enable/Disable
+When the Discord extension is toggled via the Extensions panel:
+- **Disabled**: `discordService.disconnect()` is called.
+- **Enabled**: If `autoConnect` is on and credentials are present, `discordService.connect()` is called.
+
+## 5. Configuration
+
+Settings are stored via `ConfigService` (`electron-store`):
+
+| Key | Type | Storage | Description |
+|:----|:-----|:--------|:------------|
+| `discord.enabled` | `boolean` | Config | Extension enabled/disabled |
+| `discord.channelId` | `string` | Config | Target Discord voice channel ID |
+| `discord.autoConnect` | `boolean` | Config | Connect automatically on startup |
+| `discord.token` | `string` | Secure (safeStorage) | Discord bot token |
+
+The Settings panel (`extensions/discord/renderer/Settings.tsx`) provides inputs for the token, channel ID, and an auto-connect toggle.
+
+## 6. TTS Pipeline
+
+1. **Trigger**: A Sequence step (e.g., "Full Course Yellow") fires the `communication.announce` intent with `{ message: "Safety car deployed" }`.
+2. **Routing**: The Extension Host dispatches to the `director-discord` extension's registered handler.
+3. **Delegation**: The extension calls `director.invoke('discordPlayTts', message)`.
+4. **API Call**: `DiscordService.playTts()` obtains an auth token via `AuthService`, then POSTs to the Race Control TTS API (`/api/tts`) with the text.
+5. **Audio Playback**: The returned WAV audio buffer is wrapped in a `Readable` stream, turned into a `createAudioResource`, and played through the `AudioPlayer` subscribed to the voice connection.
+
+### FFmpeg in Packaged Builds
+`@discordjs/voice` depends on `prism-media` which requires FFmpeg. In packaged Electron apps, the `ffmpeg-static` binary is inside the asar archive and cannot be spawned. The solution:
+- `ffmpeg-static/**` is listed in `asarUnpack` in `package.json`.
+- `discord-service.ts` monkey-patches `PrismFFmpeg.getInfo()` at module load to point at the unpacked binary path.
+
+## 7. Panel UI
+
+### Status Tab
+- Polls `discord:get-status` IPC every 3 seconds.
+- Shows **ONLINE** / **OFFLINE** badge, channel name, messages sent count.
+- Connect / Disconnect buttons.
+- Manual TTS test input with broadcast button.
+- Event log of recent TTS operations.
+
+### Settings Tab
+- Bot Token (password field, shows "Token is set" when stored).
+- Voice Channel ID.
+- Auto-Connect toggle (`Switch` component).
+- Save button persists all fields.
+
+## 8. Manifest Definition
 
 ```json
 {
   "name": "director-discord",
-  "displayName": "Discord Communication Bridge",
+  "version": "1.0.0",
+  "main": "index.js",
+  "displayName": "Discord Integration",
+  "description": "Provides Discord features including text-to-speech announcements.",
   "contributes": {
     "intents": [
       {
-        "name": "communication.announce",
-        "description": "Broadcasts a voice message to the specific Discord channel",
+        "intent": "communication.announce",
+        "title": "Announce Message",
+        "description": "Announces a message via Discord TTS.",
         "schema": {
           "type": "object",
           "properties": {
-            "message": { "type": "string" },
-            "audioUrl": { "type": "string" }
-          }
+            "message": { "type": "string" }
+          },
+          "required": ["message"]
         }
       }
     ],
-    "views": [
-      { "id": "discord-status", "type": "widget" },
-      { "id": "discord-settings", "type": "panel" }
-    ]
+    "settings": {
+      "discord.channelId": {
+        "type": "string",
+        "description": "The Voice Channel ID to join."
+      },
+      "discord.token": {
+        "type": "string",
+        "description": "Bot Token (Secure)"
+      }
+    }
   }
 }
 ```
 
-## 4. Alternative Implementations (Future)
+## 9. Alternative Implementations (Future)
 By focusing on the "Talk to Drivers" feature set, we allow for future drivers to be swapped in without changing the core automation sequences:
 *   **TeamSpeak Integration**: Common in older leagues.
 *   **iRacing Radio**: Using the iRacing SDK to transmit directly to the in-game radio frequency (if API permits).

@@ -9,7 +9,51 @@ import {
   NoSubscriberBehavior
 } from '@discordjs/voice';
 import { Readable } from 'stream';
+import { app } from 'electron';
+import path from 'path';
 import { apiConfig } from './auth-config';
+
+// prism-media discovers FFmpeg via require('ffmpeg-static'), but in a
+// packaged Electron build the binary lives inside app.asar which cannot
+// be spawned.  We resolve the correct path and force-register it with
+// prism-media's FFmpeg class *before* @discordjs/voice ever uses it.
+import { FFmpeg as PrismFFmpeg } from 'prism-media';
+import { spawnSync } from 'child_process';
+
+(() => {
+  let ffmpegPath: string;
+  if (app.isPackaged) {
+    ffmpegPath = path.join(
+      process.resourcesPath,
+      'app.asar.unpacked',
+      'node_modules',
+      'ffmpeg-static',
+      process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg',
+    );
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    ffmpegPath = require('ffmpeg-static');
+  }
+  // Force prism-media to accept this path by pre-populating its cache
+  // via getInfo(true) won't help because require() inside asar still fails.
+  // Instead, we spawnSync ourselves and monkey-patch the static info.
+  try {
+    const result = spawnSync(ffmpegPath, ['-h'], { windowsHide: true });
+    if (!result.error) {
+      const output = Buffer.concat(result.output.filter(Boolean) as Buffer[]).toString();
+      // Access the internal FFMPEG cache via getInfo() structure
+      // After calling getInfo once with our patched path, it will be cached.
+      (PrismFFmpeg as any).getInfo = (force = false) => {
+        return { command: ffmpegPath, output, get version() { return (/version (.+) Copyright/mi.exec(output) || [])[1] || 'unknown'; } };
+      };
+      console.log('[Discord] FFmpeg resolved:', ffmpegPath);
+    } else {
+      console.error('[Discord] FFmpeg binary not executable:', result.error.message);
+    }
+  } catch (err: any) {
+    console.error('[Discord] Failed to initialize FFmpeg:', err.message);
+  }
+})();
 import { AuthService } from './auth-service';
 import { TelemetryService } from './telemetry-service';
 

@@ -104,6 +104,9 @@ export interface ExtensionAPI {
   updateOverlay(overlayId: string, data: Record<string, unknown>): void;
   showOverlay(overlayId: string): void;
   hideOverlay(overlayId: string): void;
+
+  // Generic invoke — call a registered handler in the main process
+  invoke(method: string, ...args: any[]): Promise<any>;
 }
 
 // IPC Messages

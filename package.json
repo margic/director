@@ -28,6 +28,9 @@
       },
       "!.env"
     ],
+    "asarUnpack": [
+      "node_modules/ffmpeg-static/**"
+    ],
     "extraResources": [
       ".env"
     ],

@@ -75,6 +75,10 @@ class ExtensionApiImpl implements ExtensionAPI {
   hideOverlay(overlayId: string): void {
     ExtensionProcess.invoke('hideOverlay', [overlayId], this.extensionId);
   }
+
+  invoke(method: string, ...args: any[]): Promise<any> {
+    return ExtensionProcess.invoke(method, args, this.extensionId);
+  }
 }
 
 // Global state for the process

@@ -90,6 +90,8 @@ export class ExtensionHostService {
   
   // Track if we are ready
   private isReady: boolean = false;
+  // Custom invoke handlers registered by main process
+  private customInvokeHandlers: Map<string, (args: any[], extensionId?: string) => Promise<any>> = new Map();
 
   constructor(
     extensionsPath: string, 
@@ -229,6 +231,13 @@ export class ExtensionHostService {
    */
   public hasActiveHandler(intent: string): boolean {
     return !!this.intentRegistry.getIntent(intent);
+  }
+
+  /**
+   * Register a custom invoke handler that extensions can call via director.invoke().
+   */
+  public registerInvokeHandler(method: string, handler: (args: any[], extensionId?: string) => Promise<any>) {
+    this.customInvokeHandlers.set(method, handler);
   }
 
   private async scanAndLoad() {
@@ -491,6 +500,9 @@ export class ExtensionHostService {
             if (this.overlayBus && payload.extensionId) {
                 this.overlayBus.hideOverlay(payload.extensionId, overlayId);
             }
+        } else if (this.customInvokeHandlers.has(payload.method)) {
+            const handler = this.customInvokeHandlers.get(payload.method)!;
+            result = await handler(payload.args || [], payload.extensionId);
         } else {
             throw new Error(`Unknown method: ${payload.method}`);
         }

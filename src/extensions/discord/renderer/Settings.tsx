@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
 
 export const DiscordSettings = () => {
-    const [discordConfig, setDiscordConfig] = useState({ tokenSet: false, channelId: '' });
+    const [discordConfig, setDiscordConfig] = useState({ tokenSet: false, channelId: '', autoConnect: false });
     const [discordTokenInput, setDiscordTokenInput] = useState('');
 
     useEffect(() => {
@@ -15,7 +16,8 @@ export const DiscordSettings = () => {
                     const tokenSet = await window.electronAPI.config.isSecureSet('discord.token');
                     setDiscordConfig({
                         tokenSet,
-                        channelId: discord?.channelId || ''
+                        channelId: discord?.channelId || '',
+                        autoConnect: discord?.autoConnect ?? false
                     });
                 } catch (e) {
                     console.error("Failed to load Discord config", e);
@@ -29,6 +31,7 @@ export const DiscordSettings = () => {
         try {
             if (window.electronAPI?.config) {
                 await window.electronAPI.config.set('discord.channelId', discordConfig.channelId);
+                await window.electronAPI.config.set('discord.autoConnect', discordConfig.autoConnect);
                 if (discordTokenInput) {
                     await window.electronAPI.config.saveSecure('discord.token', discordTokenInput);
                     setDiscordConfig(prev => ({ ...prev, tokenSet: true }));
@@ -71,6 +74,17 @@ export const DiscordSettings = () => {
                         onChange={(e) => setDiscordConfig({...discordConfig, channelId: e.target.value})}
                     />
                     <p className="text-xs text-muted-foreground">The ID of the voice channel to join.</p>
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                    <div className="space-y-0.5">
+                        <label className="text-sm font-medium uppercase text-muted-foreground">Auto-Connect</label>
+                        <p className="text-xs text-muted-foreground">Automatically connect to Discord when Director starts.</p>
+                    </div>
+                    <Switch
+                        checked={discordConfig.autoConnect}
+                        onCheckedChange={(checked) => setDiscordConfig({...discordConfig, autoConnect: checked})}
+                    />
                 </div>
 
                 <Button onClick={handleSaveDiscord} className="w-full">Save Discord Settings</Button>

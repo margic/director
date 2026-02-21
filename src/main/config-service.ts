@@ -20,6 +20,7 @@ interface AppConfig {
   discord: {
     enabled: boolean;
     channelId?: string;
+    autoConnect?: boolean;
   };
 }
 
@@ -55,7 +56,8 @@ const schema = {
     type: 'object',
     properties: {
       enabled: { type: 'boolean', default: true },
-      channelId: { type: 'string' }
+      channelId: { type: 'string' },
+      autoConnect: { type: 'boolean', default: false }
     },
     default: {}
   }

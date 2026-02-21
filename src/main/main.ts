@@ -109,6 +109,11 @@ app.on('ready', () => {
   const extensionsPath = path.join(__dirname, '../extensions');
   extensionHost = new ExtensionHostService(extensionsPath, intentRegistry, eventBus, viewRegistry, authService, capabilityCatalog, overlayBus);
 
+  // Register invoke handlers so extensions can delegate to main-process services
+  extensionHost.registerInvokeHandler('discordPlayTts', async ([text]) => {
+    return discordService.playTts(text);
+  });
+
   // Initialize Director Service — no longer depends on ObsService directly.
   // OBS scene switching is now handled by the obs extension via intents.
   directorService = new DirectorService(authService, extensionHost);
@@ -159,7 +164,7 @@ app.on('ready', () => {
   extensionHost.start().then(() => {
     // Initialize sequence library after extensions are loaded (needs catalog)
     return sequenceLibrary.initialize();
-  }).then(() => {
+  }).then(async () => {
     // Auto-connect OBS only if the extension is enabled AND autoConnect is on
     const extStatus = extensionHost.getStatus();
     const obsExtEnabled = extStatus['director-obs']?.active ?? false;
@@ -169,6 +174,24 @@ app.on('ready', () => {
       obsService.connect();
     } else {
       console.log(`[Main] OBS auto-connect skipped (enabled=${obsExtEnabled}, autoConnect=${!!obsConfig?.autoConnect})`);
+    }
+
+    // Auto-connect Discord only if the extension is enabled AND autoConnect is on
+    const discordExtEnabled = extStatus['director-discord']?.active ?? false;
+    const discordConfig = configService.get('discord');
+    if (discordExtEnabled && discordConfig?.autoConnect) {
+      const token = await configService.getSecure('discord.token');
+      const channelId = discordConfig?.channelId;
+      if (token && channelId) {
+        console.log('[Main] Discord extension enabled with autoConnect — connecting...');
+        discordService.connect(token, channelId).catch(err => {
+          console.error('[Main] Discord auto-connect failed:', err.message);
+        });
+      } else {
+        console.log('[Main] Discord auto-connect skipped (missing token or channelId)');
+      }
+    } else {
+      console.log(`[Main] Discord auto-connect skipped (enabled=${discordExtEnabled}, autoConnect=${!!discordConfig?.autoConnect})`);
     }
   }).catch(err => {
     console.error('Failed to start extension host:', err);
@@ -259,6 +282,25 @@ app.on('ready', () => {
           if (obsConfig?.autoConnect) {
             console.log('[Main] OBS extension enabled — auto-connecting ObsService.');
             obsService.connect();
+          }
+        }
+      }
+
+      if (extensionId === 'director-discord') {
+        if (!enabled) {
+          console.log('[Main] Discord extension disabled — disconnecting DiscordService.');
+          discordService.disconnect();
+        } else {
+          const discordConfig = configService.get('discord');
+          if (discordConfig?.autoConnect) {
+            const token = await configService.getSecure('discord.token');
+            const channelId = discordConfig?.channelId;
+            if (token && channelId) {
+              console.log('[Main] Discord extension enabled — auto-connecting DiscordService.');
+              discordService.connect(token, channelId).catch(err => {
+                console.error('[Main] Discord auto-connect failed:', err.message);
+              });
+            }
           }
         }
       }
