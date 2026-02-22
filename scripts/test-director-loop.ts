@@ -1,7 +1,6 @@
 
 import { DirectorService } from '../src/main/director-service';
 import { AuthService } from '../src/main/auth-service';
-import { ObsService } from '../src/main/modules/obs-core/obs-service';
 import { ExtensionHostService } from '../src/main/extension-host/extension-host';
 import { RaceSession, GetNextSequenceResponse } from '../src/main/director-types';
 
@@ -11,15 +10,10 @@ const mockAuthService = {
   getUserProfile: async () => ({ centerId: "mock-center-id" }),
 } as unknown as AuthService;
 
-const mockObsService = {
-  connect: async () => {},
-  disconnect: () => {},
-  switchScene: async () => {},
-} as unknown as ObsService;
-
 const mockExtensionHost = {
   start: async () => {},
   stop: () => {},
+  hasActiveHandler: (_intent: string) => true,
   executeIntent: async () => [{ success: true }],
 } as unknown as ExtensionHostService;
 
@@ -144,7 +138,6 @@ async function runTest() {
   
   const directorService = new DirectorService(
     mockAuthService, 
-    mockObsService, 
     mockExtensionHost
   );
 
