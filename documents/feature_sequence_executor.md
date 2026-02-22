@@ -1,102 +1,141 @@
 # Sequence Executor Feature Specification
 
 ## Overview
-The Sequence Executor is responsible for processing and executing `DirectorSequence` objects received from the Race Control API via the Director Loop. It acts as the central dispatch mechanism that routes specific commands to their respective handlers, ensuring modularity and separation of concerns.
+The Sequence Executor is responsible for processing and executing `PortableSequence` objects. It acts as a **headless runtime** — a central dispatch mechanism that routes steps to their respective handlers via the Extension System, ensuring modularity and separation of concerns.
+
+The executor does not care *who* created the sequence. It can be produced by:
+- The Race Control Cloud API (AI Director)
+- A Visual Editor / Control Deck UI
+- A manual JSON file
+- An external webhook
+
+## Data Protocol: The Portable Sequence
+
+To decouple the **Sequence Generator** (UI, AI, Manual File) from the **Sequence Executor**, we define a strict **Portable Sequence Format**.
+
+### 1. PortableSequence
+A portable JSON object representing a full sequence.
+```json
+{
+  "id": "seq_12345",
+  "name": "Race Start Protocol",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "id": "step_1",
+      "intent": "system.log",
+      "payload": { "message": "Starting Sequence", "level": "INFO" }
+    },
+    {
+      "id": "step_2",
+      "intent": "broadcast.showLiveCam",
+      "payload": { "carNum": "63", "camGroup": "TV1" }
+    },
+    {
+      "id": "step_3",
+      "intent": "system.wait",
+      "payload": { "durationMs": 3000 }
+    },
+    {
+      "id": "step_4",
+      "intent": "obs.switchScene",
+      "payload": { "sceneName": "Race Cam" }
+    }
+  ]
+}
+```
+
+### 2. Universal Command (Step)
+The Executor operates on a normalized command structure. It does **not** rely on hardcoded TypeScript Enums for extension usage.
+
+```typescript
+interface SequenceStep {
+  id: string;          // Unique step ID
+  intent: string;      // Semantic Intent ID (e.g. "obs.switchScene")
+  payload: Record<string, unknown>;  // Data matching the Extension's Input Schema
+  metadata?: {
+    label?: string;    // Human readable label for UI
+    timeout?: number;  // Max execution time in ms
+  };
+}
+```
+
+### 3. Intent Naming Convention
+Intents use **semantic `domain.action`** notation defined by extensions in their `package.json` manifests:
+- `system.wait` — Built-in
+- `system.log` — Built-in
+- `broadcast.showLiveCam` — iRacing Extension
+- `obs.switchScene` — OBS Extension
+- `communication.announce` — Discord Extension
+- `communication.talkToChat` — YouTube Extension
+
+This naming is intentionally **not tied to extension IDs**. The AI can reason about `communication.announce` semantically without knowing it's the Discord extension.
+
+### 4. API Backward Compatibility
+The Race Control API sends legacy `DirectorCommand[]` with `commandType` enums. The `DirectorService` normalizes these to `PortableSequence` before passing them to the executor via a built-in adapter function (`normalizeApiResponse`).
+
+### 5. Decoupling Guarantee
+- **The Executor is Headless**: It does not know *how* the sequence was created. It only validates:
+    1.  Does the `intent` have an active handler in the Registry?
+    2.  Does the `payload` match the Schema? (Optional runtime validation)
+- **The Extension System is the Definition**: The `package.json` manifest provides the *only* definition of valid intents and payloads. The Executor is merely a generic runtime engine.
 
 ## Scope & Acceptance Criteria
 
-**Goal**: Implement the core executor logic and the command handler architecture.
+**Goal**: Implement the core executor logic and the command handler architecture using the new **Intent-based Extension System**.
 
 **In Scope**:
-- `SequenceExecutor` class implementation (iterating commands, error handling).
-- `CommandHandler` interface definition.
-- `CommandHandlerRegistry` implementation.
-- **Full Implementation**:
-  - `WAIT` command handler.
-  - `LOG` command handler.
-- **Stub Implementation** (Log intent only):
-  - `SWITCH_CAMERA` (iRacing integration).
-  - `SWITCH_OBS_SCENE` (OBS integration).
-  - `DRIVER_TTS` (Discord/LLM integration).
-  - `VIEWER_CHAT` (YouTube integration).
+- `SequenceExecutor` class implementation (iterating steps, error handling).
+- **Built-in Handlers** (inline in executor, no separate handler classes):
+  - `system.wait` — Non-blocking delay.
+  - `system.log` — Write to application log.
+- **Extension Integration**:
+  - Dynamic lookup of Intent Handlers via `ExtensionHostService`.
+  - Extensions register their handlers via `registerIntentHandler()` during `activate()`.
+- **API Adapter**:
+  - `normalizeApiResponse()` in `DirectorService` to convert legacy API format to `PortableSequence`.
 
 **Out of Scope**:
-- Actual integration with external services (iRacing SDK, OBS WebSocket, Discord Bot, YouTube API). These will be implemented in separate, dedicated feature branches.
+- Implementation of specific extension handlers (these live in `extensions/iracing`, `extensions/obs`, etc.).
+- Visual Editor / Control Deck UI (separate feature).
 
 ## Architecture
 
-### Command Pattern
-The feature implements the **Command Pattern**. The `SequenceExecutor` iterates through the list of commands in a sequence. For each command, it identifies the `type` and delegates execution to a registered **Command Handler**.
+### Intent-Driven Dispatch
+The `SequenceExecutor` iterates through the `steps` array. For each step, it checks the `intent` string:
+1. If `system.*` — handled inline (built-in).
+2. Otherwise — dispatched to `ExtensionHostService.executeIntent()`.
 
-### Handler Interface
-Each command type has a dedicated handler implementing a common interface:
+### Execution Logic (Soft Failures)
+To support the dynamic nature of extensions (which may be disabled or uninstalled):
 
-```typescript
-interface CommandHandler<T extends BaseCommand> {
-  execute(command: T): Promise<void>;
-}
-```
+1.  **Lookup**: The executor checks `extensionHost.hasActiveHandler(intent)`.
+2.  **Hit**: The handler is executed via `extensionHost.executeIntent(intent, payload)`.
+3.  **Miss (Soft Fail)**: If no handler is registered (e.g., extension disabled):
+    - Log a warning: `[SequenceExecutor] Skipping step: No active handler for intent '${intent}'`.
+    - **continue** to the next step.
+    - Do **not** throw an error or abort the sequence.
 
-### Registry
-A `CommandHandlerRegistry` maps `CommandType` strings to their corresponding handler instances. This allows for easy extension of new command types without modifying the core executor logic.
+### Two-Tier Registry
+The system uses a two-tier registry to manage capabilities:
+1.  **Capability Catalog (Static)**: Derived from `package.json` manifests of ALL installed extensions. Used by the **Visual Editor** to show available intents even if the extension isn't active.
+2.  **Handler Registry (Dynamic)**: Populated at runtime when extensions `activate()`. Used by the **Sequence Executor** to dispatch intents.
 
-## Command Types & Specifications
+## Intent Catalog
 
-The following command types are supported. All types must be aligned with the OpenAPI specification.
+### Built-in Intents
 
-### 1. SWITCH_CAMERA
-**Description**: A camera switch request used to switch the camera view being rendered in the race directors iRacing session used to provide the director view for the broadcast output.
-**Payload**:
-```json
-{
-  "carNumber": "string", // Target car number (e.g. "63")
-  "cameraGroup": "string", // e.g., "TV1", "Cockpit", "Rear Chase"
-  "cameraNumber": "number" // Optional specific camera index
-}
-```
-**Implementation Notes**:
-- **Current Feature**: Implement as a **STUB**. Log the camera switch request to the console (e.g., `[STUB] Switching camera to Car 63 - TV1`).
-- **Future Integration**: Direct integration with iRacing SDK (via `node-irsdk` or similar).
-- **Logic**:
-  - On receiving a SWITCH_CAMERA message, the director app will create an iRacing windows command event message (or use SDK broadcast messages) to send a command to iRacing to switch camera.
-  - Must handle cases where the car is not on track.
-
-### 2. WAIT
-**Description**: A generic wait request that will cause the sequencer to add a pause to the sequence execution for the appropriate time.
+#### system.wait
+**Description**: Non-blocking pause for the sequence execution.
 **Payload**:
 ```json
 {
   "durationMs": 1000
 }
 ```
-**Implementation Notes**:
-- **Full Implementation Required**.
-- Non-blocking for the main thread (use `setTimeout` / `Promise` delay).
-- Essential for pacing sequences.
 
-### 3. SWITCH_OBS_SCENE
-**Description**: A command that changes the OBS scene using a WebSocket integration with OBS to allow the director to control the OBS broadcast output.
-**Payload**:
-```json
-{
-  "sceneName": "string",
-  "transition": "string", // Optional transition override
-  "duration": "number" // Optional transition duration
-}
-```
-**Implementation Notes**:
-- **Current Feature**: Implement as a **STUB**. Log the scene switch request (e.g., `[STUB] Switching OBS Scene to 'Driver 1'`).
-- **Future Integration**:
-  - **Library**: Use `obs-websocket-js` (Node.js equivalent of `obsws-python`).
-  - **Connection**: Requires `host`, `port`, and `password` configuration.
-  - **Logic**:
-    - Maintain a persistent connection or connect on demand (persistent preferred).
-    - `SetCurrentProgramScene` request to switch scenes.
-    - `GetSceneList` to verify scene existence before switching.
-    - Handle connection failures gracefully (log error, continue sequence).
-
-### 4. LOG
-**Description**: Log a message in the log for the director. This is a command message added for convenience to allow the Race Control to embed logging statements into sequence executions.
+#### system.log
+**Description**: Write a message to the application log.
 **Payload**:
 ```json
 {
@@ -104,64 +143,38 @@ The following command types are supported. All types must be aligned with the Op
   "level": "INFO | WARN | ERROR"
 }
 ```
-**Implementation Notes**:
-- **Full Implementation Required**.
-- Writes to the application's internal log.
 
-### 5. DRIVER_TTS (Text-to-Speech)
-**Description**: A driver text-to-speech function that receives a text message that needs to be conveyed to the drivers. It is converted to audio and fed to the Discord race channel.
-**Payload**:
-```json
-{
-  "text": "string",
-  "voiceId": "string", // Optional voice selection
-  "channelId": "string" // Optional target Discord channel
-}
-```
-**Implementation Notes**:
-- **Current Feature**: Implement as a **STUB**. Log the TTS request (e.g., `[STUB] TTS: "Gentlemen, start your engines"`).
-- **Future Integration**:
-  - **TTS Generation**: Use Google Gemini API (or similar) to generate audio from text.
-    - Model: `gemini-2.0-flash-exp` (or current available model).
-    - Output: WAV format (48kHz, mono, 16-bit preferred for Discord).
-  - **Discord Playback**:
-    - Requires a Discord Bot Token.
-    - Use a library like `discord.js` (Node.js) to connect to the voice channel.
-    - `joinVoiceChannel` -> `createAudioResource` -> `player.play()`.
-    - **Latency**: This is a high-latency operation. The executor should probably *start* the process and not block the entire sequence for the duration of the speech, unless specifically desired. However, for simple sequences, awaiting completion is safer.
-    - **Fallback**: If Gemini fails, log error.
+### Extension Intents (Examples)
+These are defined by their respective extension manifests. The executor does not need to know about them at compile time.
 
-### 6. VIEWER_CHAT
-**Description**: Send a chat message to the live stream chat in the YouTube channel.
-**Payload**:
+#### broadcast.showLiveCam (iRacing)
 ```json
-{
-  "platform": "YOUTUBE | TWITCH",
-  "message": "string"
-}
+{ "carNum": "string", "camGroup": "string" }
 ```
-**Implementation Notes**:
-- **Current Feature**: Implement as a **STUB**. Log the chat message request (e.g., `[STUB] Posting to YouTube: "Welcome to the stream!"`).
-- **Future Integration**:
-  - **YouTube API**:
-    - Requires OAuth 2.0 credentials (`client_secrets.json`).
-    - Scope: `https://www.googleapis.com/auth/youtube.force-ssl` (or similar write scope).
-    - Endpoint: `liveChatMessages.insert`.
-    - Needs `liveChatId` from the active broadcast. This might need to be fetched first via `liveBroadcasts.list`.
-  - **Twitch API** (Future/Optional):
-    - IRC based or Helix API.
-  - **Logic**:
-    - Ensure OAuth token is valid (refresh if needed).
-    - Resolve `liveChatId` if not cached.
-    - Post message.
-    - Handle rate limits and quota errors.
+
+#### obs.switchScene (OBS)
+```json
+{ "sceneName": "string", "transition": "string", "duration": "number" }
+```
+
+#### communication.announce (Discord)
+```json
+{ "message": "string" }
+```
+
+#### communication.talkToChat (YouTube)
+```json
+{ "message": "string" }
+```
 
 ## Error Handling
 
-- **Individual Command Failure**: If a command fails (e.g., OBS not connected), the executor should log the error.
-- **Sequence Continuation**: By default, failure of a non-critical command (like LOG) should not stop the sequence. Critical failures (like WAIT failing?) might need different handling.
-- **Timeout**: Commands should have a default timeout to prevent the executor from hanging indefinitely.
+- **Soft Failure**: Missing handlers result in a skip and log warning.
+- **Handler Failure**: If an executed handler throws an error, the executor catches it, logs the error, and proceeds to the next step (unless configured to abort).
+- **Timeout**: Steps can optionally specify a `metadata.timeout` for maximum execution time. (Future implementation.)
 
 ## Future Considerations
-- **Parallel Execution**: Currently, commands are executed sequentially. Future versions might support `PARALLEL` blocks.
-- **Conditional Logic**: Simple `IF` logic based on telemetry data (e.g., "If Leader Gap < 1s, Switch to Camera X").
+- **Parallel Execution**: Currently, steps are executed sequentially. Future versions might support `PARALLEL` blocks.
+- **Conditional Logic**: Simple `IF` logic based on telemetry data (e.g., "If Leader Gap < 1s, use `broadcast.showLiveCam`").
+- **Step Results**: Intent handlers could return result data for use in subsequent steps.
+

@@ -5,14 +5,15 @@ import {
   DirectorStatus,
   DirectorState,
   DirectorCommand,
-  DirectorSequence
+  DirectorSequence,
+  PortableSequence,
+  SequenceStep,
 } from './director-types';
 import { randomUUID } from 'crypto';
 import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
-import { IracingService } from './iracing-service';
-import { ObsService } from './obs-service';
+import { ExtensionHostService } from './extension-host/extension-host';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -29,10 +30,9 @@ export class DirectorService {
 
   constructor(
     private authService: AuthService, 
-    private iracingService: IracingService, 
-    private obsService: ObsService
+    private extensionHost: ExtensionHostService
   ) {
-    this.executor = new SequenceExecutor(iracingService, obsService);
+    this.executor = new SequenceExecutor(extensionHost);
   }
 
   async start() {
@@ -54,12 +54,11 @@ export class DirectorService {
     this.currentRaceSessionId = session.raceSessionId;
     console.log(`Joined session: ${session.name} (${session.raceSessionId})`);
 
-    // Configure OBS if host is provided
+    // Configure OBS if host is provided (via extension intent system)
     if (session.obsHost) {
       console.log(`Configuring OBS connection for session: ${session.obsHost}`);
-      // If we are already connected to a different host, we might need to reconnect.
-      // For now, we'll just call connect which handles the logic.
-      this.obsService.connect(session.obsHost, session.obsPassword);
+      // TODO: Once OBS extension supports a 'connect' intent or config update,
+      // dispatch it here. For now, OBS extension auto-connects from its settings.
     }
 
     // 3. Start Loop
@@ -86,6 +85,41 @@ export class DirectorService {
       processedCommands: this.processedCommands,
       lastError: this.lastError
     };
+  }
+
+  async executeSequenceById(sequenceId: string) {
+    if (!sequenceId) return;
+    
+    console.log(`[Director] Manual execution of sequence: ${sequenceId}`);
+    
+    // Fetch sequence definition
+    const token = await this.authService.getAccessToken();
+    if (!token) {
+        console.warn('[Director] Cannot execute sequence: No auth token.');
+        return;
+    }
+
+    try {
+        const url = `${apiConfig.baseUrl}${apiConfig.endpoints.getSequence(sequenceId)}`;
+        const response = await fetch(url, {
+             headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) {
+            console.error(`[Director] Failed to fetch sequence ${sequenceId}: ${response.status}`);
+            return;
+        }
+
+        const sequenceData: any = await response.json();
+        
+        // Normalize API response to PortableSequence format
+        const portable = this.normalizeApiResponse(sequenceData);
+        
+        this.executor.execute(portable);
+        
+    } catch (err) {
+        console.error(`[Director] Error executing sequence ${sequenceId}:`, err);
+    }
   }
 
   async listSessions(centerId?: string): Promise<RaceSession[]> {
@@ -194,48 +228,99 @@ export class DirectorService {
     }
   }
 
-  private mapApiCommandToDirectorCommand(apiCommand: any): DirectorCommand {
-    const type = apiCommand.commandType || apiCommand.type;
-    
-    // Default payload to empty object or existing payload
-    let payload: any = apiCommand.payload || {};
+  /**
+   * Intent mappings for legacy API CommandType values.
+   * Maps the old enum-based command types from the OpenAPI spec
+   * to the semantic intent names registered by extensions.
+   */
+  private static readonly LEGACY_INTENT_MAP: Record<string, string> = {
+    'SWITCH_CAMERA': 'broadcast.showLiveCam',
+    'SWITCH_OBS_SCENE': 'obs.switchScene',
+    'DRIVER_TTS': 'communication.announce',
+    'VIEWER_CHAT': 'communication.talkToChat',
+    'PLAY_AUDIO': 'audio.play',          // Future
+    'SHOW_OVERLAY': 'overlay.show',       // Future
+    'HIDE_OVERLAY': 'overlay.hide',       // Future
+  };
 
-    // Map specific command structures
-    if (type === 'SWITCH_CAMERA' && apiCommand.target) {
-      payload = {
-        carNumber: apiCommand.target.carNumber?.toString(),
-        cameraGroupNumber: apiCommand.target.cameraGroupNumber,
-        cameraGroupName: apiCommand.target.cameraGroupName,
-      };
-    } else if (type === 'SWITCH_OBS_SCENE') {
-        if (apiCommand.target) {
-             payload = {
-                 sceneName: apiCommand.target.sceneName,
-                 transition: apiCommand.target.transition,
-                 duration: apiCommand.target.duration
-             };
-        }
-    } else if (type === 'WAIT') {
-        if (apiCommand.durationMs !== undefined) {
-            payload = { durationMs: apiCommand.durationMs };
-        }
-    } else if (type === 'LOG') {
-        if (apiCommand.message) {
-            payload = { 
-                message: apiCommand.message,
-                level: apiCommand.level || 'INFO'
-            };
-        }
-    }
+  /**
+   * Normalizes a raw API response (legacy DirectorCommand[]) into a PortableSequence.
+   * This is the single adapter point between the Race Control API format
+   * and the intent-driven execution engine.
+   */
+  private normalizeApiResponse(apiData: any): PortableSequence {
+    const commands: any[] = apiData.commands || [];
     
-    // Ensure ID exists
-    const id = apiCommand.id || randomUUID();
+    const steps: SequenceStep[] = commands.map((cmd: any, index: number) => {
+      const type = cmd.commandType || cmd.type;
+      const id = cmd.id || randomUUID();
+      
+      // Handle WAIT
+      if (type === 'WAIT') {
+        const durationMs = cmd.payload?.durationMs ?? cmd.durationMs ?? 0;
+        return { id, intent: 'system.wait', payload: { durationMs } };
+      }
+      
+      // Handle LOG
+      if (type === 'LOG') {
+        const payload = cmd.payload || { message: cmd.message || '', level: cmd.level || 'INFO' };
+        return { id, intent: 'system.log', payload };
+      }
+      
+      // Handle EXECUTE_INTENT (already intent-based, unwrap)
+      if (type === 'EXECUTE_INTENT') {
+        return {
+          id,
+          intent: cmd.payload?.intent || 'system.log',
+          payload: cmd.payload?.payload || {},
+        };
+      }
+      
+      // Map legacy command types to semantic intents
+      const intent = DirectorService.LEGACY_INTENT_MAP[type];
+      if (intent) {
+        // Build payload from target object (OpenAPI format) or inline payload
+        let payload = cmd.payload || {};
+        
+        if (cmd.target) {
+          if (type === 'SWITCH_CAMERA') {
+            payload = {
+              carNum: cmd.target.carNumber?.toString(),
+              camGroup: cmd.target.cameraGroup?.toString(),
+              ...cmd.target,
+            };
+          } else if (type === 'SWITCH_OBS_SCENE') {
+            payload = {
+              sceneName: cmd.target.obsSceneId || cmd.target.sceneName,
+              ...cmd.target,
+            };
+          } else {
+            payload = { ...cmd.target };
+          }
+        }
+        
+        return { id, intent, payload };
+      }
+      
+      // Unknown command — emit a warning log step
+      console.warn(`[Director] Unknown API command type: ${type}`);
+      return {
+        id,
+        intent: 'system.log',
+        payload: { message: `Unknown API command type: ${type}`, level: 'WARN' },
+      };
+    });
 
     return {
-      id,
-      type,
-      payload
-    } as DirectorCommand;
+      id: apiData.sequenceId || apiData.id || randomUUID(),
+      name: apiData.name,
+      steps,
+      metadata: {
+        priority: apiData.priority,
+        generatedAt: apiData.generatedAt,
+        totalDurationMs: apiData.totalDurationMs,
+      },
+    };
   }
 
   private async fetchAndExecuteNextSequence(): Promise<number | false> {
@@ -304,26 +389,21 @@ export class DirectorService {
       const sequenceData: any = await response.json();
       console.log('Received sequence:', JSON.stringify(sequenceData, null, 2));
 
-      const commands: DirectorCommand[] = (sequenceData.commands || []).map((cmd: any) => 
-        this.mapApiCommandToDirectorCommand(cmd)
-      );
+      // Normalize API response to PortableSequence using the adapter
+      const portable = this.normalizeApiResponse(sequenceData);
 
-      this.currentSequenceId = sequenceData.sequenceId;
-      this.totalCommands = commands.length;
+      this.currentSequenceId = portable.id;
+      this.totalCommands = portable.steps.length;
       this.processedCommands = 0;
 
       telemetryService.trackEvent('Sequence.Received', {
-        sequenceId: sequenceData.sequenceId,
+        sequenceId: portable.id,
         sessionId: this.currentRaceSessionId,
-        commandCount: commands.length.toString(),
-        priority: sequenceData.priority || 'NORMAL',
+        commandCount: portable.steps.length.toString(),
+        priority: String(portable.metadata?.priority || 'NORMAL'),
       });
 
-      await this.executor.execute({
-        id: sequenceData.sequenceId,
-        commands: commands,
-        metadata: sequenceData.metadata
-      }, (completed, total) => {
+      await this.executor.execute(portable, (completed, total) => {
         this.processedCommands = completed;
         this.totalCommands = total;
       });
@@ -333,7 +413,7 @@ export class DirectorService {
       this.processedCommands = 0;
 
       telemetryService.trackEvent('Sequence.Executed', {
-        sequenceId: sequenceData.sequenceId,
+        sequenceId: portable.id,
         sessionId: this.currentRaceSessionId,
       });
 

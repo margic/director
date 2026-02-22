@@ -12,6 +12,7 @@ interface AppConfig {
     enabled: boolean;
     host?: string;
     password?: string;
+    autoConnect?: boolean;
   };
   iracing: {
     enabled: boolean;
@@ -19,6 +20,7 @@ interface AppConfig {
   discord: {
     enabled: boolean;
     channelId?: string;
+    autoConnect?: boolean;
   };
 }
 
@@ -38,7 +40,8 @@ const schema = {
     properties: {
       enabled: { type: 'boolean', default: true },
       host: { type: 'string' },
-      password: { type: 'string' }
+      password: { type: 'string' },
+      autoConnect: { type: 'boolean', default: false }
     },
     default: {}
   },
@@ -53,7 +56,8 @@ const schema = {
     type: 'object',
     properties: {
       enabled: { type: 'boolean', default: true },
-      channelId: { type: 'string' }
+      channelId: { type: 'string' },
+      autoConnect: { type: 'boolean', default: false }
     },
     default: {}
   }
@@ -70,7 +74,15 @@ class ConfigService {
     return this.store.get(key);
   }
 
+  getAny(key: string): any {
+    return this.store.get(key);
+  }
+
   set<K extends keyof AppConfig>(key: K, value: AppConfig[K]): void {
+    this.store.set(key, value);
+  }
+
+  setAny(key: string, value: any): void {
     this.store.set(key, value);
   }
 

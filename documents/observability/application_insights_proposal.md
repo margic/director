@@ -116,14 +116,16 @@ Currently, the Director Electron app lacks remote observability capabilities. Wh
 
 ```bash
 # Application Insights (from Azure resource)
-VITE_APPINSIGHTS_INSTRUMENTATION_KEY=a3338f9b-48c6-4d3f-b07c-a6e4e4516ea9
+VITE_APPINSIGHTS_INSTRUMENTATION_KEY=your_instrumentation_key_here
 VITE_APPINSIGHTS_INGESTION_ENDPOINT=https://westus3-1.in.applicationinsights.azure.com/
 VITE_APPINSIGHTS_LIVE_ENDPOINT=https://westus3.livediagnostics.monitor.azure.com/
-VITE_APPINSIGHTS_APPLICATION_ID=7fa3a6e8-91ae-4549-b0de-995d0e8b0c7d
+VITE_APPINSIGHTS_APPLICATION_ID=your_application_id_here
 
 # Feature flag (allows disabling in development or for privacy)
 VITE_APPINSIGHTS_ENABLED=true
 ```
+
+**Note:** Obtain these values from Azure Portal → Application Insights → Properties.
 
 **SDK Auto-Collection:**
 - ✅ HTTP requests (as dependencies)

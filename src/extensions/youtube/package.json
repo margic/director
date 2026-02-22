@@ -1,0 +1,85 @@
+{
+  "name": "director-youtube",
+  "version": "1.0.0",
+  "main": "index.js",
+  "displayName": "YouTube Chat & Integration",
+  "description": "Provides YouTube Live Chat integration for communication and context.",
+  "contributes": {
+    "intents": [
+      {
+        "intent": "communication.talkToChat",
+        "title": "Send Chat Message",
+        "description": "Sends a message to the active YouTube Live Chat.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "message": { "type": "string" }
+          },
+          "required": ["message"]
+        }
+      },
+      {
+        "intent": "youtube.startMonitor",
+        "title": "Start Chat Monitoring",
+        "description": "Begins polling YouTube API for chat messages."
+      },
+      {
+        "intent": "youtube.stopMonitor",
+        "title": "Stop Chat Monitoring",
+        "description": "Stops polling YouTube API."
+      }
+    ],
+    "commands": [
+      {
+        "command": "director.youtube.login",
+        "title": "Sign in to YouTube",
+        "description": "Starts the OAuth flow for YouTube."
+      },
+      {
+        "command": "director.youtube.logout",
+        "title": "Sign out of YouTube",
+        "description": "Clears stored credentials."
+      }
+    ],
+    "views": [
+      {
+        "id": "status-widget",
+        "name": "YouTube Status",
+        "type": "widget"
+      }
+    ],
+    "events": [
+      {
+        "event": "chat.messageReceived",
+        "title": "Chat Message Received",
+        "description": "Emitted when a new chat message is detected in the stream.",
+        "schema": {
+           "type": "object",
+           "properties": {
+             "author": { "type": "string" },
+             "message": { "type": "string" },
+             "timestamp": { "type": "string" }
+           }
+        }
+      }
+    ],
+    "settings": {
+      "youtube.channelId": {
+        "type": "string",
+        "description": "The YouTube Channel ID to monitor."
+      },
+      "youtube.clientId": {
+        "type": "string",
+        "description": "Google OAuth Client ID"
+      },
+      "youtube.clientSecret": {
+        "type": "string",
+        "description": "Google OAuth Client Secret (Secure)"
+      },
+      "youtube.refreshToken": {
+         "type": "string",
+         "description": "Stored Refresh Token (Secure)"
+      }
+    }
+  }
+}

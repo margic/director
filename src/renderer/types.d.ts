@@ -50,6 +50,113 @@ export interface RaceSession {
   [key: string]: any;
 }
 
+// ============================================================================
+// Sequence Types (mirrors director-types.ts for renderer consumption)
+// ============================================================================
+
+export interface SequenceVariable {
+  name: string;
+  label: string;
+  type: 'string' | 'number' | 'boolean' | 'select' | 'sessionTime' | 'sessionTick';
+  required: boolean;
+  default?: unknown;
+  description?: string;
+  constraints?: {
+    min?: number;
+    max?: number;
+    options?: Array<{ label: string; value: string }>;
+    pattern?: string;
+  };
+  source?: 'user' | 'context';
+  contextKey?: string;
+}
+
+export interface SequenceStep {
+  id: string;
+  intent: string;
+  payload: Record<string, unknown>;
+  metadata?: {
+    label?: string;
+    timeout?: number;
+  };
+}
+
+export interface PortableSequence {
+  id: string;
+  name?: string;
+  version?: string;
+  description?: string;
+  category?: 'built-in' | 'cloud' | 'custom';
+  priority?: boolean;
+  variables?: SequenceVariable[];
+  steps: SequenceStep[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface SequenceFilter {
+  category?: string;
+  search?: string;
+}
+
+export interface StepResult {
+  stepId: string;
+  intent: string;
+  status: 'success' | 'skipped' | 'failed';
+  durationMs: number;
+  message?: string;
+}
+
+export interface ExecutionResult {
+  executionId: string;
+  sequenceId: string;
+  sequenceName: string;
+  status: 'completed' | 'partial' | 'failed' | 'cancelled';
+  source: string;
+  priority: boolean;
+  startedAt: string;
+  completedAt: string;
+  totalDurationMs: number;
+  resolvedVariables: Record<string, unknown>;
+  steps: StepResult[];
+}
+
+export interface SequenceProgress {
+  executionId: string;
+  sequenceId: string;
+  sequenceName: string;
+  currentStep: number;
+  totalSteps: number;
+  stepIntent: string;
+  stepStatus: 'running' | 'success' | 'skipped' | 'failed';
+  log: string;
+}
+
+export interface QueuedSequence {
+  executionId: string;
+  sequence: PortableSequence;
+  variables: Record<string, unknown>;
+  queuedAt: string;
+  position: number;
+  source: string;
+}
+
+export interface IntentCatalogEntry {
+  intentId: string;
+  label?: string;
+  extensionId: string;
+  extensionLabel?: string;
+  inputSchema?: Record<string, unknown>;
+  active: boolean;
+}
+
+export interface EventCatalogEntry {
+  eventId: string;
+  label?: string;
+  extensionId: string;
+  extensionLabel?: string;
+  payloadSchema?: Record<string, unknown>;
+}
+
 export interface IElectronAPI {
   login: () => Promise<any>;
   getAccount: () => Promise<any>;
@@ -59,11 +166,13 @@ export interface IElectronAPI {
   directorStop: () => Promise<any>;
   directorStatus: () => Promise<any>;
   directorListSessions: (centerId?: string) => Promise<RaceSession[]>;
-  iracingGetStatus: () => Promise<{ connected: boolean }>;
-  iracingSendCommand: (cmd: number, var1: number, var2: number, var3?: number) => Promise<void>;
-  obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[] }>;
+  obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[]; currentScene: string; host: string; autoConnect: boolean }>;
   obsGetScenes: () => Promise<string[]>;
   obsSetScene: (sceneName: string) => Promise<void>;
+  obsConnect: () => Promise<void>;
+  obsDisconnect: () => Promise<void>;
+  obsGetConfig: () => Promise<{ host: string; passwordSet: boolean; autoConnect: boolean }>;
+  obsSaveSettings: (settings: { host: string; password?: string; autoConnect: boolean }) => Promise<boolean>;
   discordGetStatus: () => Promise<{ connected: boolean; channelName?: string; lastMessage?: string; messagesSent: number }>;
   discordConnect: (token?: string, channelId?: string) => Promise<void>;
   discordDisconnect: () => Promise<void>;
@@ -74,18 +183,37 @@ export interface IElectronAPI {
     saveSecure: (key: string, value: string) => Promise<boolean>;
     isSecureSet: (key: string) => Promise<boolean>;
   };
-  youtube: {
-    getStatus: () => Promise<any>;
-    startAuth: () => Promise<void>;
-    signOut: () => Promise<void>;
-    searchVideos: (channelId: string) => Promise<any>;
-    setVideo: (videoId: string) => Promise<void>;
-    onStatusChange: (callback: (status: any) => void) => () => void;
+  extensions: {
+      getStatus: () => Promise<Record<string, { active: boolean; version?: string }>>;
+      setEnabled: (id: string, enabled: boolean) => Promise<void>;
+      getViews: (type?: 'panel' | 'dialog' | 'overlay' | 'widget') => Promise<any[]>;
+      executeIntent: (intent: string, data: any) => Promise<any>;
+      getLastEvent: (eventName: string) => Promise<{ extensionId: string; eventName: string; payload: any } | null>;
+      onExtensionEvent: (callback: (data: { extensionId: string; eventName: string; payload: any }) => void) => () => void;
   };
-  telemetry: {
-    trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => Promise<boolean>;
-    trackException: (error: { message: string; stack?: string; name: string }, properties?: { [key: string]: string }) => Promise<boolean>;
-    trackTrace: (message: string, severity?: string, properties?: { [key: string]: string }) => Promise<boolean>;
+  sequences: {
+      list: (filter?: SequenceFilter) => Promise<PortableSequence[]>;
+      get: (id: string) => Promise<PortableSequence | null>;
+      save: (sequence: PortableSequence) => Promise<void>;
+      delete: (id: string) => Promise<void>;
+      export: (id: string) => Promise<string>;
+      import: (json: string) => Promise<PortableSequence>;
+      execute: (id: string, variables?: Record<string, unknown>, options?: { priority?: boolean; source?: string }) => Promise<string>;
+      cancel: () => Promise<void>;
+      cancelQueued: (executionId: string) => Promise<void>;
+      queue: () => Promise<QueuedSequence[]>;
+      history: () => Promise<ExecutionResult[]>;
+      onProgress: (callback: (progress: SequenceProgress) => void) => () => void;
+  };
+  catalog: {
+      intents: () => Promise<IntentCatalogEntry[]>;
+      events: () => Promise<EventCatalogEntry[]>;
+  };
+  overlay: {
+      getUrl: () => Promise<string>;
+      getOverlays: () => Promise<any[]>;
+      getRegionAssignments: () => Promise<Record<string, string>>;
+      setRegionOwner: (region: string, extensionId: string) => Promise<boolean>;
   };
 }
 
@@ -94,3 +222,4 @@ declare global {
     electronAPI: IElectronAPI;
   }
 }
+

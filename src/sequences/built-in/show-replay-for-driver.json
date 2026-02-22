@@ -1,0 +1,59 @@
+{
+  "id": "seq_replay_driver",
+  "name": "Show Replay for Driver",
+  "version": "1.0.0",
+  "description": "Jumps iRacing to an absolute session time for a specific driver on the replay scene, then automatically returns to live racing when the replay catches up.",
+  "category": "built-in",
+  "variables": [
+    {
+      "name": "driverNumber",
+      "label": "Driver Number",
+      "type": "select",
+      "required": true,
+      "description": "The car number of the driver to show",
+      "source": "context",
+      "contextKey": "iracing.drivers"
+    },
+    {
+      "name": "replayToSessionTime",
+      "label": "Replay To Session Time",
+      "type": "sessionTime",
+      "required": true,
+      "description": "The absolute session time to replay from. Auto-captured from iRacing telemetry.",
+      "source": "context",
+      "contextKey": "iracing.sessionTime"
+    }
+  ],
+  "steps": [
+    {
+      "id": "step_1",
+      "intent": "broadcast.replayFromSessionTime",
+      "payload": { "sessionTime": "$var(replayToSessionTime)" },
+      "metadata": { "label": "Replay from session time" }
+    },
+    {
+      "id": "step_2",
+      "intent": "broadcast.showLiveCam",
+      "payload": { "carNum": "$var(driverNumber)", "camGroup": "TV1" },
+      "metadata": { "label": "Switch to driver camera" }
+    },
+    {
+      "id": "step_3",
+      "intent": "obs.switchScene",
+      "payload": { "sceneName": "Replay" },
+      "metadata": { "label": "Switch OBS to Replay scene" }
+    },
+    {
+      "id": "step_4",
+      "intent": "system.waitUntilSessionTime",
+      "payload": { "sessionTime": "$var(replayToSessionTime)" },
+      "metadata": { "label": "Wait until session catches up to live" }
+    },
+    {
+      "id": "step_5",
+      "intent": "obs.switchScene",
+      "payload": { "sceneName": "Live Race" },
+      "metadata": { "label": "Return to live scene" }
+    }
+  ]
+}

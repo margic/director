@@ -1,0 +1,53 @@
+{
+  "name": "director-obs",
+  "version": "1.0.0",
+  "main": "index.js",
+  "displayName": "OBS Studio Integration",
+  "description": "Provides OBS Studio scene switching and status monitoring.",
+  "contributes": {
+    "intents": [
+      {
+        "intent": "obs.switchScene",
+        "title": "Switch OBS Scene",
+        "description": "Changes the active OBS scene.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "sceneName": { "type": "string", "description": "Name of the scene to switch to." },
+            "transition": { "type": "string", "description": "Optional transition override." },
+            "duration": { "type": "number", "description": "Optional transition duration in ms." }
+          },
+          "required": ["sceneName"]
+        }
+      },
+      {
+        "intent": "obs.getScenes",
+        "title": "Get Available Scenes",
+        "description": "Emits the list of available OBS scenes."
+      }
+    ],
+    "events": [
+      {
+        "event": "obs.connectionStateChanged",
+        "title": "OBS Connection Changed",
+        "description": "Emitted when OBS connection state changes.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "connected": { "type": "boolean" }
+          }
+        }
+      }
+    ],
+    "settings": {
+      "obs.host": {
+        "type": "string",
+        "description": "OBS WebSocket Host (e.g. ws://localhost:4455)"
+      },
+      "obs.password": {
+        "type": "string",
+        "description": "OBS WebSocket Password"
+      }
+    }
+  }
+}

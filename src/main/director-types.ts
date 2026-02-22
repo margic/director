@@ -1,9 +1,148 @@
 /**
  * Director Loop Feature - Type Definitions
  * Based on documents/feature_director_loop.md
+ * Updated for Intent-based Extension System (feature_sequence_executor.md)
  */
 
-export type CommandType = 'WAIT' | 'LOG' | 'SWITCH_CAMERA' | 'SWITCH_OBS_SCENE' | 'DRIVER_TTS' | 'VIEWER_CHAT';
+// ============================================================================
+// NEW: Portable Sequence Format (Intent-Driven)
+// The canonical format for sequence execution. All legacy API responses
+// are normalized to this format before execution.
+// ============================================================================
+
+/**
+ * A single step in a sequence. The executor dispatches based on the `intent`
+ * string, not a hardcoded enum. Built-in intents use the `system.` prefix.
+ */
+export interface SequenceStep {
+  id: string;
+  intent: string;       // Namespace-scoped Intent ID (e.g. "system.wait", "broadcast.showLiveCam")
+  payload: Record<string, unknown>;
+  metadata?: {
+    label?: string;     // Human-readable label for UI / logging
+    timeout?: number;   // Max execution time in ms
+  };
+}
+
+/**
+ * Runtime variable definition for parameterised sequences.
+ * Variables use $var(name) substitution-only syntax in step payloads.
+ */
+export interface SequenceVariable {
+  name: string;              // Variable identifier (alphanumeric, camelCase)
+  label: string;             // Human-readable label for UI
+  type: 'string' | 'number' | 'boolean' | 'select' | 'sessionTime' | 'sessionTick';
+  required: boolean;
+  default?: unknown;         // Default value (used if not provided)
+  description?: string;      // Help text shown in UI
+  constraints?: {
+    min?: number;            // For number type
+    max?: number;            // For number type
+    options?: Array<{        // For select type
+      label: string;
+      value: string;
+    }>;
+    pattern?: string;        // Regex for string type
+  };
+  source?: 'user' | 'context';  // Where the value comes from
+  contextKey?: string;       // Dot-path for auto-population from telemetry/session data
+}
+
+/**
+ * The portable, headless sequence format. The executor does not care
+ * how this was created (Visual Editor, AI, API, manual JSON).
+ */
+export interface PortableSequence {
+  id: string;
+  name?: string;
+  version?: string;
+  description?: string;                              // Human-readable description
+  category?: 'built-in' | 'cloud' | 'custom';       // Library category
+  priority?: boolean;                                 // If true, executes immediately even during Director Loop
+  variables?: SequenceVariable[];                     // Runtime variable definitions
+  steps: SequenceStep[];
+  metadata?: Record<string, unknown>;
+}
+
+// ============================================================================
+// Sequence Execution Types
+// ============================================================================
+
+export interface StepResult {
+  stepId: string;
+  intent: string;
+  status: 'success' | 'skipped' | 'failed';
+  durationMs: number;
+  message?: string;  // Error message or skip reason
+}
+
+export interface ExecutionResult {
+  executionId: string;
+  sequenceId: string;
+  sequenceName: string;
+  status: 'completed' | 'partial' | 'failed' | 'cancelled';
+  source: 'manual' | 'director-loop' | 'ai-agent' | 'stream-deck' | 'webhook';
+  priority: boolean;
+  startedAt: string;
+  completedAt: string;
+  totalDurationMs: number;
+  resolvedVariables: Record<string, unknown>;
+  steps: StepResult[];
+}
+
+export interface SequenceProgress {
+  executionId: string;
+  sequenceId: string;
+  sequenceName: string;
+  currentStep: number;
+  totalSteps: number;
+  stepIntent: string;
+  stepStatus: 'running' | 'success' | 'skipped' | 'failed';
+  log: string;       // Formatted log line
+}
+
+export interface QueuedSequence {
+  executionId: string;
+  sequence: PortableSequence;
+  variables: Record<string, unknown>;
+  queuedAt: string;
+  position: number;
+  source: string;
+}
+
+export interface ExecutionHistoryConfig {
+  maxEntries: number;  // Default: 25
+}
+
+export interface SequenceFilter {
+  category?: string;
+  search?: string;
+}
+
+export interface IntentCatalogEntry {
+  intentId: string;
+  label?: string;
+  extensionId: string;
+  extensionLabel?: string;
+  inputSchema?: Record<string, unknown>;
+  active: boolean;
+}
+
+export interface EventCatalogEntry {
+  eventId: string;
+  label?: string;
+  extensionId: string;
+  extensionLabel?: string;
+  payloadSchema?: Record<string, unknown>;
+}
+
+// ============================================================================
+// LEGACY: API-Compatible Types
+// Kept for backward compatibility with the Race Control OpenAPI spec.
+// The normalizeApiSequence() function converts these to PortableSequence.
+// ============================================================================
+
+export type CommandType = 'WAIT' | 'LOG' | 'SWITCH_CAMERA' | 'SWITCH_OBS_SCENE' | 'DRIVER_TTS' | 'VIEWER_CHAT' | 'EXECUTE_INTENT';
 
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR';
 
@@ -48,6 +187,11 @@ export interface DriverTtsCommandPayload {
   channelId?: string;
 }
 
+export interface ExecuteIntentCommandPayload {
+  intent: string;
+  payload: any;
+}
+
 export interface ViewerChatCommandPayload {
   platform: 'YOUTUBE' | 'TWITCH';
   message: string;
@@ -90,13 +234,19 @@ export interface ViewerChatCommand extends BaseCommand {
   payload: ViewerChatCommandPayload;
 }
 
+export interface ExecuteIntentCommand extends BaseCommand {
+  type: 'EXECUTE_INTENT';
+  payload: ExecuteIntentCommandPayload;
+}
+
 export type DirectorCommand = 
   | WaitCommand 
   | LogCommand 
   | SwitchCameraCommand 
   | SwitchObsSceneCommand 
   | DriverTtsCommand 
-  | ViewerChatCommand;
+  | ViewerChatCommand
+  | ExecuteIntentCommand;
 
 // --- Sequences ---
 
@@ -178,3 +328,107 @@ export interface GetNextSequenceResponse {
   commands: DirectorCommand[];
   totalDurationMs?: number;
 }
+
+// --- Extension Protocol ---
+
+export type ExtensionMessageType = 'EXTENSION_INTENT' | 'EXTENSION_EVENT' | 'EXTENSION_STATUS';
+
+export interface ExtensionMessage {
+  type: ExtensionMessageType;
+}
+
+export interface ExtensionIntentMessage extends ExtensionMessage {
+  type: 'EXTENSION_INTENT';
+  intent: string; // The intent ID (e.g., 'communication.message')
+  payload?: any;  // The intent payload
+}
+
+export interface ExtensionEventMessage extends ExtensionMessage {
+  type: 'EXTENSION_EVENT';
+  data: {
+    eventName: string;
+    payload: any;
+  };
+}
+
+export interface ExtensionStatusMessage extends ExtensionMessage {
+  type: 'EXTENSION_STATUS';
+  data: Record<string, { active: boolean; [key: string]: any }>;
+}
+
+// ============================================================================
+// API Normalizer
+// Converts legacy DirectorCommand[] (from Race Control API) into the
+// PortableSequence format consumed by the Sequence Executor.
+// ============================================================================
+
+/**
+ * Intent mappings for legacy CommandType values.
+ * Maps the old enum-based command types to the semantic intent names
+ * registered by extensions in their package.json manifests.
+ */
+const LEGACY_INTENT_MAP: Record<string, string> = {
+  'SWITCH_CAMERA': 'broadcast.showLiveCam',
+  'SWITCH_OBS_SCENE': 'obs.switchScene',
+  'DRIVER_TTS': 'communication.announce',
+  'VIEWER_CHAT': 'communication.talkToChat',
+};
+
+/**
+ * Normalizes a single legacy DirectorCommand into a SequenceStep.
+ */
+function normalizeCommand(cmd: DirectorCommand, index: number): SequenceStep {
+  const id = cmd.id || `step_${index}`;
+
+  switch (cmd.type) {
+    case 'WAIT':
+      return { id, intent: 'system.wait', payload: { ...cmd.payload } };
+    case 'LOG':
+      return { id, intent: 'system.log', payload: { ...cmd.payload } };
+    case 'EXECUTE_INTENT': {
+      // Already intent-based, unwrap
+      const intentPayload = cmd.payload as ExecuteIntentCommandPayload;
+      return {
+        id,
+        intent: intentPayload.intent,
+        payload: (intentPayload.payload ?? {}) as Record<string, unknown>,
+      };
+    }
+    default: {
+      // Map legacy command type to a semantic intent
+      const intent = LEGACY_INTENT_MAP[cmd.type];
+      if (intent) {
+        return { id, intent, payload: { ...cmd.payload } };
+      }
+      // Unknown command — log a warning step
+      return {
+        id,
+        intent: 'system.log',
+        payload: { message: `Unknown legacy command type: ${cmd.type}`, level: 'WARN' },
+      };
+    }
+  }
+}
+
+/**
+ * Normalizes a legacy DirectorSequence (from API) into a PortableSequence.
+ */
+export function normalizeApiSequence(legacy: DirectorSequence): PortableSequence {
+  return {
+    id: legacy.id,
+    steps: legacy.commands.map((cmd, i) => normalizeCommand(cmd, i)),
+    metadata: legacy.metadata,
+  };
+}
+
+/**
+ * Normalizes a GetNextSequenceResponse (from polling API) into a PortableSequence.
+ */
+export function normalizeNextSequenceResponse(response: GetNextSequenceResponse): PortableSequence {
+  return {
+    id: response.sequenceId,
+    steps: response.commands.map((cmd, i) => normalizeCommand(cmd, i)),
+    metadata: { priority: response.priority },
+  };
+}
+

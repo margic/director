@@ -1,0 +1,33 @@
+{
+  "name": "director-discord",
+  "version": "1.0.0",
+  "main": "index.js",
+  "displayName": "Discord Integration",
+  "description": "Provides Discord features including text-to-speech announcements.",
+  "contributes": {
+    "intents": [
+      {
+        "intent": "communication.announce",
+        "title": "Announce Message",
+        "description": "Announces a message via Discord TTS.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "message": { "type": "string" }
+          },
+          "required": ["message"]
+        }
+      }
+    ],
+    "settings": {
+      "discord.channelId": {
+        "type": "string",
+        "description": "The Voice Channel ID to join."
+      },
+       "discord.token": {
+        "type": "string",
+        "description": "Bot Token (Secure)"
+      }
+    }
+  }
+}

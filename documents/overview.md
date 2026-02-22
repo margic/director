@@ -35,19 +35,31 @@ The platform is built for reliability and modern usability:
 
 # The Director App
 
-The Director App is the on-premise execution engine for Sim RaceCenter. It runs locally on the race center PC, acting as a secure bridge between the cloud-based Race Control and the local hardware and software environment.
+The Director App is the on-premise Broadcast Orchestrator for Sim RaceCenter. It runs locally on the race center PC, acting as the bridge between the physical racing environment, broadcast software, and the race control strategies.
 
-## Elevator Pitch
+## Product Philosophy: "The Racing Is Real"
 
-Think of the Director App as a "Network Proxy Application." It is a lightweight, on-premise client that executes instructions from SimRaceCenter.com. It is not "smart" in itself; rather, it faithfully executes sequences of commands to orchestrate the local broadcast environment.
+The Director App is an **Open Source** automation platform. Our philosophy is simple:
+*   **The Orchestrator is Free:** The core ability to connect integrations (OBS, iRacing, Discord) and trigger sequences manually is open source.
+*   **The Intelligence is Premium:** Our cloud-based "Race Control" acts as an expert AI director that automatically triggers these sequences for you.
 
 ## Core Responsibilities
 
-The Director App manages the "last mile" of integration that cloud services cannot reach:
+The Director App operates in two modes:
 
-*   **Authentication Hub:** Handles the human interaction required for OAuth logins, securely managing tokens for:
-    *   **YouTube API:** For sending and receiving live chat messages.
-    *   **Discord:** For managing voice chat channels with drivers.
+### 1. Manual Mode (The "Control Deck")
+The app provides a "Stream Deck" style interface allowing local operators to manually trigger complex broadcast sequences.
+*   *Example:* Operator presses "Safety Car" -> App mutes drivers, switches OBS to Track Map, and plays audio cue.
+
+### 2. Auto Mode (The "Director Loop")
+The app connects to Sim RaceCenter Cloud to receive real-time commands from our AI Broadcast Agent.
+*   *Example:* AI detects a crash -> AI commands Director to run "Replay Sequence".
+
+## Architecture: The Extension System
+
+The Director is built as a modular host for **Extensions**.
+*   **Core:** Handles the execution loop, authentication, and the sequence engine.
+*   **Extensions:** All device integrations (OBS, Discord, Philips Hue, iRacing) are plugins. This allows the community to build and share new integrations without waiting for core updates.
     *   **iRacing Data API:** For retrieving series results and session info.
 *   **Local Hardware Control:**
     *   **OBS Studio:** Connects via WebSocket to switch scenes, toggle sources, and manage the broadcast stream.
