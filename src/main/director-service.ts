@@ -19,6 +19,7 @@ export class DirectorService {
   private isRunning: boolean = false;
   private status: DirectorStatus = 'IDLE';
   private currentSequenceId: string | null = null;
+  private lastCompletedSequenceId: string | null = null;
   private totalCommands: number = 0;
   private processedCommands: number = 0;
   private lastError: string | undefined;
@@ -336,7 +337,11 @@ export class DirectorService {
       return false;
     }
 
-    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}`;
+    const params = new URLSearchParams({ status: this.status });
+    if (this.lastCompletedSequenceId) {
+      params.set('currentSequenceId', this.lastCompletedSequenceId);
+    }
+    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}?${params}`;
 
     try {
       console.log('Fetching next sequence from:', url);
@@ -408,6 +413,7 @@ export class DirectorService {
         this.totalCommands = total;
       });
 
+      this.lastCompletedSequenceId = portable.id;
       this.currentSequenceId = null;
       this.totalCommands = 0;
       this.processedCommands = 0;
