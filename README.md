@@ -35,8 +35,8 @@ Think of it as the **broadcast control room** for high-performance sim racing op
 - 🌐 **Cross-Platform** — Windows, Linux AppImage support
 
 ### **API Documentation**
-- [OpenAPI Specification](https://api.simracecenter.com/api/openapi.yaml)
-- [API Documentation](https://api.simracecenter.com/api/docs)
+- [OpenAPI Specification](https://simracecenter.com/api/openapi.yaml)
+- [API Documentation](https://simracecenter.com/api/docs)
 
 ### **Security & Trust**
 - [Security Design & Architecture](documents/security_design.md) — Read how we handle authentication and secure token storage.

@@ -556,7 +556,7 @@ if (intent === 'overlay.hide') {
 
 Once RC ships their updated spec, pull it into the repo:
 ```bash
-curl -o openapi.yaml https://api.simracecenter.com/api/openapi.yaml
+curl -o openapi.yaml https://simracecenter.com/api/openapi.yaml
 ```
 
 Verify:
