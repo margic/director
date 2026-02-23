@@ -4,7 +4,7 @@ info:
   version: 1.0.0
   description: API for Sim RaceCenter Race Control and Director Integration
 servers:
-  - url: https://api.simracecenter.com
+  - url: https://simracecenter.com
     description: Production Server
   - url: http://localhost:7071
     description: Local Development Server
