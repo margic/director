@@ -28,8 +28,17 @@ export const msalConfig = {
   },
 };
 
+/**
+ * Race Control API scope for token acquisition.
+ * The Director must request this scope (not User.Read) so the access token
+ * is issued with the Race Control API audience.
+ */
+export const rcApiScope =
+  process.env.VITE_RC_API_SCOPE ||
+  'api://racecontrol-api-a780e279-1cb6-4ed0-9ef6-49029aa50a42/access_as_user';
+
 export const apiConfig = {
-  baseUrl: process.env.VITE_API_BASE_URL || 'https://dev-simracecenter.com',
+  baseUrl: process.env.VITE_API_BASE_URL || 'https://simracecenter.com',
   endpoints: {
     userProfile: '/api/auth/user',
     listSessions: '/api/director/v1/sessions',

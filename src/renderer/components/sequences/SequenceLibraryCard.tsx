@@ -30,7 +30,7 @@ export interface SequenceLibraryCardProps {
 }
 
 const categoryBadge: Record<string, { label: string; className: string }> = {
-  'built-in': { label: 'BUILT-IN', className: 'bg-secondary/20 text-secondary' },
+  'builtin': { label: 'BUILT-IN', className: 'bg-secondary/20 text-secondary' },
   cloud: { label: 'CLOUD', className: 'bg-primary/20 text-primary' },
   custom: { label: 'CUSTOM', className: 'bg-green-500/20 text-green-400' },
 };

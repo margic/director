@@ -1,6 +1,6 @@
 import { PublicClientApplication, CryptoProvider } from '@azure/msal-node';
 import { shell, BrowserWindow } from 'electron';
-import { msalConfig, apiConfig } from './auth-config';
+import { msalConfig, apiConfig, rcApiScope } from './auth-config';
 import { UserProfile } from './director-types';
 
 export class AuthService {
@@ -25,7 +25,7 @@ export class AuthService {
       try {
         const response = await this.clientApplication.acquireTokenSilent({
           account: account,
-          scopes: ["User.Read"],
+          scopes: [rcApiScope],
         });
         this.account = response.account;
         return this.account;
@@ -39,21 +39,27 @@ export class AuthService {
 
   async getUserProfile(): Promise<UserProfile | null> {
     const token = await this.getAccessToken();
-    if (!token) return null;
+    if (!token) {
+      console.warn('[AuthService] getUserProfile: no access token available');
+      return null;
+    }
 
     try {
-      const response = await fetch(`${apiConfig.baseUrl}${apiConfig.endpoints.userProfile}`, {
+      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.userProfile}`;
+      const response = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
 
       if (!response.ok) {
-        console.error('Failed to fetch user profile:', response.status, response.statusText);
+        const body = await response.text();
+        console.error('[AuthService] Failed to fetch user profile:', response.status, response.statusText, body);
         return null;
       }
 
       const profile: UserProfile = await response.json();
+      console.log('[AuthService] User profile: userId=%s, centerId=%s', profile.userId, profile.centerId || profile.center?.id);
       return profile;
     } catch (error) {
       console.error('Error fetching user profile:', error);
@@ -70,7 +76,7 @@ export class AuthService {
       try {
         const response = await this.clientApplication.acquireTokenSilent({
           account: account,
-          scopes: ["User.Read"],
+          scopes: [rcApiScope],
         });
         return response.accessToken;
       } catch (error) {
@@ -102,7 +108,7 @@ export class AuthService {
 
     const authResponse = await this.clientApplication.acquireTokenInteractive({
       openBrowser,
-      scopes: ["User.Read"],
+      scopes: [rcApiScope],
       successTemplate: "<h1>Successfully signed in!</h1> <p>You can close this window now.</p>",
       errorTemplate: "<h1>Something went wrong</h1> <p>Check the console for more information.</p>",
     });

@@ -3,7 +3,7 @@
   "name": "Show Replay for Driver",
   "version": "1.0.0",
   "description": "Jumps iRacing to an absolute session time for a specific driver on the replay scene, then automatically returns to live racing when the replay catches up.",
-  "category": "built-in",
+  "category": "builtin",
   "variables": [
     {
       "name": "driverNumber",
