@@ -1,11 +1,8 @@
 import { AuthService } from './auth-service';
 import { 
   RaceSession,
-  GetNextSequenceResponse, 
   DirectorStatus,
   DirectorState,
-  DirectorCommand,
-  DirectorSequence,
   PortableSequence,
   SequenceStep,
 } from './director-types';
@@ -113,7 +110,8 @@ export class DirectorService {
 
         const sequenceData: any = await response.json();
         
-        // Normalize API response to PortableSequence format
+        // API now returns PortableSequence format directly (with steps/intent)
+        // Fall back to legacy normalization if it still has old format
         const portable = this.normalizeApiResponse(sequenceData);
         
         this.executor.execute(portable);
@@ -136,7 +134,7 @@ export class DirectorService {
     const filterCenterId = centerId || profile?.centerId || profile?.center?.id;
 
     if (!filterCenterId) {
-      console.warn('No centerId available for session discovery');
+      console.warn('[DirectorService] No centerId available for session discovery');
       return [];
     }
 
@@ -211,6 +209,11 @@ export class DirectorService {
       this.status = 'BUSY';
       sequenceResult = await this.fetchAndExecuteNextSequence();
     } catch (error) {
+      if ((error as any)?.sessionEnded) {
+        console.log('[Director] Session has ended. Stopping director loop.');
+        this.stop();
+        return;
+      }
       console.error('Error in director loop:', error);
       this.status = 'ERROR';
     } finally {
@@ -233,6 +236,7 @@ export class DirectorService {
    * Intent mappings for legacy API CommandType values.
    * Maps the old enum-based command types from the OpenAPI spec
    * to the semantic intent names registered by extensions.
+   * @deprecated The API now returns PortableSequence with semantic intents directly.
    */
   private static readonly LEGACY_INTENT_MAP: Record<string, string> = {
     'SWITCH_CAMERA': 'broadcast.showLiveCam',
@@ -245,11 +249,33 @@ export class DirectorService {
   };
 
   /**
-   * Normalizes a raw API response (legacy DirectorCommand[]) into a PortableSequence.
-   * This is the single adapter point between the Race Control API format
-   * and the intent-driven execution engine.
+   * Normalizes a raw API response into a PortableSequence.
+   * The current API returns PortableSequence format directly (with `steps` and semantic `intent` fields).
+   * Legacy format (with `commands` and `commandType` fields) is still supported for backward compatibility.
    */
   private normalizeApiResponse(apiData: any): PortableSequence {
+    // New format: API returns PortableSequence directly with `steps`
+    if (apiData.steps && Array.isArray(apiData.steps)) {
+      return {
+        id: apiData.id || randomUUID(),
+        name: apiData.name,
+        version: apiData.version,
+        description: apiData.description,
+        category: apiData.category,
+        priority: apiData.priority,
+        variables: apiData.variables,
+        steps: apiData.steps.map((step: any) => ({
+          id: step.id || randomUUID(),
+          intent: step.intent,
+          payload: step.payload || {},
+          metadata: step.metadata,
+        })),
+        metadata: apiData.metadata,
+      };
+    }
+
+    // Legacy format: API returned DirectorSequence with `commands`
+    console.warn('[Director] Received legacy API format with commands[] — normalizing to PortableSequence');
     const commands: any[] = apiData.commands || [];
     
     const steps: SequenceStep[] = commands.map((cmd: any, index: number) => {
@@ -280,7 +306,6 @@ export class DirectorService {
       // Map legacy command types to semantic intents
       const intent = DirectorService.LEGACY_INTENT_MAP[type];
       if (intent) {
-        // Build payload from target object (OpenAPI format) or inline payload
         let payload = cmd.payload || {};
         
         if (cmd.target) {
@@ -318,8 +343,8 @@ export class DirectorService {
       steps,
       metadata: {
         priority: apiData.priority,
-        generatedAt: apiData.generatedAt,
-        totalDurationMs: apiData.totalDurationMs,
+        generatedAt: apiData.generatedAt || apiData.metadata?.generatedAt,
+        totalDurationMs: apiData.totalDurationMs || apiData.metadata?.totalDurationMs,
       },
     };
   }
@@ -337,10 +362,20 @@ export class DirectorService {
       return false;
     }
 
-    const params = new URLSearchParams({ status: this.status });
+    // Build query parameters per updated OpenAPI spec:
+    //   lastSequenceId — ID of the sequence just completed (for chaining/logging)
+    //   intents — comma-separated list of active intent handlers (capability reporting)
+    const params = new URLSearchParams();
     if (this.lastCompletedSequenceId) {
-      params.set('currentSequenceId', this.lastCompletedSequenceId);
+      params.set('lastSequenceId', this.lastCompletedSequenceId);
     }
+
+    // Report active intents so RC constrains sequence generation to what we can execute
+    const activeIntents = this.getActiveIntents();
+    if (activeIntents.length > 0) {
+      params.set('intents', activeIntents.join(','));
+    }
+
     const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}?${params}`;
 
     try {
@@ -355,9 +390,22 @@ export class DirectorService {
 
       const duration = Date.now() - startTime;
 
+      // Handle 410 Gone — session has ended (COMPLETED or CANCELED)
+      if (response.status === 410) {
+        console.log('[Director] Session ended (410 Gone). Stopping polling.');
+        telemetryService.trackDependency(
+          'RaceControl API', url, duration, true, 410, 'HTTP',
+          { sessionId: this.currentRaceSessionId, result: 'session-ended' }
+        );
+        const error: any = new Error('Session has ended');
+        error.sessionEnded = true;
+        throw error;
+      }
+
       if (response.status === 204) {
-        // No new sequence available
-        console.log('No new sequence available (204)');
+        // No new sequence available — respect Retry-After header if present
+        const retryAfter = response.headers.get('Retry-After');
+        console.log(`No new sequence available (204)${retryAfter ? `, Retry-After: ${retryAfter}s` : ''}`);
         telemetryService.trackDependency(
           'RaceControl API',
           url,
@@ -370,6 +418,13 @@ export class DirectorService {
             result: 'no-sequence',
           }
         );
+        // Return negative value to signal the loop to use Retry-After as the poll interval
+        if (retryAfter) {
+          const retryMs = parseInt(retryAfter, 10) * 1000;
+          if (!isNaN(retryMs) && retryMs > 0) {
+            return retryMs;
+          }
+        }
         return false;
       }
 
@@ -394,7 +449,8 @@ export class DirectorService {
       const sequenceData: any = await response.json();
       console.log('Received sequence:', JSON.stringify(sequenceData, null, 2));
 
-      // Normalize API response to PortableSequence using the adapter
+      // Normalize API response — handles both new PortableSequence format (steps/intent)
+      // and legacy DirectorSequence format (commands/commandType) for backward compatibility
       const portable = this.normalizeApiResponse(sequenceData);
 
       this.currentSequenceId = portable.id;
@@ -405,7 +461,7 @@ export class DirectorService {
         sequenceId: portable.id,
         sessionId: this.currentRaceSessionId,
         commandCount: portable.steps.length.toString(),
-        priority: String(portable.metadata?.priority || 'NORMAL'),
+        priority: String(portable.priority || false),
       });
 
       await this.executor.execute(portable, (completed, total) => {
@@ -423,8 +479,13 @@ export class DirectorService {
         sessionId: this.currentRaceSessionId,
       });
 
-      return sequenceData.totalDurationMs ?? 0;
+      // Use metadata.totalDurationMs for poll pacing (per RFC agreement)
+      const totalDurationMs = (portable.metadata as any)?.totalDurationMs ?? 0;
+      return totalDurationMs;
     } catch (error) {
+      // Re-throw session-ended errors so the loop handler can stop
+      if ((error as any)?.sessionEnded) throw error;
+
       console.error('Error fetching/executing sequence:', error);
       const duration = Date.now() - startTime;
       telemetryService.trackDependency(
@@ -443,6 +504,26 @@ export class DirectorService {
         sessionId: this.currentRaceSessionId || 'unknown',
       });
       return false;
+    }
+  }
+
+  /**
+   * Returns the list of currently active intent handlers.
+   * Sent as the `intents` query parameter so Race Control constrains
+   * sequence generation to only emit steps we can execute.
+   * Always includes system.wait and system.log (built-in, always available).
+   */
+  private getActiveIntents(): string[] {
+    const builtIns = ['system.wait', 'system.log'];
+    try {
+      const catalog = this.extensionHost.getCapabilityCatalog();
+      const allIntents = catalog.getAllIntents();
+      const activeExtIntents = allIntents
+        .filter(entry => entry.enabled)
+        .map(entry => entry.intent.intent);
+      return [...builtIns, ...activeExtIntents];
+    } catch {
+      return builtIns;
     }
   }
 }

@@ -31,7 +31,7 @@ export interface SequenceStep {
 export interface SequenceVariable {
   name: string;              // Variable identifier (alphanumeric, camelCase)
   label: string;             // Human-readable label for UI
-  type: 'string' | 'number' | 'boolean' | 'select' | 'sessionTime' | 'sessionTick';
+  type: 'text' | 'number' | 'boolean' | 'select' | 'sessionTime' | 'sessionTick';
   required: boolean;
   default?: unknown;         // Default value (used if not provided)
   description?: string;      // Help text shown in UI
@@ -44,7 +44,7 @@ export interface SequenceVariable {
     }>;
     pattern?: string;        // Regex for string type
   };
-  source?: 'user' | 'context';  // Where the value comes from
+  source?: 'user' | 'context' | 'cloud';  // Where the value comes from
   contextKey?: string;       // Dot-path for auto-population from telemetry/session data
 }
 
@@ -57,7 +57,7 @@ export interface PortableSequence {
   name?: string;
   version?: string;
   description?: string;                              // Human-readable description
-  category?: 'built-in' | 'cloud' | 'custom';       // Library category
+  category?: 'builtin' | 'cloud' | 'custom';         // Library category
   priority?: boolean;                                 // If true, executes immediately even during Director Loop
   variables?: SequenceVariable[];                     // Runtime variable definitions
   steps: SequenceStep[];
@@ -321,6 +321,10 @@ export interface ActiveSessionResponse {
 
 export type SequencePriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
 
+/**
+ * @deprecated The /sequences/next endpoint now returns PortableSequence directly.
+ * Kept for backward compatibility with any remaining code paths.
+ */
 export interface GetNextSequenceResponse {
   sequenceId: string;
   createdAt: string;

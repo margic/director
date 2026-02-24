@@ -241,7 +241,7 @@ export class SequenceLibraryService {
         jsonFiles.map(async (f) => {
           const content = await fs.readFile(path.join(this.builtInDir, f), 'utf-8');
           const seq = JSON.parse(content) as PortableSequence;
-          return { ...seq, category: 'built-in' as const };
+          return { ...seq, category: 'builtin' as const };
         })
       );
       this.builtInCache = sequences;

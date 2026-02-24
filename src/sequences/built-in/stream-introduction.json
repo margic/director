@@ -3,7 +3,7 @@
   "name": "Stream Introduction",
   "version": "1.0.0",
   "description": "Opens the broadcast with driver overview and scenic cameras, then sends a welcome message to YouTube chat.",
-  "category": "built-in",
+  "category": "builtin",
   "variables": [],
   "steps": [
     {

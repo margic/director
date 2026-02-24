@@ -86,7 +86,7 @@ export interface PortableSequence {
   name?: string;
   version?: string;
   description?: string;
-  category?: 'built-in' | 'cloud' | 'custom';
+  category?: 'builtin' | 'cloud' | 'custom';
   priority?: boolean;
   variables?: SequenceVariable[];
   steps: SequenceStep[];

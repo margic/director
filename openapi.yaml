@@ -5,7 +5,7 @@ info:
   description: API for Sim RaceCenter Race Control and Director Integration
 servers:
   - url: https://simracecenter.com
-    description: Production Server
+    description: Production Server (via SWA linked backend)
   - url: http://localhost:7071
     description: Local Development Server
 components:
@@ -15,101 +15,170 @@ components:
       scheme: bearer
       bearerFormat: JWT
   schemas:
-    DirectorCommandType:
-      type: string
-      enum:
-        - SWITCH_CAMERA
-        - PLAY_AUDIO
-        - SHOW_OVERLAY
-        - HIDE_OVERLAY
-      description: The type of command to execute.
-    DirectorCommand:
+    SequenceVariable:
       type: object
       properties:
-        commandType:
-          $ref: '#/components/schemas/DirectorCommandType'
-        target:
-          type: object
-          description: Target details for the command (e.g., car, camera, overlay).
-          properties:
-            carIndex:
-              type: integer
-              description: The index of the car to focus on.
-            driverName:
-              type: string
-              description: The name of the driver.
-            carNumber:
-              type: string
-              description: The number of the car.
-            cameraGroup:
-              type: string
-              description: The camera group to use (e.g., TV1, Cockpit).
-            sceneType:
-              type: string
-              description: The type of scene (e.g., Forward, Rear, General).
-            obsSceneId:
-              type: string
-              description: The OBS Scene ID to switch to.
-          additionalProperties: true
-        durationMs:
-          type: integer
-          description: Duration to hold this state in milliseconds.
-        offsetMs:
-          type: integer
-          description: Time offset from the start of the sequence to execute this command.
-        id:
+        name:
           type: string
-          format: uuid
+          description: Variable name for substitution.
+        label:
+          type: string
+          description: Human-readable label for UI.
         type:
           type: string
           enum:
-            - WAIT
-            - LOG
+            - text
+            - number
+            - select
+            - boolean
+            - sessionTime
+            - sessionTick
+          description: Variable data type.
+        required:
+          type: boolean
+          description: Whether the variable must be provided.
+        source:
+          type: string
+          enum:
+            - cloud
+            - context
+            - user
+          description: How the variable is resolved.
+        contextKey:
+          type: string
+          description: Context path for resolution (e.g., iracing.drivers).
+        defaultValue:
+          description: Default value if not provided.
+        constraints:
+          type: object
+          description: Validation constraints for the variable.
+          properties:
+            min:
+              type: number
+            max:
+              type: number
+            options:
+              type: array
+              items:
+                type: object
+                properties:
+                  label:
+                    type: string
+                  value:
+                    type: string
+            pattern:
+              type: string
+      required:
+        - name
+        - label
+        - type
+        - required
+        - source
+    SequenceStep:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique step identifier.
+        intent:
+          type: string
+          description: Semantic intent in domain.action notation (e.g., obs.switchScene).
         payload:
           type: object
+          additionalProperties: true
+          description: Step payload matching the intent's schema.
+        metadata:
+          type: object
+          properties:
+            label:
+              type: string
+            timeout:
+              type: number
+          additionalProperties: true
       required:
-        - commandType
-        - target
-        - offsetMs
-    DirectorSequence:
+        - id
+        - intent
+        - payload
+    PortableSequence:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Unique sequence identifier.
+        name:
+          type: string
+          description: Sequence name.
+        version:
+          type: string
+          description: Sequence version.
+        description:
+          type: string
+          description: Human-readable description.
+        category:
+          type: string
+          enum:
+            - cloud
+            - builtin
+            - custom
+          description: Sequence category.
+        priority:
+          type: boolean
+          description: >-
+            If true, the client should cancel any in-progress execution and run
+            this sequence immediately.
+        centerId:
+          type: string
+          description: Associated center ID for cloud sequences.
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/SequenceVariable'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/SequenceStep'
+        metadata:
+          type: object
+          description: Sequence-level metadata for auto-generated sequences.
+          properties:
+            totalDurationMs:
+              type: integer
+              description: >-
+                Expected total duration in milliseconds. Mandatory on
+                auto-director sequences.
+            generatedAt:
+              type: string
+              format: date-time
+              description: Timestamp when the sequence was generated.
+            source:
+              type: string
+              enum:
+                - ai-director
+                - command-buffer
+                - library
+              description: Origin of the sequence.
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - steps
+    ExecuteSequencePayload:
       type: object
       properties:
         sequenceId:
           type: string
-          format: uuid
-          description: Unique identifier for this generated sequence.
-        raceSessionId:
-          type: string
-          format: uuid
-          description: The session context.
-        commands:
-          type: array
-          items:
-            $ref: '#/components/schemas/DirectorCommand'
-          description: List of commands to execute.
-        totalDurationMs:
-          type: integer
-          description: Expected duration of the entire sequence in milliseconds.
-        generatedAt:
-          type: string
-          format: date-time
-          description: Timestamp when the sequence was generated.
-        createdAt:
-          type: string
-          format: date-time
-        priority:
-          type: string
-          enum:
-            - LOW
-            - NORMAL
-            - HIGH
-            - URGENT
+          description: ID of the sequence to execute.
+        variables:
+          type: object
+          additionalProperties: true
+          description: Variable bindings for the sequence.
       required:
         - sequenceId
-        - raceSessionId
-        - commands
-        - totalDurationMs
-        - generatedAt
     RaceSession:
       type: object
       properties:
@@ -200,17 +269,6 @@ components:
           type: array
           items:
             type: string
-    NextSequenceResponse:
-      type: object
-      properties:
-        status:
-          type: string
-          enum:
-            - IDLE
-            - BUSY
-            - ERROR
-        sequence:
-          $ref: '#/components/schemas/DirectorSequence'
 security:
   - bearerAuth: []
 paths:
@@ -295,6 +353,36 @@ paths:
                     type: string
         '500':
           description: Internal server error.
+  /api/chat:
+    post:
+      summary: Interact with the AI Agent
+      description: Ask questions about the current race progress, incidents, and standings.
+      tags:
+        - AI
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - sessionId
+                - message
+              properties:
+                sessionId:
+                  type: string
+                message:
+                  type: string
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reply:
+                    type: string
   /api/director/v1/sessions/{raceSessionId}/sequences/next:
     get:
       summary: Generate Next Sequence
@@ -306,8 +394,9 @@ paths:
         This endpoint acts as an "AI Director", analyzing telemetry, gaps, and
         incidents to determine the most interesting shots to show.
 
-        The returned sequence contains a list of time-stamped commands (e.g.,
-        camera switches) that the client should execute.
+        The returned sequence contains a list of steps using semantic intents
+        (e.g., broadcast.showLiveCam, obs.switchScene) that the client executes
+        sequentially.
       parameters:
         - in: path
           name: raceSessionId
@@ -324,15 +413,46 @@ paths:
           description: >-
             The ID of the sequence that was just completed (for chaining and
             logging).
+        - in: query
+          name: intents
+          schema:
+            type: string
+          description: >-
+            Comma-separated list of intent handlers the Director currently
+            supports (e.g.,
+            "broadcast.showLiveCam,obs.switchScene,system.wait"). If absent, RC
+            generates with all registered intents.
       responses:
         '200':
           description: A new sequence is generated and returned.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DirectorSequence'
+                $ref: '#/components/schemas/PortableSequence'
+        '204':
+          description: >-
+            No sequence available. Director should retry after the indicated
+            interval.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+              description: Suggested retry interval in seconds.
         '404':
           description: Session not found or user not authorized for this center.
+        '410':
+          description: >-
+            Session has ended (COMPLETED or CANCELED). Director should stop
+            polling.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  sessionStatus:
+                    type: string
         '500':
           description: Internal server error during sequence generation.
   /api/director/v1/sessions:
@@ -528,12 +648,83 @@ paths:
           description: User not found.
         '500':
           description: Internal server error.
+  /api/director/v1/sequences:
+    get:
+      summary: List Portable Sequences
+      description: >
+        Retrieves a library of pre-defined portable sequences.
+
+
+        These sequences are configured in the cloud portal and appear in the
+        Director's
+
+        local library under the "Cloud" category. The Director App uses this
+        endpoint
+
+        to fetch sequences for display and execution.
+      parameters:
+        - in: query
+          name: centerId
+          schema:
+            type: string
+          required: false
+          description: Filter sequences by center ID (defaults to user's center).
+        - in: query
+          name: category
+          schema:
+            type: string
+            enum:
+              - cloud
+              - builtin
+              - custom
+          description: Filter sequences by category.
+      responses:
+        '200':
+          description: Array of portable sequences.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PortableSequence'
+        '401':
+          description: Not authenticated.
+        '403':
+          description: Access denied - RaceDirector role required.
+        '500':
+          description: Internal server error.
+  /api/director/v1/sequences/{id}:
+    get:
+      summary: Get Portable Sequence by ID
+      description: Retrieves a specific portable sequence by its ID.
+      parameters:
+        - in: path
+          name: id
+          schema:
+            type: string
+          required: true
+          description: The ID of the sequence to retrieve.
+      responses:
+        '200':
+          description: The portable sequence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortableSequence'
+        '401':
+          description: Not authenticated.
+        '403':
+          description: Access denied - RaceDirector role required.
+        '404':
+          description: Sequence not found.
+        '500':
+          description: Internal server error.
   /api/director/v1/sessions/{id}/commands:
     post:
       summary: Queue a chat/voice command
       description: >
-        Queues a command (e.g., TTS_MESSAGE or SHOW_OVERLAY) to be included in
-        the next director sequence.
+        Queues a command using the shared intent registry to be included in the
+        next director sequence.
 
         This endpoint is called by external AI Bot webhooks to inject
         asynchronous commands into the broadcast.
@@ -554,30 +745,30 @@ paths:
             schema:
               type: object
               required:
-                - type
+                - intent
                 - payload
               properties:
-                type:
+                intent:
                   type: string
                   enum:
-                    - TTS_MESSAGE
-                    - SHOW_OVERLAY
-                  description: The type of command to queue
+                    - communication.announce
+                    - communication.talkToChat
+                    - overlay.show
+                    - overlay.hide
+                    - system.log
+                  description: Intent from the shared registry
                 payload:
                   type: object
                   properties:
-                    text:
+                    message:
                       type: string
                       description: The text content (for TTS or overlay)
-                    author:
-                      type: string
-                      description: The author of the message
                   additionalProperties: true
-                  description: Command-specific payload data
+                  description: Intent-specific payload data
                 priority:
                   type: integer
                   default: 5
-                  description: Command priority (lower number = higher priority)
+                  description: Command priority (lower number = higher priority, 1-10)
       responses:
         '201':
           description: Command queued successfully
@@ -592,7 +783,7 @@ paths:
                   sessionId:
                     type: string
                     format: uuid
-                  type:
+                  intent:
                     type: string
                   payload:
                     type: object

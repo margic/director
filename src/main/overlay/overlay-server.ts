@@ -187,8 +187,6 @@ export class OverlayServer {
     const relativePath = pathname.replace(/^\/overlay\/?/, '') || 'index.html';
     const filePath = path.join(this.overlayDir, relativePath);
 
-    console.log(`[OverlayServer] serveOverlay: pathname='${pathname}' → file='${filePath}' exists=${fs.existsSync(filePath)}`);
-
     // Security: prevent directory traversal
     if (!filePath.startsWith(this.overlayDir)) {
       res.writeHead(403, { 'Content-Type': 'text/plain' });
