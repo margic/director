@@ -1,6 +1,7 @@
 // src/main/config-service.ts
 import Store from 'electron-store';
 import { safeStorage } from 'electron';
+import { randomUUID } from 'crypto';
 
 interface AppConfig {
   youtube: {
@@ -21,6 +22,9 @@ interface AppConfig {
     enabled: boolean;
     channelId?: string;
     autoConnect?: boolean;
+  };
+  director: {
+    id?: string;
   };
 }
 
@@ -58,6 +62,13 @@ const schema = {
       enabled: { type: 'boolean', default: true },
       channelId: { type: 'string' },
       autoConnect: { type: 'boolean', default: false }
+    },
+    default: {}
+  },
+  director: {
+    type: 'object',
+    properties: {
+      id: { type: 'string' }
     },
     default: {}
   }
@@ -153,6 +164,20 @@ class ConfigService {
   isSecureSet(key: string): boolean {
     const encryptedBase64 = this.store.get(`secure.${key}` as any);
     return !!encryptedBase64;
+  }
+
+  /**
+   * Returns a persistent Director instance ID, creating one on first call.
+   * Format: d_inst_{uuid}
+   */
+  getOrCreateDirectorId(): string {
+    let id = this.store.get('director' as any) as any;
+    id = id?.id;
+    if (!id) {
+      id = `d_inst_${randomUUID()}`;
+      this.store.set('director.id' as any, id);
+    }
+    return id;
   }
 }
 

@@ -1,10 +1,10 @@
-# Feature Proposal: Session Claim & Capability Exchange
+# Feature Proposal: Session Check-In & Capability Exchange
 
 **From:** Director Client Team  
 **To:** Race Control API Team  
 **Date:** 2026-03-14  
 **Status:** RFC — Requesting Feedback  
-**Depends On:** Director Loop v2 RFC, RC Response to Director Proposal  
+**Depends On:** Director Agent v2 RFC, RC Response to Director Proposal, RC Response to Session Check-In RFC  
 
 ---
 
@@ -12,9 +12,9 @@
 
 Today when a Director selects and starts a session, it simply begins polling `GET .../sequences/next`. Race Control has no knowledge that a Director has connected, what hardware it controls, or whether another Director is already operating on the same session. The first indication RC receives is the `intents` query parameter on the first poll — if it's even implemented yet.
 
-**This proposal introduces a formal session lifecycle: Claim → Direct → Release.** Before any sequences flow, the Director claims a session and exchanges capabilities with Race Control. RC acknowledges the claim, returns session configuration, and from that point generates sequences tailored to the Director's actual hardware. On teardown, the Director releases the claim cleanly.
+**This proposal introduces a formal session lifecycle: Check In → On Standby → Start Agent → Directing → Wrap.** Before any sequences flow, the Director checks in to a session and exchanges capabilities with Race Control. RC acknowledges the check-in, puts the Director on standby, and returns session configuration. From that point RC generates sequences tailored to the Director's actual hardware. On teardown, the Director wraps the session cleanly.
 
-**Cost justification:** This handshake is a single HTTP round-trip at session setup. It eliminates blind sequence generation, prevents multi-Director conflicts, and gives both sides the information they need before the first sequence ever fires. The investment is one new endpoint and one new schema.
+**Cost justification:** This check-in handshake is a single HTTP round-trip at session setup. It eliminates blind sequence generation, prevents multi-Director conflicts, and gives both sides the information they need before the first sequence ever fires. The investment is one new endpoint and one new schema.
 
 ---
 
@@ -26,14 +26,14 @@ RC's AI Director currently generates sequences with no knowledge of which hardwa
 
 The `intents` query parameter (accepted in the RC Response §5.1) partially addresses this, but it has limitations:
 
-| Concern | `intents` Param Only | With Session Claim |
+| Concern | `intents` Param Only | With Session Check-In |
 |:---|:---|:---|
 | RC knows what Director can do | After first poll | Before first poll |
-| RC knows Director version/identity | Never | At claim time |
+| RC knows Director version/identity | Never | At check-in time |
 | RC knows hardware connection state | Inferred (if intent is absent, maybe disconnected?) | Explicit structured health report |
-| Protection against duplicate Directors | None | Exclusive claim |
-| Director receives session config upfront | Never (must separately query sessions + guess mappings) | Returned in claim response |
-| Clean session teardown signal | None (Director just stops polling) | Explicit release call |
+| Protection against duplicate Directors | None | Exclusive check-in |
+| Director receives session config upfront | Never (must separately query sessions + guess mappings) | Returned in check-in response |
+| Clean session teardown signal | None (Director just stops polling) | Explicit wrap call |
 
 ### 1.2 No Mutual Exclusion on Sessions
 
@@ -48,7 +48,7 @@ The `GET /api/director/v1/sessions` endpoint returns basic session metadata (nam
 - **OBS host address:** The session may specify a different OBS instance than the Director's default.
 - **Polling configuration:** Should the Director poll every 5s or can RC suggest different intervals based on session type?
 
-Today the Director operates with incomplete context. The claim response fills this gap.
+Today the Director operates with incomplete context. The check-in response fills this gap.
 
 ### 1.4 No Clean Session Teardown
 
@@ -56,43 +56,52 @@ When the Director stops or crashes, RC has no signal. The `410 Gone` response (a
 
 ---
 
-## 2. Proposed Solution: Three-Phase Session Lifecycle
+## 2. Proposed Solution: Five-Phase Session Lifecycle
 
 ```
-Phase 1: Claim (Pre-Race)
+Phase 1: Check In (Pre-Race)
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
 │  1. User selects session from dashboard                     │
 │  2. Director collects capabilities (catalog + health)       │
-│  3. POST /api/director/v1/sessions/{id}/claim               │
-│  4. RC validates: session exists, no conflicting claim       │
-│  5. RC responds: accepted + session config                  │
+│  3. POST /api/director/v1/sessions/{id}/checkin             │
+│  4. RC validates: session exists, no conflicting check-in   │
+│  5. RC responds: status "standby" + session config          │
 │  6. Director applies config (OBS host, scene mappings)      │
-│  7. UI shows "Session Claimed — Ready" with green badge     │
+│  7. UI shows "On Standby" with green badge                  │
 │                                                             │
-└─────────────────────────────┬───────────────────────────────┘
+└─────────────────────────────────┬───────────────────────────┘
                               │
                               ▼
-Phase 2: Direct (Race)
+Phase 2: On Standby (Pre-Race)
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
-│  1. User clicks "Start Engine" → auto mode                  │
+│  Director is checked in, config applied, equipment verified │
+│  Waiting for the Broadcast Director to start the AI Agent   │
+│                                                             │
+└─────────────────────────────────┬───────────────────────────┘
+                              │
+                              ▼
+Phase 3: Start Agent → Directing (Race)
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  1. User clicks "Start Agent" → auto mode                   │
 │  2. CloudPoller begins polling GET .../sequences/next       │
 │  3. intents param sent on each poll (lightweight delta)     │
 │  4. Sequences arrive → Scheduler → Executor                 │
 │  5. Capability changes mid-session sent via intents param   │
 │                                                             │
-└─────────────────────────────┬───────────────────────────────┘
+└─────────────────────────────────┬───────────────────────────┘
                               │
                               ▼
-Phase 3: Release (Post-Race)
+Phase 4: Wrap (Post-Race)
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
-│  1. Session ends (410 Gone) → auto-release                  │
-│     OR user clicks "Stop" → manual release                  │
+│  1. Session ends (410 Gone) → auto-wrap                     │
+│     OR user clicks "Wrap" → manual wrap                     │
 │     OR Director process exits → TTL-based expiry            │
-│  2. DELETE /api/director/v1/sessions/{id}/claim              │
-│  3. RC clears the claim → session available to other        │
+│  2. DELETE /api/director/v1/sessions/{id}/checkin            │
+│  3. RC clears the check-in → session available to other     │
 │     Directors                                               │
 │  4. UI returns to session selection                         │
 │                                                             │
@@ -103,10 +112,10 @@ Phase 3: Release (Post-Race)
 
 ## 3. API Specification
 
-### 3.1 Claim Session
+### 3.1 Check In to Session
 
 ```
-POST /api/director/v1/sessions/{raceSessionId}/claim
+POST /api/director/v1/sessions/{raceSessionId}/checkin
 Authorization: Bearer <token>
 Content-Type: application/json
 ```
@@ -114,7 +123,7 @@ Content-Type: application/json
 #### Request Body
 
 ```typescript
-interface SessionClaimRequest {
+interface SessionCheckinRequest {
   /**
    * Stable identifier for this Director installation.
    * Generated once on first launch and persisted in electron-store.
@@ -130,7 +139,7 @@ interface SessionClaimRequest {
   version: string;
 
   /**
-   * Capabilities snapshot at claim time.
+   * Capabilities snapshot at check-in time.
    * This is the heavyweight handshake — full schema info, connection health.
    * Subsequent capability updates during active direction use the lightweight
    * `intents` query parameter on GET .../sequences/next.
@@ -140,7 +149,7 @@ interface SessionClaimRequest {
 
 interface DirectorCapabilities {
   /**
-   * Active intent handlers at claim time.
+   * Active intent handlers at check-in time.
    * Unlike the `intents` query parameter (comma-separated strings),
    * this includes metadata RC can use for intelligent generation:
    * - Schema information for payload validation
@@ -275,30 +284,30 @@ interface ConnectionHealth {
 
 #### Responses
 
-**200 OK — Claim Accepted**
+**200 OK — Check-In Accepted (On Standby)**
 
 ```typescript
-interface SessionClaimResponse {
-  /** Claim was accepted */
-  claimed: true;
+interface SessionCheckinResponse {
+  /** Director's session status after check-in */
+  status: "standby";
 
   /**
-   * Unique claim identifier. The Director includes this in
-   * subsequent requests as proof of ownership. RC can invalidate
-   * claims server-side if needed.
+   * Unique check-in identifier. The Director includes this in
+   * subsequent requests as proof of assignment. RC can invalidate
+   * check-ins server-side if needed.
    */
-  claimId: string;
+  checkinId: string;
 
   /**
-   * Claim TTL in seconds. The Director must refresh or release
-   * before this expires. If the Director crashes without releasing,
-   * the claim expires and the session becomes available again.
+   * Check-in TTL in seconds. The Director must refresh or wrap
+   * before this expires. If the Director crashes without wrapping,
+   * the check-in expires and the session becomes available again.
    *
    * The polling loop itself serves as the implicit heartbeat — 
    * each GET .../sequences/next resets the TTL. No separate 
    * keepalive endpoint is needed.
    */
-  claimTtlSeconds: number;
+  checkinTtlSeconds: number;
 
   /**
    * Operational session configuration.
@@ -306,6 +315,20 @@ interface SessionClaimResponse {
    * receive from the basic GET .../sessions endpoint.
    */
   sessionConfig: SessionOperationalConfig;
+
+  /**
+   * Non-fatal warnings about the check-in.
+   * RC emits these when the reported capabilities are missing
+   * expected intents or hardware is disconnected.
+   * The Director displays these during the On Standby phase
+   * so the operator can remediate before starting the agent.
+   *
+   * v1 warning conditions:
+   * - "Primary camera intent (broadcast.showLiveCam) not available"
+   * - "OBS not connected — obs.switchScene steps will be omitted"
+   * - "No communication intents available — TTS and chat steps will be omitted"
+   */
+  warnings?: string[];
 }
 
 interface SessionOperationalConfig {
@@ -367,9 +390,9 @@ interface SessionDriverMapping {
 
 ```json
 {
-  "claimed": true,
-  "claimId": "claim_f47ac10b-58cc-4372-a567-0e02b2c3d479",
-  "claimTtlSeconds": 120,
+  "status": "standby",
+  "checkinId": "checkin_f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "checkinTtlSeconds": 120,
   "sessionConfig": {
     "raceSessionId": "sess_a1b2c3d4",
     "name": "Saturday Night League Race — Round 7",
@@ -416,16 +439,17 @@ interface SessionDriverMapping {
 }
 ```
 
-**409 Conflict — Session Already Claimed**
+**409 Conflict — Session Already Checked In**
 
-Returned when another Director instance already holds an active claim on this session.
+Returned when another Director instance already holds an active check-in on this session.
 
 ```json
 {
-  "error": "Session is already claimed by another Director",
-  "existingClaim": {
+  "error": "Session already has a director checked in",
+  "existingCheckin": {
     "directorId": "d_inst_99887766-...",
-    "claimedAt": "2026-03-14T17:30:00Z",
+    "displayName": "Ana Torres",
+    "checkedInAt": "2026-03-14T17:30:00Z",
     "expiresAt": "2026-03-14T18:30:00Z"
   }
 }
@@ -433,7 +457,7 @@ Returned when another Director instance already holds an active claim on this se
 
 The Director should display this to the user with options:
 - **Wait** — Retry later (another operator may be using the session)
-- **Force Claim** — If authorized, send `POST .../claim` with header `X-Force-Claim: true` to override (requires admin role)
+- **Force Check-In** — If authorized, send `POST .../checkin` with header `X-Force-Checkin: true` to override (requires admin role)
 
 **404 Not Found — Session Does Not Exist**
 
@@ -455,45 +479,81 @@ The Director should display this to the user with options:
 
 **401 Unauthorized / 403 Forbidden** — Standard auth errors.
 
-### 3.2 Release Session Claim
+### 3.2 Wrap Session (Release Check-In)
 
 ```
-DELETE /api/director/v1/sessions/{raceSessionId}/claim
+DELETE /api/director/v1/sessions/{raceSessionId}/checkin
 Authorization: Bearer <token>
-X-Claim-Id: claim_f47ac10b-58cc-4372-a567-0e02b2c3d479
+X-Checkin-Id: checkin_f47ac10b-58cc-4372-a567-0e02b2c3d479
 ```
 
 #### Responses
 
-**204 No Content** — Claim released successfully.
+**204 No Content** — Check-in released successfully. Session wrapped.
 
-**404 Not Found** — No active claim exists for this session (already expired or released).
+**404 Not Found** — No active check-in exists for this session (already expired or wrapped).
 
-**403 Forbidden** — The `X-Claim-Id` does not match the active claim (another Director owns it).
+**403 Forbidden** — The `X-Checkin-Id` does not match the active check-in (another Director owns it).
 
 ### 3.3 Heartbeat via Polling (Implicit — No New Endpoint)
 
-No dedicated heartbeat endpoint is needed. The existing `GET .../sequences/next` polling loop serves as the implicit keepalive. RC resets the claim TTL on every successful poll from the claiming Director.
+No dedicated heartbeat endpoint is needed. The existing `GET .../sequences/next` polling loop serves as the implicit keepalive. RC resets the check-in TTL on every successful poll from the checked-in Director.
 
-**RC implementation:** On each `GET .../sequences/next` request, if the `Authorization` token resolves to the same user that holds the claim, reset the `expiresAt` timestamp to `now + claimTtlSeconds`.
+**RC implementation:** On each `GET .../sequences/next` request, if the `Authorization` token resolves to the same user that holds the check-in, reset the `expiresAt` timestamp to `now + checkinTtlSeconds`.
 
-**Edge case: Director crashes.** The claim TTL expires naturally. With a 120-second TTL and 5-second polling, the Director has 24 missed polls before the claim lapses — ample margin for transient network issues.
+**Edge case: Director crashes.** The check-in TTL expires naturally. With a 120-second TTL and 5-second polling, the Director has 24 missed polls before the check-in lapses — ample margin for transient network issues.
 
-### 3.4 Claim ID on Polling Requests
+#### Heartbeat Floor Rate Contract
 
-To tie the claim to the polling loop, the Director includes its claim ID as a header on sequence requests:
+RC may send `Retry-After` headers on 204 responses to throttle polling during caution periods. To prevent the check-in TTL from lapsing during long `Retry-After` intervals, the Director observes this invariant:
+
+> **The Director MUST poll at `min(Retry-After, checkinTtlSeconds / 4)` regardless of the `Retry-After` value.**
+
+With `checkinTtlSeconds: 120`, this caps the maximum polling interval at 30s — ensuring at least 4 heartbeats per TTL window. The extra 204 responses from "too-frequent" polling are cheap: no body, no sequence generation, just a TTL refresh.
+
+### 3.4 Check-In ID on Polling Requests
+
+To tie the check-in to the polling loop, the Director includes its check-in ID as a header on sequence requests:
 
 ```
 GET /api/director/v1/sessions/{id}/sequences/next
   ?lastSequenceId=abc-123
   &intents=broadcast.showLiveCam,obs.switchScene,...
-X-Claim-Id: claim_f47ac10b-58cc-4372-a567-0e02b2c3d479
+X-Checkin-Id: checkin_f47ac10b-58cc-4372-a567-0e02b2c3d479
 ```
 
-RC validates the claim on each poll:
-- **Valid claim:** Normal response (200/204). TTL refreshed.
-- **Expired claim:** `401` or `409` — Director must re-claim.
-- **No claim header:** RC can choose to reject or allow (backward-compat for testing).
+RC validates the check-in on each poll:
+- **Valid check-in:** Normal response (200/204). TTL refreshed.
+- **Expired check-in:** `401` or `409` — Director must re-check-in.
+- **No check-in header:** RC can choose to reject or allow (backward-compat for testing).
+
+### 3.5 Backward Compatibility Transition
+
+During rollout, the Director and RC won't ship simultaneously. The `X-Checkin-Id` enforcement follows a phased transition controlled by RC via a feature flag (`CHECKIN_ENFORCEMENT_MODE`):
+
+| Mode | Behavior | When |
+|:---|:---|:---|
+| **Permissive** (default) | RC accepts polls without `X-Checkin-Id`. Logs a deprecation warning on each headerless poll. | Until Director production build confirmed sending header |
+| **Enforced** | RC requires `X-Checkin-Id` on all polls. Missing header returns `401`. | After 1 week clean operation in staging |
+
+**Transition rules:**
+- **Director deploys first:** Sends `X-Checkin-Id` header, RC ignores it (unknown header, no-op). Safe.
+- **RC deploys first:** RC in permissive mode accepts polls without `X-Checkin-Id`. Logs deprecation warning.
+- **Both live:** Director team confirms production build sends header → RC enables enforcement in staging → production after 1 week.
+
+### 3.6 Intent Precedence: Polling Supersedes Check-In
+
+The check-in exchanges the full capability snapshot (intents, schemas, connection health). The `intents` query parameter on each poll conveys only currently active handler identifiers. Mid-session, hardware state changes can cause these to diverge.
+
+**Precedence model:**
+
+| Data Source | When Used | Authoritative For |
+|:---|:---|:---|
+| **Check-in snapshot** | From check-in until the first poll arrives | Full capability picture (intents, schemas, health) |
+| **`intents` param on each poll** | Every poll after check-in | Real-time intent availability — **supersedes** the check-in snapshot |
+| **Check-in `connections` health** | Until a future refresh mechanism is added | Hardware connected/disconnected distinction (not refreshable in v1) |
+
+In practice: if the check-in reports `communication.announce` as `active: false` but the next poll includes `communication.announce` in `intents`, RC treats it as available and begins emitting TTS steps.
 
 ---
 
@@ -554,7 +614,7 @@ ConnectionHealth:
   required:
     - connected
 
-SessionClaimRequest:
+SessionCheckinRequest:
   type: object
   properties:
     directorId:
@@ -570,24 +630,30 @@ SessionClaimRequest:
     - version
     - capabilities
 
-SessionClaimResponse:
+SessionCheckinResponse:
   type: object
   properties:
-    claimed:
-      type: boolean
-    claimId:
+    status:
+      type: string
+      enum: [standby]
+    checkinId:
       type: string
       format: uuid
-      description: Unique claim identifier for subsequent requests
-    claimTtlSeconds:
+      description: Unique check-in identifier for subsequent requests
+    checkinTtlSeconds:
       type: integer
-      description: Seconds before the claim expires without a polling heartbeat
+      description: Seconds before the check-in expires without a polling heartbeat
     sessionConfig:
       $ref: '#/components/schemas/SessionOperationalConfig'
+    warnings:
+      type: array
+      items:
+        type: string
+      description: Non-fatal warnings about the check-in (e.g., missing camera intent, OBS disconnected)
   required:
-    - claimed
-    - claimId
-    - claimTtlSeconds
+    - status
+    - checkinId
+    - checkinTtlSeconds
     - sessionConfig
 
 SessionOperationalConfig:
@@ -645,17 +711,18 @@ SessionDriverMapping:
 ### 4.2 New Endpoints
 
 ```yaml
-/api/director/v1/sessions/{raceSessionId}/claim:
+/api/director/v1/sessions/{raceSessionId}/checkin:
   post:
-    summary: Claim a Session
+    summary: Check In to Session
     description: >
-      Claims exclusive control of a race session for this Director instance.
-      Exchanges capabilities (active intents, hardware connection state) with
-      Race Control and receives operational session configuration in return.
+      Checks in to a race session, exchanging capabilities with Race Control.
+      The Director reports its active intents, hardware connection state, and
+      version. RC validates the session, confirms the check-in, and returns
+      operational session configuration. The Director enters "On Standby" status.
       
-      The claim provides mutual exclusion — only one Director can actively
-      direct a session at a time. Claims have a TTL that is refreshed by
-      the polling loop (GET .../sequences/next).
+      The check-in provides mutual exclusion — only one Director can be
+      checked in to a session at a time. Check-ins have a TTL that is
+      refreshed by the polling loop (GET .../sequences/next).
     tags:
       - Director
     parameters:
@@ -665,40 +732,40 @@ SessionDriverMapping:
           type: string
           format: uuid
         required: true
-        description: The ID of the session to claim
+        description: The ID of the session to check in to
       - in: header
-        name: X-Force-Claim
+        name: X-Force-Checkin
         schema:
           type: boolean
         required: false
         description: >
-          If true, overrides an existing claim (requires admin role).
-          Use when recovering from a crashed Director that left a stale claim.
+          If true, overrides an existing check-in (requires admin role).
+          Use when recovering from a crashed Director that left a stale check-in.
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/SessionClaimRequest'
+            $ref: '#/components/schemas/SessionCheckinRequest'
     responses:
       '200':
-        description: Claim accepted. Director may begin polling for sequences.
+        description: Check-in accepted. Director is On Standby. May begin polling for sequences after Start Agent.
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SessionClaimResponse'
+              $ref: '#/components/schemas/SessionCheckinResponse'
       '401':
         description: Not authenticated.
       '403':
         description: >
           Access denied. User does not have RaceDirector role, or
-          X-Force-Claim used without admin role.
+          X-Force-Checkin used without admin role.
       '404':
         description: Session not found.
       '409':
         description: >
-          Session is already claimed by another Director instance.
-          Response includes the existing claim details.
+          Session already has a director checked in.
+          Response includes the existing check-in details.
         content:
           application/json:
             schema:
@@ -706,23 +773,26 @@ SessionDriverMapping:
               properties:
                 error:
                   type: string
-                existingClaim:
+                existingCheckin:
                   type: object
                   properties:
                     directorId:
                       type: string
-                    claimedAt:
+                    displayName:
+                      type: string
+                      description: Human-readable name of the operator holding the check-in
+                    checkedInAt:
                       type: string
                       format: date-time
                     expiresAt:
                       type: string
                       format: date-time
       '410':
-        description: Session has ended. Cannot claim a completed or canceled session.
+        description: Session has ended. Cannot check in to a completed or canceled session.
   delete:
-    summary: Release a Session Claim
+    summary: Wrap Session (Release Check-In)
     description: >
-      Releases the Director's exclusive claim on a session.
+      Releases the Director's check-in on a session, wrapping the broadcast.
       Called when the Director stops directing, the user switches sessions,
       or the application exits gracefully.
     tags:
@@ -734,42 +804,42 @@ SessionDriverMapping:
           type: string
           format: uuid
         required: true
-        description: The ID of the session to release
+        description: The ID of the session to wrap
       - in: header
-        name: X-Claim-Id
+        name: X-Checkin-Id
         schema:
           type: string
           format: uuid
         required: true
-        description: The claim ID received from the POST claim response
+        description: The check-in ID received from the POST checkin response
     responses:
       '204':
-        description: Claim released successfully.
+        description: Check-in released. Session wrapped.
       '403':
         description: >
-          The X-Claim-Id does not match the active claim.
+          The X-Checkin-Id does not match the active check-in.
           Another Director owns this session.
       '404':
         description: >
-          No active claim exists for this session
-          (already expired or released).
+          No active check-in exists for this session
+          (already expired or wrapped).
 ```
 
 ### 4.3 Modified Endpoints
 
-Add `X-Claim-Id` header to existing `GET .../sequences/next`:
+Add `X-Checkin-Id` header to existing `GET .../sequences/next`:
 
 ```yaml
 # Add to existing parameters list
 - in: header
-  name: X-Claim-Id
+  name: X-Checkin-Id
   schema:
     type: string
     format: uuid
   required: false
   description: >
-    Claim identifier from POST .../claim. When present, RC validates
-    the claim and refreshes its TTL. If absent, RC may allow
+    Check-in identifier from POST .../checkin. When present, RC validates
+    the check-in and refreshes its TTL. If absent, RC may allow
     unauthenticated polling for backward compatibility / testing.
 ```
 
@@ -792,27 +862,27 @@ Add `X-Claim-Id` header to existing `GET .../sequences/next`:
 
 | Component | Description |
 |:---|:---|
-| **Director Instance ID** | Generate a UUID on first launch, persist in `electron-store`. Include in all claim requests. |
+| **Director Instance ID** | Generate a UUID on first launch, persist in `electron-store`. Include in all check-in requests. |
 | **Connection Health Collector** | Query each extension for connection state. Extensions already emit connection events — need a unified aggregator. |
-| **Session Claim Service** | New service or method in `DirectorService`: `claimSession()`, `releaseSession()`. Makes the API calls, stores the `claimId`. |
-| **Claim ID on Polling** | Add `X-Claim-Id` header to the `GET .../sequences/next` fetch call. |
-| **Auto-Release on Exit** | Electron `before-quit` handler calls `releaseSession()`. |
-| **Auto-Release on Session Change** | `setSession()` releases the old claim before claiming the new one. |
-| **Session Config Application** | Use the claim response's `sessionConfig` to configure OBS host, populate driver mappings in UI, etc. |
-| **UI: Claim Status Badge** | Show claimed/unclaimed state on the Director panel and dashboard card. |
+| **Session Check-In Service** | New service or method in `DirectorService`: `checkinSession()`, `wrapSession()`. Makes the API calls, stores the `checkinId`. |
+| **Check-In ID on Polling** | Add `X-Checkin-Id` header to the `GET .../sequences/next` fetch call. |
+| **Auto-Wrap on Exit** | Electron `before-quit` handler calls `wrapSession()`. |
+| **Auto-Wrap on Session Change** | `setSession()` wraps the old session before checking in to the new one. |
+| **Session Config Application** | Use the check-in response's `sessionConfig` to configure OBS host, populate driver mappings in UI, etc. |
+| **UI: Session Status Display** | Show session status (Checked In / On Standby / Directing / Wrapped) on the Director panel and dashboard card. |
 
-### 5.3 Claim Flow Integration with Director Loop
+### 5.3 Check-In Flow Integration with Director Agent
 
 ```typescript
 // In DirectorService (or future SessionManager)
 
-async claimSession(raceSessionId: string): Promise<SessionClaimResponse> {
+async checkinSession(raceSessionId: string): Promise<SessionCheckinResponse> {
   const token = await this.authService.getAccessToken();
   
   const capabilities = this.buildCapabilities();
   
   const response = await fetch(
-    `${apiConfig.baseUrl}/api/director/v1/sessions/${raceSessionId}/claim`,
+    `${apiConfig.baseUrl}/api/director/v1/sessions/${raceSessionId}/checkin`,
     {
       method: 'POST',
       headers: {
@@ -829,18 +899,18 @@ async claimSession(raceSessionId: string): Promise<SessionClaimResponse> {
   
   if (response.status === 409) {
     const conflict = await response.json();
-    throw new SessionAlreadyClaimedException(conflict.existingClaim);
+    throw new SessionAlreadyCheckedInException(conflict.existingCheckin);
   }
   
   if (!response.ok) {
-    throw new SessionClaimException(response.status, await response.text());
+    throw new SessionCheckinException(response.status, await response.text());
   }
   
-  const claim = await response.json();
-  this.claimId = claim.claimId;
-  this.applySessionConfig(claim.sessionConfig);
+  const checkin = await response.json();
+  this.checkinId = checkin.checkinId;
+  this.applySessionConfig(checkin.sessionConfig);
   
-  return claim;
+  return checkin;
 }
 
 private buildCapabilities(): DirectorCapabilities {
@@ -875,15 +945,15 @@ async setSession(raceSessionId: string): Promise<DirectorState> {
     this.stop();
   }
   
-  // Release previous claim if any
-  if (this.claimId && this.currentRaceSessionId) {
-    await this.releaseSession().catch(err => 
-      console.warn('[Director] Failed to release previous claim:', err.message)
+  // Wrap previous session if any
+  if (this.checkinId && this.currentRaceSessionId) {
+    await this.wrapSession().catch(err => 
+      console.warn('[Director] Failed to wrap previous session:', err.message)
     );
   }
   
-  // Claim the new session
-  const claim = await this.claimSession(raceSessionId);
+  // Check in to the new session
+  const checkin = await this.checkinSession(raceSessionId);
   this.currentRaceSessionId = raceSessionId;
   
   if (wasRunning) {
@@ -898,28 +968,28 @@ async setSession(raceSessionId: string): Promise<DirectorState> {
 
 ## 6. Race Control Implementation Notes
 
-### 6.1 Claim Storage
+### 6.1 Check-In Storage
 
-Claims are lightweight documents. Suggested Cosmos DB structure:
+Check-ins are lightweight documents. Suggested Cosmos DB structure:
 
 ```json
 {
-  "id": "claim_f47ac10b-...",
+  "id": "checkin_f47ac10b-...",
   "raceSessionId": "sess_a1b2c3d4",
   "directorId": "d_inst_a1b2c3d4-...",
   "userId": "user_abc123",
   "capabilities": { /* ... */ },
-  "claimedAt": "2026-03-14T18:00:00Z",
+  "checkedInAt": "2026-03-14T18:00:00Z",
   "expiresAt": "2026-03-14T18:02:00Z",
   "lastPollAt": null
 }
 ```
 
-TTL-based expiry via Cosmos DB's native TTL feature ensures stale claims auto-clean without a background job.
+TTL-based expiry via Cosmos DB's native TTL feature ensures stale check-ins auto-clean without a background job.
 
 ### 6.2 Capability-Aware Sequence Generation
 
-With the claim, RC has the full capability snapshot before generating the first sequence. The AI Director prompt can include:
+With the check-in, RC has the full capability snapshot before generating the first sequence. The AI Director prompt can include:
 
 ```
 Available hardware:
@@ -936,7 +1006,7 @@ This is far richer than a comma-separated `intents` string. The `intents` param 
 
 ### 6.3 Token Cost Impact
 
-The claim data adds ~300 tokens to the AI Director's system prompt (cached per session). This is a one-time cost that **improves** sequence quality by preventing wasted steps on disconnected hardware. Net effect on the per-stream cost estimate: negligible (~$0.01 per 2-hour stream).
+The check-in data adds ~300 tokens to the AI Director's system prompt (cached per session). This is a one-time cost that **improves** sequence quality by preventing wasted steps on disconnected hardware. Net effect on the per-stream cost estimate: negligible (~$0.01 per 2-hour stream).
 
 ---
 
@@ -944,12 +1014,12 @@ The claim data adds ~300 tokens to the AI Director's system prompt (cached per s
 
 | # | Question | Context |
 |:---|:---|:---|
-| 1 | **Claim exclusivity: hard or soft?** Should the claim be a hard lock (409 for any other Director) or a soft advisory (RC tracks the claim but doesn't reject others)? Hard lock prevents conflicts but adds operational complexity (stale claims blocking new Directors). | We propose **hard lock with TTL auto-expiry and force-claim override for admins.** |
-| 2 | **Claim TTL duration?** We propose 120 seconds (24 missed polls at 5s intervals). Is this appropriate for RC's infrastructure? Too short risks false expiry; too long means a crashed Director blocks the session. | 120s seems reasonable. Open to RC's preference. |
-| 3 | **Claim refresh mechanism?** We propose implicit refresh via polling (each `GET .../sequences/next` resets TTL). Alternative: explicit `PATCH .../claim` heartbeat. Implicit is simpler but couples claiming to polling. | We prefer implicit. The polling loop already runs at 5s intervals — piggybacking is natural. |
-| 4 | **Session config in claim vs. separate endpoint?** Should the operational config (driver mappings, OBS scenes) be in the claim response, or should we use a separate `GET .../sessions/{id}/config` endpoint? Inline is simpler; separate allows refresh without re-claiming. | We propose inline in the claim response. If config changes mid-session, RC can push it via a new field on the `GET .../sequences/next` 200 response. |
-| 5 | **Force-claim authorization?** What role should be required for `X-Force-Claim: true`? We suggest the existing admin role, distinct from the RaceDirector role. | Open to RC's RBAC model. |
-| 6 | **Should RC validate capabilities on claim?** Example: if the Director reports no `broadcast.showLiveCam` intent, should RC reject the claim (can't direct without cameras) or accept with a warning? | We propose accept-with-warning. RC returns a `warnings` array in the response (e.g., `"Primary camera intent not available"`). The Director displays these in the UI. |
+| 1 | **Check-in exclusivity: hard or soft?** Should the check-in be a hard lock (409 for any other Director) or a soft advisory (RC tracks the check-in but doesn't reject others)? Hard lock prevents conflicts but adds operational complexity (stale check-ins blocking new Directors). | We propose **hard lock with TTL auto-expiry and force-check-in override for admins.** |
+| 2 | **Check-in TTL duration?** We propose 120 seconds (24 missed polls at 5s intervals). Is this appropriate for RC's infrastructure? Too short risks false expiry; too long means a crashed Director blocks the session. | 120s seems reasonable. Open to RC's preference. |
+| 3 | **Check-in refresh mechanism?** We propose implicit refresh via polling (each `GET .../sequences/next` resets TTL). Alternative: explicit `PATCH .../checkin` heartbeat. Implicit is simpler but couples check-in to polling. | We prefer implicit. The polling loop already runs at 5s intervals — piggybacking is natural. |
+| 4 | **Session config in check-in vs. separate endpoint?** Should the operational config (driver mappings, OBS scenes) be in the check-in response, or should we use a separate `GET .../sessions/{id}/config` endpoint? Inline is simpler; separate allows refresh without re-checking-in. | We propose inline in the check-in response. If config changes mid-session, RC can push it via a new field on the `GET .../sequences/next` 200 response. |
+| 5 | **Force-check-in authorization?** What role should be required for `X-Force-Checkin: true`? We suggest the existing admin role, distinct from the RaceDirector role. | Open to RC's RBAC model. |
+| 6 | **Should RC validate capabilities on check-in?** Example: if the Director reports no `broadcast.showLiveCam` intent, should RC reject the check-in (can't direct without cameras) or accept with a warning? | We propose accept-with-warning. RC returns a `warnings` array in the response (e.g., `"Primary camera intent not available"`). The Director displays these in the UI. |
 
 ---
 
@@ -958,32 +1028,32 @@ The claim data adds ~300 tokens to the AI Director's system prompt (cached per s
 ### Director-Side
 
 - [ ] `directorId` is generated on first launch and persisted in `electron-store`.
-- [ ] Selecting a session calls `POST .../claim` before any polling starts.
-- [ ] Claim response `sessionConfig` is applied (OBS host, driver mappings).
-- [ ] `claimId` is stored and sent as `X-Claim-Id` header on every `GET .../sequences/next` request.
-- [ ] `409 Conflict` is handled in UI: shows existing claim info, offers retry/force-claim options.
-- [ ] Switching sessions releases the old claim before claiming the new one.
-- [ ] `before-quit` handler calls `DELETE .../claim` for graceful shutdown.
-- [ ] Director panel shows claim status (unclaimed → claiming → claimed → released).
+- [ ] Selecting a session calls `POST .../checkin` before any polling starts.
+- [ ] Check-in response `sessionConfig` is applied (OBS host, driver mappings).
+- [ ] `checkinId` is stored and sent as `X-Checkin-Id` header on every `GET .../sequences/next` request.
+- [ ] `409 Conflict` is handled in UI: shows existing check-in info, offers retry/force-check-in options.
+- [ ] Switching sessions wraps the old session before checking in to the new one.
+- [ ] `before-quit` handler calls `DELETE .../checkin` for graceful wrap.
+- [ ] Director panel shows session status (Checked In → On Standby → Directing → Wrapped).
 - [ ] Capabilities payload includes both catalog intents and runtime connection health.
 
 ### Race Control Side
 
-- [ ] `POST .../claim` endpoint validates session exists and is not in terminal state.
-- [ ] `POST .../claim` stores the claim with a TTL in Cosmos DB.
-- [ ] `POST .../claim` returns `409` if another Director holds an active claim.
-- [ ] `POST .../claim` with `X-Force-Claim: true` overrides existing claim (admin role required).
-- [ ] `DELETE .../claim` clears the claim document.
-- [ ] `GET .../sequences/next` with valid `X-Claim-Id` refreshes claim TTL.
-- [ ] `GET .../sequences/next` from an un-claimed Director returns `401` or a warning (backward-compat TBD).
-- [ ] AI Director prompt includes capability data from the active claim.
-- [ ] Stale claims auto-expire via Cosmos DB TTL.
+- [ ] `POST .../checkin` endpoint validates session exists and is not in terminal state.
+- [ ] `POST .../checkin` stores the check-in with a TTL in Cosmos DB.
+- [ ] `POST .../checkin` returns `409` if another Director is already checked in.
+- [ ] `POST .../checkin` with `X-Force-Checkin: true` overrides existing check-in (admin role required).
+- [ ] `DELETE .../checkin` clears the check-in document.
+- [ ] `GET .../sequences/next` with valid `X-Checkin-Id` refreshes check-in TTL.
+- [ ] `GET .../sequences/next` from a non-checked-in Director returns `401` or a warning (backward-compat TBD).
+- [ ] AI Director prompt includes capability data from the active check-in.
+- [ ] Stale check-ins auto-expire via Cosmos DB TTL.
 - [ ] `SessionOperationalConfig` is populated from the session's Cosmos DB document (drivers, scenes, OBS host).
 
 ### Integration
 
-- [ ] End-to-end: Director claims session → polls → receives capability-tailored sequences → releases on stop.
-- [ ] Director crash: claim expires after TTL → another Director can claim the session.
+- [ ] End-to-end: Director checks in to session → goes on standby → starts agent → polls → receives capability-tailored sequences → wraps on stop.
+- [ ] Director crash: check-in expires after TTL → another Director can check in to the session.
 - [ ] Mid-session capability change: Discord connects → `intents` param on next poll includes `communication.announce` → RC begins including TTS steps.
 
 ---
@@ -992,25 +1062,25 @@ The claim data adds ~300 tokens to the AI Director's system prompt (cached per s
 
 | Phase | Owner | Description | Depends On |
 |:---|:---|:---|:---|
-| **1. Schema Agreement** | Both | Agree on `SessionClaimRequest`, `SessionClaimResponse`, `DirectorCapabilities` schemas. Add to `openapi.yaml`. | This RFC accepted |
-| **2. RC Endpoint Implementation** | Race Control | Implement `POST .../claim`, `DELETE .../claim`. Claim storage in Cosmos DB with TTL. | Phase 1 |
-| **3. Director Claim Flow** | Director | `claimSession()`, `releaseSession()`, `directorId` persistence, `X-Claim-Id` header on polls, `before-quit` release. | Phase 1, Phase 2 |
+| **1. Schema Agreement** | Both | Agree on `SessionCheckinRequest`, `SessionCheckinResponse`, `DirectorCapabilities` schemas. Add to `openapi.yaml`. | This RFC accepted |
+| **2. RC Endpoint Implementation** | Race Control | Implement `POST .../checkin`, `DELETE .../checkin`. Check-in storage in Cosmos DB with TTL. | Phase 1 |
+| **3. Director Check-In Flow** | Director | `checkinSession()`, `wrapSession()`, `directorId` persistence, `X-Checkin-Id` header on polls, `before-quit` wrap. | Phase 1, Phase 2 |
 | **4. Connection Health API** | Director | Unified extension connection health query. Aggregate from per-extension status into `DirectorCapabilities.connections`. | None (can start immediately) |
-| **5. Session Config Consumption** | Director | Apply `sessionConfig` from claim response — wire OBS host, populate driver mappings in UI, respect polling config. | Phase 3 |
-| **6. Capability-Aware Generation** | Race Control | AI Director prompt includes claim capabilities. Sequence generation constrained by reported intents and connection state. | Phase 2 |
-| **7. UI Polish** | Director | Claim status badges, 409 conflict handling, force-claim dialog, connection health display on Director panel. | Phase 3 |
+| **5. Session Config Consumption** | Director | Apply `sessionConfig` from check-in response — wire OBS host, populate driver mappings in UI, respect polling config. | Phase 3 |
+| **6. Capability-Aware Generation** | Race Control | AI Director prompt includes check-in capabilities. Sequence generation constrained by reported intents and connection state. | Phase 2 |
+| **7. UI Polish** | Director | Session status display (On Standby / Directing / Wrapped), 409 conflict handling, force-check-in dialog, connection health display on Director panel. | Phase 3 |
 
 ---
 
 ## 10. Relationship to Existing Agreements
 
-This proposal **extends** the existing Director Loop v2 RFC and RC Response. It does not contradict any previously accepted items:
+This proposal **extends** the existing Director Agent v2 RFC and RC Response. It does not contradict any previously accepted items:
 
 | Existing Agreement | How This Proposal Relates |
 |:---|:---|
-| `intents` query parameter on `GET .../sequences/next` (RC Response §5.1) | **Unchanged.** The `intents` param remains the lightweight per-poll update channel. The claim is the heavyweight initial handshake. Both coexist. |
-| `PortableSequence` as sole wire format (RFC §4.1) | **Unchanged.** The claim doesn't affect the sequence format. |
-| `410 Gone` for ended sessions (RC Response §5.3) | **Extended.** `410` also prevents claiming ended sessions. |
-| `Retry-After` on 204 (RC Response §5.2) | **Unchanged.** The claim response's `pollingConfig` supplements but doesn't replace `Retry-After`. |
-| Priority semantics: cancel-and-replace (RC Response §6.1) | **Unchanged.** Priority behavior is independent of session claiming. |
-| Shared Intent Registry (RFC §4.2) | **Leveraged.** The claim payload uses the same intent identifiers from the shared registry. |
+| `intents` query parameter on `GET .../sequences/next` (RC Response §5.1) | **Unchanged.** The `intents` param remains the lightweight per-poll update channel. The check-in is the heavyweight initial handshake. Both coexist. |
+| `PortableSequence` as sole wire format (RFC §4.1) | **Unchanged.** The check-in doesn't affect the sequence format. |
+| `410 Gone` for ended sessions (RC Response §5.3) | **Extended.** `410` also prevents checking in to ended sessions. |
+| `Retry-After` on 204 (RC Response §5.2) | **Unchanged.** The check-in response's `pollingConfig` supplements but doesn't replace `Retry-After`. |
+| Priority semantics: cancel-and-replace (RC Response §6.1) | **Unchanged.** Priority behavior is independent of session check-in. |
+| Shared Intent Registry (RFC §4.2) | **Leveraged.** The check-in payload uses the same intent identifiers from the shared registry. |

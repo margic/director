@@ -11,6 +11,7 @@ import { configService } from '../config-service';
 import { AuthService } from '../auth-service';
 import { OverlayBus } from '../overlay/overlay-bus';
 import { OverlayRegistration, OverlayRegion } from '../overlay/overlay-types';
+import { ConnectionHealth } from '../director-types';
 
 class ScraperManager {
   private scrapers: Map<string, { window: BrowserWindow, extensionId: string }> = new Map();
@@ -92,6 +93,8 @@ export class ExtensionHostService {
   private isReady: boolean = false;
   // Custom invoke handlers registered by main process
   private customInvokeHandlers: Map<string, (args: any[], extensionId?: string) => Promise<any>> = new Map();
+  // Connection health per extension (populated from connection state events)
+  private connectionHealthMap: Map<string, ConnectionHealth> = new Map();
 
   constructor(
     extensionsPath: string, 
@@ -120,6 +123,9 @@ export class ExtensionHostService {
             });
         }
     });
+
+    // Track connection health from extension events
+    this.listenForConnectionEvents();
   }
 
   public async start() {
@@ -231,6 +237,49 @@ export class ExtensionHostService {
    */
   public hasActiveHandler(intent: string): boolean {
     return !!this.intentRegistry.getIntent(intent);
+  }
+
+  /**
+   * Returns aggregated connection health for all extensions that report state.
+   */
+  public getConnectionHealth(): Record<string, ConnectionHealth> {
+    const result: Record<string, ConnectionHealth> = {};
+    for (const [extId, health] of this.connectionHealthMap) {
+      result[extId] = { ...health };
+    }
+    return result;
+  }
+
+  /**
+   * Allows main process to set connection health for extensions that don't
+   * emit events themselves (e.g., discord delegates to main process).
+   */
+  public setConnectionHealth(extensionId: string, connected: boolean): void {
+    const existing = this.connectionHealthMap.get(extensionId);
+    this.connectionHealthMap.set(extensionId, {
+      connected,
+      connectedSince: connected ? (existing?.connectedSince ?? new Date().toISOString()) : undefined,
+    });
+  }
+
+  /**
+   * Listens for connection state events from extensions via the event bus.
+   */
+  private listenForConnectionEvents(): void {
+    // OBS: obs.connectionStateChanged { connected: boolean }
+    this.eventBus.on('obs.connectionStateChanged', (data: { extensionId: string; payload: { connected: boolean } }) => {
+      this.setConnectionHealth(data.extensionId || 'director-obs', data.payload.connected);
+    });
+
+    // iRacing: iracing.connectionStateChanged { connected: boolean }
+    this.eventBus.on('iracing.connectionStateChanged', (data: { extensionId: string; payload: { connected: boolean } }) => {
+      this.setConnectionHealth(data.extensionId || 'director-iracing', data.payload.connected);
+    });
+
+    // YouTube: youtube.status { monitoring: boolean }
+    this.eventBus.on('youtube.status', (data: { extensionId: string; payload: { monitoring: boolean } }) => {
+      this.setConnectionHealth(data.extensionId || 'director-youtube', data.payload.monitoring);
+    });
   }
 
   /**

@@ -45,5 +45,7 @@ export const apiConfig = {
     nextSequence: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/sequences/next`,
     getSequence: (sequenceId: string) => `/api/director/v1/sequences/${sequenceId}`,
     tts: '/api/tts',
+    checkin: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/checkin`,
+    wrap: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/checkin`,
   },
 };

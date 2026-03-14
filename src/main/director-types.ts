@@ -156,6 +156,11 @@ export interface DirectorState {
   totalCommands?: number;
   processedCommands?: number;
   lastError?: string;
+  // Session Check-In lifecycle
+  checkinStatus: CheckinStatus;
+  checkinId?: string | null;
+  sessionConfig?: SessionOperationalConfig | null;
+  checkinWarnings?: string[];
 }
 
 // --- Command Payloads ---
@@ -434,5 +439,81 @@ export function normalizeNextSequenceResponse(response: GetNextSequenceResponse)
     steps: response.commands.map((cmd, i) => normalizeCommand(cmd, i)),
     metadata: { priority: response.priority },
   };
+}
+
+// ============================================================================
+// Session Check-In Types
+// Based on documents/feature_session_claim.md (Session Check-In RFC)
+// ============================================================================
+
+export type CheckinStatus = 'unchecked' | 'checking-in' | 'standby' | 'directing' | 'wrapping' | 'error';
+
+export interface ConnectionHealth {
+  connected: boolean;
+  connectedSince?: string;   // ISO8601
+  metadata?: Record<string, unknown>;
+}
+
+export interface IntentCapability {
+  intent: string;
+  extensionId: string;
+  active: boolean;
+  schema?: Record<string, unknown>;
+}
+
+export interface DirectorCapabilities {
+  intents: IntentCapability[];
+  connections: Record<string, ConnectionHealth>;
+}
+
+export interface SessionCheckinRequest {
+  directorId: string;
+  version: string;
+  capabilities: DirectorCapabilities;
+}
+
+export interface SessionCheckinResponse {
+  status: 'standby';
+  checkinId: string;
+  checkinTtlSeconds: number;
+  sessionConfig: SessionOperationalConfig;
+  warnings?: string[];
+}
+
+export interface SessionOperationalConfig {
+  raceSessionId: string;
+  name: string;
+  status: string;
+  simulator: string;
+  drivers: SessionDriverMapping[];
+  obsScenes: string[];
+  obsHost?: string;
+  pollingConfig?: {
+    idleIntervalMs: number;
+    busyIntervalMs: number;
+    maxBackoffMs?: number;
+  };
+}
+
+export interface SessionDriverMapping {
+  driverId: string;
+  carNumber: string;
+  rigId: string;
+  obsSceneId: string;
+  displayName?: string;
+}
+
+export interface SessionCheckinConflict {
+  error: string;
+  existingCheckin: {
+    directorId: string;
+    checkedInAt: string;
+    expiresAt: string;
+    displayName?: string;
+  };
+}
+
+export interface SessionWrapRequest {
+  reason?: string;
 }
 
