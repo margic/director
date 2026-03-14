@@ -419,10 +419,10 @@ app.on('ready', () => {
     return await directorService.setSession(raceSessionId);
   });
 
-  ipcMain.handle('director:checkin-session', async (_, raceSessionId: string) => {
+  ipcMain.handle('director:checkin-session', async (_, raceSessionId: string, options?: { forceCheckin?: boolean }) => {
     try {
       telemetryService.trackEvent('Director.CheckinRequested', { sessionId: raceSessionId });
-      return await directorService.checkinSession(raceSessionId);
+      return await directorService.checkinSession(raceSessionId, options);
     } catch (error) {
       telemetryService.trackException(error as Error, { operation: 'director.checkin' });
       throw error;

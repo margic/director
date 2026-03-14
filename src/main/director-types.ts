@@ -470,6 +470,8 @@ export interface SessionCheckinRequest {
   directorId: string;
   version: string;
   capabilities: DirectorCapabilities;
+  /** Optional: local sequence library for Planner training (max 50, 100KB) */
+  sequences?: PortableSequence[];
 }
 
 export interface SessionCheckinResponse {
@@ -488,10 +490,9 @@ export interface SessionOperationalConfig {
   drivers: SessionDriverMapping[];
   obsScenes: string[];
   obsHost?: string;
-  pollingConfig?: {
-    idleIntervalMs: number;
-    busyIntervalMs: number;
-    maxBackoffMs?: number;
+  timingConfig?: {
+    idleRetryIntervalMs: number;
+    retryBackoffMs: number;
   };
 }
 

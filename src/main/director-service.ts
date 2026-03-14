@@ -131,7 +131,7 @@ export class DirectorService {
    * Checks into a session with Race Control, exchanging capabilities.
    * Transitions: unchecked → checking-in → standby (or error).
    */
-  async checkinSession(raceSessionId: string): Promise<DirectorState> {
+  async checkinSession(raceSessionId: string, options?: { forceCheckin?: boolean }): Promise<DirectorState> {
     if (this.checkinStatus === 'checking-in') {
       console.warn('[Director] Check-in already in progress');
       return this.getStatus();
@@ -161,12 +161,17 @@ export class DirectorService {
 
     try {
       const startTime = Date.now();
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      };
+      if (options?.forceCheckin) {
+        headers['X-Force-Checkin'] = 'true';
+      }
+
       const response = await fetch(url, {
-        method: 'PUT',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
+        method: 'POST',
+        headers,
         body: JSON.stringify(body),
       });
 
