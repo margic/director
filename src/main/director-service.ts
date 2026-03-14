@@ -39,28 +39,51 @@ export class DirectorService {
     console.log('Starting Director Service...');
     this.isRunning = true;
     
-    // 1. Discover Sessions
-    const sessions = await this.listSessions();
-    if (!sessions || sessions.length === 0) {
-      console.log('No active sessions found. Director will not start loop.');
-      this.isRunning = false;
-      return;
+    // Use pre-selected session if set, otherwise discover and auto-select
+    if (!this.currentRaceSessionId) {
+      const sessions = await this.listSessions();
+      if (!sessions || sessions.length === 0) {
+        console.log('No active sessions found. Director will not start loop.');
+        this.isRunning = false;
+        return;
+      }
+
+      const session = sessions[0];
+      this.currentRaceSessionId = session.raceSessionId;
+      console.log(`Auto-selected session: ${session.name} (${session.raceSessionId})`);
+
+      if (session.obsHost) {
+        console.log(`Configuring OBS connection for session: ${session.obsHost}`);
+      }
+    } else {
+      console.log(`Using pre-selected session: ${this.currentRaceSessionId}`);
     }
 
-    // 2. Auto-select session (for now, pick the first one)
-    const session = sessions[0];
-    this.currentRaceSessionId = session.raceSessionId;
-    console.log(`Joined session: ${session.name} (${session.raceSessionId})`);
-
-    // Configure OBS if host is provided (via extension intent system)
-    if (session.obsHost) {
-      console.log(`Configuring OBS connection for session: ${session.obsHost}`);
-      // TODO: Once OBS extension supports a 'connect' intent or config update,
-      // dispatch it here. For now, OBS extension auto-connects from its settings.
-    }
-
-    // 3. Start Loop
+    // Start Loop
     this.loop();
+  }
+
+  /**
+   * Sets the active race session. If the director is running,
+   * it stops the current loop and restarts with the new session.
+   */
+  async setSession(raceSessionId: string): Promise<DirectorState> {
+    console.log(`[DirectorService] Setting active session: ${raceSessionId}`);
+    const wasRunning = this.isRunning;
+
+    if (wasRunning) {
+      this.stop();
+    }
+
+    this.currentRaceSessionId = raceSessionId;
+    this.lastCompletedSequenceId = null;
+    this.lastError = undefined;
+
+    if (wasRunning) {
+      await this.start();
+    }
+
+    return this.getStatus();
   }
 
   stop() {

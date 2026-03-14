@@ -415,6 +415,10 @@ app.on('ready', () => {
     return await directorService.listSessions(centerId);
   });
 
+  ipcMain.handle('director:set-session', async (_, raceSessionId: string) => {
+    return await directorService.setSession(raceSessionId);
+  });
+
   // Telemetry IPC Handlers
   ipcMain.handle('telemetry:track-event', async (_, name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => {
     telemetryService.trackEvent(name, properties, measurements);
