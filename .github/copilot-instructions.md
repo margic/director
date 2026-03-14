@@ -21,18 +21,18 @@ The application interacts with the Race Control API to fetch user profiles, disc
 
 **OFFICIAL SPECIFICATION POLICY:**
 The official source of truth for the API is the OpenAPI specification located at:
-`https://api.simracecenter.com/api/openapi.yaml`
+`https://simracecenter.com/api/openapi.yaml`
 
 *   **Code to the Spec:** Always implement against the official OpenAPI spec, even if manual tests suggest otherwise.
 *   **Discrepancies:** If the API behaves differently than the spec, do not change the code to match the behavior. Instead, raise an issue with the Race Control team at:
     `https://github.com/margic/racecontrol/issues`
 
 **Documentation:**
-- **OpenAPI Spec:** [https://api.simracecenter.com/api/openapi.yaml](https://api.simracecenter.com/api/openapi.yaml)
-- **API Docs:** [https://api.simracecenter.com/api/docs](https://api.simracecenter.com/api/docs)
+- **OpenAPI Spec:** [https://simracecenter.com/api/openapi.yaml](https://simracecenter.com/api/openapi.yaml)
+- **API Docs:** [https://simracecenter.com/api/docs](https://simracecenter.com/api/docs)
 
 **Key Endpoints (Production):**
-- Base URL: `https://api.simracecenter.com`
+- Base URL: `https://simracecenter.com`
 - User Profile: `GET /api/auth/user`
 - List Sessions: `GET /api/director/v1/sessions` (Query: `centerId`, `status`)
 - Next Sequence: `GET /api/director/v1/sessions/{raceSessionId}/sequences/next`

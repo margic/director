@@ -65,7 +65,7 @@ To prevent remote code execution (RCE) from compromised web content (e.g., YouTu
 
 ## 4. Network Security
 
-*   **HTTPS**: All communication with Race Control APIs `api.simracecenter.com` is strictly HTTPS (TLS 1.2+).
+*   **HTTPS**: All communication with Race Control APIs `simracecenter.com` is strictly HTTPS (TLS 1.2+).
 *   **Local Server**: The local loopback server used for OAuth callbacks listens only on `127.0.0.1` and shuts down immediately after receiving the token.
 
 ## 5. Compliance

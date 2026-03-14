@@ -148,7 +148,7 @@ export const SequenceDetail: React.FC<SequenceDetailProps> = ({
             )}
             {sequence.category && (
               <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${
-                sequence.category === 'built-in'
+                sequence.category === 'builtin'
                   ? 'bg-secondary/10 text-secondary'
                   : sequence.category === 'cloud'
                     ? 'bg-primary/10 text-primary'

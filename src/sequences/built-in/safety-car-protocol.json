@@ -3,7 +3,7 @@
   "name": "Safety Car Protocol",
   "version": "1.0.0",
   "description": "Deploys the full safety car broadcast protocol: switches to track map, mutes drivers, announces to chat, then returns to normal after a delay.",
-  "category": "built-in",
+  "category": "builtin",
   "variables": [
     {
       "name": "returnDelayMs",
