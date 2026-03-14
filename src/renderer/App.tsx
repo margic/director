@@ -186,7 +186,7 @@ function App() {
           <button
             onClick={() => setCurrentView('director')}
             className={`p-3 rounded-lg transition-colors ${currentView === 'director' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
-            title="Director"
+            title="Agent"
           >
             <Activity className="w-6 h-6" />
           </button>
@@ -390,7 +390,7 @@ function AppHeader({ user, userProfile, activeMenu, setActiveMenu, headerRef, on
           </h1>
         ) : (
           <h1 className="text-xl font-bold uppercase tracking-widest text-white">
-            Race Control <span className="text-primary">Director</span>
+            Race Control <span className="text-primary">Agent</span>
           </h1>
         )}
 

@@ -55,7 +55,7 @@ export const DirectorPanel: React.FC = () => {
   const prevStatusRef = useRef<DirectorState | null>(null);
 
   useSetPageHeader({
-    title: 'Director',
+    title: 'Agent',
     icon: Activity,
     subtitle: directorStatus.isRunning ? directorStatus.status : 'Stopped',
     subtitleVariant: directorStatus.isRunning
@@ -87,9 +87,9 @@ export const DirectorPanel: React.FC = () => {
         const prev = prevStatusRef.current;
         if (prev) {
           if (!prev.isRunning && status.isRunning) {
-            addLog('success', 'Director loop started');
+            addLog('success', 'Agent started');
           } else if (prev.isRunning && !status.isRunning) {
-            addLog('info', 'Director loop stopped');
+            addLog('info', 'Agent stopped');
           }
 
           if (prev.status !== status.status) {
@@ -151,11 +151,11 @@ export const DirectorPanel: React.FC = () => {
       if (!window.electronAPI) return;
 
       if (directorStatus.isRunning) {
-        addLog('info', 'Stopping director loop...');
+        addLog('info', 'Stopping agent...');
         const status = await window.electronAPI.directorStop();
         setDirectorStatus(status);
       } else {
-        addLog('info', 'Starting director loop...');
+        addLog('info', 'Starting agent...');
         const status = await window.electronAPI.directorStart();
         setDirectorStatus(status);
       }
@@ -203,12 +203,12 @@ export const DirectorPanel: React.FC = () => {
           {directorStatus.isRunning ? (
             <>
               <Square className="w-4 h-4 mr-2 fill-current" />
-              STOP DIRECTOR
+              STOP AGENT
             </>
           ) : (
             <>
               <Play className="w-4 h-4 mr-2 fill-current" />
-              START DIRECTOR
+              START AGENT
             </>
           )}
         </Button>
@@ -341,7 +341,7 @@ export const DirectorPanel: React.FC = () => {
                     Waiting for activity...
                   </div>
                 ) : (
-                  'Start the Director to see activity'
+                  'Start the Agent to see activity'
                 )}
               </div>
             ) : (

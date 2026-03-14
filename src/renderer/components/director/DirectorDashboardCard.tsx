@@ -77,7 +77,7 @@ export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ on
       <div className="flex justify-between items-center z-10">
         <div className="flex items-center gap-2">
           <Activity className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-          <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Control</h3>
+          <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Agent Control</h3>
         </div>
         <div className={`w-3 h-3 rounded-full ${directorStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
       </div>
