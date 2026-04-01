@@ -362,16 +362,15 @@ interface SessionOperationalConfig {
   obsHost?: string;
 
   /**
-   * Suggested polling configuration.
-   * RC may want to vary polling behavior based on session type,
+   * Suggested timing configuration.
+   * RC may want to vary retry behavior based on session type,
    * expected telemetry density, or API load.
    * The Director treats these as suggestions — it has its own
    * hardcoded defaults as fallbacks.
    */
-  pollingConfig?: {
-    idleIntervalMs: number;    // Default: 5000
-    busyIntervalMs: number;    // Default: 100
-    maxBackoffMs?: number;     // Error backoff ceiling
+  timingConfig?: {
+    idleRetryIntervalMs: number;  // Default: 5000 — how long to wait before retrying when RC has no sequence
+    retryBackoffMs?: number;      // Error backoff ceiling
   };
 }
 
@@ -430,10 +429,9 @@ interface SessionDriverMapping {
       "Replay"
     ],
     "obsHost": "192.168.1.10:4455",
-    "pollingConfig": {
-      "idleIntervalMs": 5000,
-      "busyIntervalMs": 100,
-      "maxBackoffMs": 30000
+    "timingConfig": {
+      "idleRetryIntervalMs": 5000,
+      "retryBackoffMs": 30000
     }
   }
 }
@@ -678,14 +676,12 @@ SessionOperationalConfig:
         type: string
     obsHost:
       type: string
-    pollingConfig:
+    timingConfig:
       type: object
       properties:
-        idleIntervalMs:
+        idleRetryIntervalMs:
           type: integer
-        busyIntervalMs:
-          type: integer
-        maxBackoffMs:
+        retryBackoffMs:
           type: integer
 
 SessionDriverMapping:
@@ -1081,6 +1077,6 @@ This proposal **extends** the existing Director Agent v2 RFC and RC Response. It
 | `intents` query parameter on `GET .../sequences/next` (RC Response §5.1) | **Unchanged.** The `intents` param remains the lightweight per-poll update channel. The check-in is the heavyweight initial handshake. Both coexist. |
 | `PortableSequence` as sole wire format (RFC §4.1) | **Unchanged.** The check-in doesn't affect the sequence format. |
 | `410 Gone` for ended sessions (RC Response §5.3) | **Extended.** `410` also prevents checking in to ended sessions. |
-| `Retry-After` on 204 (RC Response §5.2) | **Unchanged.** The check-in response's `pollingConfig` supplements but doesn't replace `Retry-After`. |
+| `Retry-After` on 204 (RC Response §5.2) | **Unchanged.** The check-in response's `timingConfig` supplements but doesn't replace `Retry-After`. |
 | Priority semantics: cancel-and-replace (RC Response §6.1) | **Unchanged.** Priority behavior is independent of session check-in. |
 | Shared Intent Registry (RFC §4.2) | **Leveraged.** The check-in payload uses the same intent identifiers from the shared registry. |

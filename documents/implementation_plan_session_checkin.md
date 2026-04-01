@@ -70,10 +70,9 @@ export interface SessionOperationalConfig {
   drivers: SessionDriverMapping[];
   obsScenes: string[];
   obsHost?: string;
-  pollingConfig?: {
-    idleIntervalMs: number;
-    busyIntervalMs: number;
-    maxBackoffMs?: number;
+  timingConfig?: {
+    idleRetryIntervalMs: number;
+    retryBackoffMs?: number;
   };
 }
 
@@ -421,10 +420,12 @@ private applySessionConfig(config: SessionOperationalConfig): void {
     });
   }
 
-  // Apply polling config (use session values if provided, fallback to defaults)
-  if (config.pollingConfig) {
-    console.log(`[Director] Applying session polling config:`, config.pollingConfig);
-    // Note: polling intervals are used dynamically in loop(), so we read from sessionConfig
+  // Apply timing config (use session values if provided, fallback to defaults)
+  if (config.timingConfig) {
+    console.log(`[Director] Applying session timing config:`, config.timingConfig);
+    // Note: config is stored on `this.sessionConfig` (set by the caller). The loop()
+    // method reads `this.sessionConfig?.timingConfig?.idleRetryIntervalMs` at runtime
+    // rather than applying it eagerly here.
   }
 
   console.log(`[Director] Session config applied: ${config.drivers?.length ?? 0} drivers, ${config.obsScenes?.length ?? 0} scenes`);
@@ -502,8 +503,8 @@ async start() {
   }
 
   // Store TTL for heartbeat floor rate calculation
-  this.checkinTtlSeconds = this.sessionConfig?.pollingConfig 
-    ? Math.floor((this.sessionConfig.pollingConfig.idleIntervalMs * 24) / 1000)  // fallback
+  this.checkinTtlSeconds = this.sessionConfig?.timingConfig
+    ? Math.floor((this.sessionConfig.timingConfig.idleRetryIntervalMs * 24) / 1000)  // fallback
     : 120;
 
   // Use pre-selected session if set, otherwise discover
@@ -670,7 +671,7 @@ Mock response:
     "simulator": "iracing",
     "drivers": [],
     "obsScenes": ["Race Cam", "Onboard 1"],
-    "pollingConfig": { "idleIntervalMs": 5000, "busyIntervalMs": 100 }
+    "timingConfig": { "idleRetryIntervalMs": 5000 }
   },
   "warnings": ["Mock mode — no RC endpoint"]
 }
