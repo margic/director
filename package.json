@@ -8,7 +8,9 @@
     "build": "tsc -p tsconfig.main.json && node scripts/copy-extension-assets.js && vite build",
     "generate-icons": "node scripts/generate-icons.js",
     "dist": "npm run generate-icons && npm run build && electron-builder",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "test:director-loop": "ts-node --transpile-only -P tsconfig.test.json -r tsconfig-paths/register scripts/test-director-loop.ts"
   },
   "build": {
@@ -93,6 +95,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^5.1.2",
+    "@vitest/coverage-v8": "^4.1.2",
     "autoprefixer": "^10.4.23",
     "concurrently": "^9.2.1",
     "electron": "^39.2.7",
@@ -104,6 +107,7 @@
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",
+    "vitest": "^4.1.2",
     "wait-on": "^9.0.3"
   },
   "overrides": {
