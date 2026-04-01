@@ -29,8 +29,8 @@ export class DirectorService {
   private processedCommands: number = 0;
   private lastError: string | undefined;
   private loopInterval: NodeJS.Timeout | null = null;
-  private readonly POLL_INTERVAL_MS = 5000; // 5 seconds
-  private readonly BUSY_INTERVAL_MS = 100; // 100ms (rapid fire)
+  // Retry interval when RC returns 204 (no sequence available)
+  private readonly IDLE_RETRY_MS = 5000;
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
 
@@ -456,12 +456,13 @@ export class DirectorService {
       // Schedule next iteration
       if (this.isRunning) {
         this.status = 'IDLE';
-        let interval = this.POLL_INTERVAL_MS;
-
-        if (sequenceResult !== false) {
-          // If we executed a sequence, use its duration if provided, otherwise default busy interval
-          interval = sequenceResult > 0 ? sequenceResult : this.BUSY_INTERVAL_MS;
-        }
+        // Determine next-iteration delay:
+        //   false          → no sequence and no Retry-After; idle-retry after IDLE_RETRY_MS
+        //   0              → sequence executed; call back immediately (execution itself consumed the time)
+        //   n > 0          → 204 with Retry-After header; wait the specified duration
+        let interval = sequenceResult === false
+          ? this.IDLE_RETRY_MS
+          : sequenceResult;
 
         // Heartbeat floor rate contract: poll at min(interval, checkinTtlSeconds / 4)
         // to prevent check-in TTL from lapsing during long Retry-After intervals.
@@ -671,7 +672,7 @@ export class DirectorService {
             result: 'no-sequence',
           }
         );
-        // Return negative value to signal the loop to use Retry-After as the poll interval
+        // Return the Retry-After interval so the loop waits the specified duration before retrying
         if (retryAfter) {
           const retryMs = parseInt(retryAfter, 10) * 1000;
           if (!isNaN(retryMs) && retryMs > 0) {
@@ -732,9 +733,8 @@ export class DirectorService {
         sessionId: this.currentRaceSessionId,
       });
 
-      // Use metadata.totalDurationMs for poll pacing (per RFC agreement)
-      const totalDurationMs = (portable.metadata as any)?.totalDurationMs ?? 0;
-      return totalDurationMs;
+      // Sequence executed — signal the loop to call back immediately (execution itself consumed the time)
+      return 0;
     } catch (error) {
       // Re-throw session-ended errors so the loop handler can stop
       if ((error as any)?.sessionEnded) throw error;
