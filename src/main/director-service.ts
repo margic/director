@@ -456,12 +456,13 @@ export class DirectorService {
       // Schedule next iteration
       if (this.isRunning) {
         this.status = 'IDLE';
-        let interval = this.IDLE_RETRY_MS;
-
-        if (sequenceResult !== false) {
-          // Sequence executed — call back immediately (execution consumed the time)
-          interval = 0;
-        }
+        // Determine next-iteration delay:
+        //   false          → no sequence and no Retry-After; idle-retry after IDLE_RETRY_MS
+        //   0              → sequence executed; call back immediately (execution itself consumed the time)
+        //   n > 0          → 204 with Retry-After header; wait the specified duration
+        let interval = sequenceResult === false
+          ? this.IDLE_RETRY_MS
+          : sequenceResult;
 
         // Heartbeat floor rate contract: poll at min(interval, checkinTtlSeconds / 4)
         // to prevent check-in TTL from lapsing during long Retry-After intervals.
@@ -671,7 +672,7 @@ export class DirectorService {
             result: 'no-sequence',
           }
         );
-        // Return negative value to signal the loop to use Retry-After as the poll interval
+        // Return the Retry-After interval so the loop waits the specified duration before retrying
         if (retryAfter) {
           const retryMs = parseInt(retryAfter, 10) * 1000;
           if (!isNaN(retryMs) && retryMs > 0) {
@@ -732,8 +733,8 @@ export class DirectorService {
         sessionId: this.currentRaceSessionId,
       });
 
-      // Return non-false to signal loop() to call back immediately
-      return 1;
+      // Sequence executed — signal the loop to call back immediately (execution itself consumed the time)
+      return 0;
     } catch (error) {
       // Re-throw session-ended errors so the loop handler can stop
       if ((error as any)?.sessionEnded) throw error;
