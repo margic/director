@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { LayoutDashboard, Settings, User, LogOut, Car, ArrowLeft, Database, Zap, Layers } from 'lucide-react'
+import { LayoutDashboard, Settings, User, LogOut, Car, ArrowLeft, Database, Zap, Layers, Activity } from 'lucide-react'
 import RaceCenterIcon from '../../assets/images/icon.png'
 import { UserProfile, RaceSession } from './types'
 import { clientTelemetry } from './telemetry'
@@ -8,6 +8,7 @@ import { SettingsPage } from './pages/SettingsPage'
 import { Dashboard } from './pages/Dashboard'
 import { SequencesPanel } from './pages/SequencesPanel'
 import { OverlayPanel } from './pages/OverlayPanel'
+import { DirectorPanel } from './pages/DirectorPanel'
 import { PageHeaderProvider, usePageHeader, useSetPageHeader } from './contexts/PageHeaderContext'
 
 const JsonViewer = ({ data }: { data: any }) => {
@@ -181,6 +182,15 @@ function App() {
             <LayoutDashboard className="w-6 h-6" />
           </button>
 
+          {/* Director — core view, always visible */}
+          <button
+            onClick={() => setCurrentView('director')}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'director' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            title="Agent"
+          >
+            <Activity className="w-6 h-6" />
+          </button>
+
           {/* Sequences — core view, always visible */}
           <button
             onClick={() => setCurrentView('sequences')}
@@ -272,6 +282,10 @@ function App() {
                 onSessionSelect={handleSessionClick}
               />
             </>
+          ) : currentView === 'director' ? (
+            <div className="w-full h-full">
+              <DirectorPanel />
+            </div>
           ) : currentView === 'sequences' ? (
             <div className="w-full h-full">
               <SequencesPanel />
@@ -376,7 +390,7 @@ function AppHeader({ user, userProfile, activeMenu, setActiveMenu, headerRef, on
           </h1>
         ) : (
           <h1 className="text-xl font-bold uppercase tracking-widest text-white">
-            Race Control <span className="text-primary">Director</span>
+            Race Control <span className="text-primary">Agent</span>
           </h1>
         )}
 

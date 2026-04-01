@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Activity, User, Play, Square, Loader2 } from 'lucide-react'
+import { Activity, User, Loader2, Radio } from 'lucide-react'
 import { UserProfile, RaceSession } from '../types'
-import { clientTelemetry } from '../telemetry'
 import { extensionViews } from '../extension-views'
+import { DirectorDashboardCard } from '../components/director/DirectorDashboardCard'
 import { SequencesDashboardCard } from '../components/sequences/SequencesDashboardCard'
 import { OverlayDashboardCard } from '../components/overlay/OverlayDashboardCard'
 
@@ -17,8 +17,8 @@ interface DashboardProps {
 export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessionSelect }: DashboardProps) => {
   const [sessions, setSessions] = useState<RaceSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
-  const [directorStatus, setDirectorStatus] = useState<any>({ isRunning: false, status: 'IDLE', sessionId: null });
   const [extensionStatus, setExtensionStatus] = useState<Record<string, { active: boolean }>>({});
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   useEffect(() => {
      const loadExtensionStatus = async () => {
@@ -37,23 +37,22 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
      return () => clearInterval(interval);
   }, []);
 
+  // Track the director's active session
   useEffect(() => {
-    const pollStatus = async () => {
-      // Guard against electronAPI missing
-      if (!window.electronAPI) return;
-
-      if (window.electronAPI.directorStatus) {
+    const pollDirectorSession = async () => {
+      if (!window.electronAPI?.directorStatus) return;
+      try {
         const status = await window.electronAPI.directorStatus();
-        setDirectorStatus(status);
+        setActiveSessionId(status.sessionId || null);
+      } catch (e) {
+        console.error('Failed to poll director status', e);
       }
     };
-    
-    if (user) {
-      pollStatus();
-      const interval = setInterval(pollStatus, 2000);
-      return () => clearInterval(interval);
-    }
-  }, [user]);
+
+    pollDirectorSession();
+    const interval = setInterval(pollDirectorSession, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Poll for available sessions with exponential backoff (5s → 3min)
   useEffect(() => {
@@ -107,24 +106,13 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
     };
   }, [userProfile]);
 
-  const toggleDirector = async () => {
+  const handleSetActiveSession = async (session: RaceSession) => {
+    if (!window.electronAPI?.directorSetSession) return;
     try {
-      clientTelemetry.trackEvent('UI.DirectorToggleClicked', {
-        currentState: directorStatus.isRunning ? 'running' : 'stopped',
-      });
-      
-      if (!window.electronAPI) return;
-
-      if (directorStatus.isRunning) {
-        const status = await window.electronAPI.directorStop();
-        setDirectorStatus(status);
-      } else {
-        const status = await window.electronAPI.directorStart();
-        setDirectorStatus(status);
-      }
+      const status = await window.electronAPI.directorSetSession(session.raceSessionId);
+      setActiveSessionId(status.sessionId || null);
     } catch (error) {
-      console.error('Failed to toggle director', error);
-      clientTelemetry.trackException(error as Error, { context: 'toggleDirector' });
+      console.error('Failed to set active session:', error);
     }
   };
 
@@ -181,32 +169,62 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {sessions.map((session) => (
-              <div 
-                key={session.raceSessionId}
-                onClick={() => onSessionSelect(session)}
-                className="bg-background border border-border rounded-lg p-4 hover:border-primary/50 transition-colors cursor-pointer group"
-              >
-                <div className="flex justify-between items-start mb-2">
-                  <h4 className="text-white font-bold group-hover:text-primary transition-colors">{session.name}</h4>
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                    session.status === 'ACTIVE' 
-                      ? 'bg-green-500/10 text-green-500 border border-green-500/20'
-                      : 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20'
-                  }`}>
-                    {session.status}
-                  </span>
-                </div>
-                <p className="text-xs text-muted-foreground mb-3">
-                  ID: {session.raceSessionId}
-                </p>
-                {session.createdAt && (
-                  <p className="text-xs text-muted-foreground">
-                    Created: {new Date(session.createdAt).toLocaleString()}
+            {sessions.map((session) => {
+              const isActive = activeSessionId === session.raceSessionId;
+              return (
+                <div 
+                  key={session.raceSessionId}
+                  className={`bg-background border rounded-lg p-4 transition-colors group ${
+                    isActive
+                      ? 'border-green-500/50 bg-green-500/5'
+                      : 'border-border hover:border-primary/50'
+                  }`}
+                >
+                  <div className="flex justify-between items-start mb-2">
+                    <h4 className={`font-bold transition-colors ${isActive ? 'text-green-500' : 'text-white group-hover:text-primary'}`}>{session.name}</h4>
+                    <div className="flex items-center gap-2">
+                      {isActive && (
+                        <span className="px-2 py-0.5 rounded text-xs font-bold bg-green-500/10 text-green-500 border border-green-500/20 flex items-center gap-1">
+                          <Radio className="w-3 h-3" />
+                          ACTIVE
+                        </span>
+                      )}
+                      <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                        session.status === 'ACTIVE' 
+                          ? 'bg-green-500/10 text-green-500 border border-green-500/20'
+                          : 'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20'
+                      }`}>
+                        {session.status}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-2 font-jetbrains truncate">
+                    {session.raceSessionId}
                   </p>
-                )}
-              </div>
-            ))}
+                  {session.createdAt && (
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Created: {new Date(session.createdAt).toLocaleString()}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-2">
+                    {!isActive && (
+                      <button
+                        onClick={() => handleSetActiveSession(session)}
+                        className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider bg-primary text-black hover:bg-primary/90 transition-colors"
+                      >
+                        Set Active
+                      </button>
+                    )}
+                    <button
+                      onClick={() => onSessionSelect(session)}
+                      className="px-3 py-1.5 rounded-md text-xs font-bold uppercase tracking-wider border border-border text-muted-foreground hover:text-white hover:border-primary/50 transition-colors"
+                    >
+                      Details
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -214,50 +232,7 @@ export const Dashboard = ({ user, userProfile, setCurrentView, onLogin, onSessio
       {/* Control Cards Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {/* Director Control Card */}
-        <div className="bg-card border border-border rounded-xl p-6 h-64 flex flex-col justify-between hover:border-primary/50 transition-colors group relative overflow-hidden">
-          <div className="flex justify-between items-center z-10">
-            <div className="flex items-center gap-2">
-              <Activity className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
-              <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Director Control</h3>
-            </div>
-            <div className={`w-3 h-3 rounded-full ${directorStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-          </div>
-          
-          <div className="z-10">
-            <div className="text-2xl font-jetbrains font-bold text-white mb-1">
-              {directorStatus.status}
-            </div>
-            <div className="text-xs text-muted-foreground font-rajdhani truncate">
-              {directorStatus.sessionId ? `Session: ${directorStatus.sessionId}` : 'No Active Session'}
-            </div>
-          </div>
-
-          <button 
-            onClick={toggleDirector}
-            className={`z-10 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
-              directorStatus.isRunning 
-                ? 'bg-destructive text-white hover:bg-destructive/90 shadow-[0_0_20px_rgba(239,51,64,0.4)]' 
-                : 'bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)]'
-            }`}
-          >
-            {directorStatus.isRunning ? (
-              <>
-                <Square className="w-4 h-4 fill-current" />
-                <span>STOP</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-current" />
-                <span>START</span>
-              </>
-            )}
-          </button>
-
-          {/* Background Pulse Effect */}
-          {directorStatus.isRunning && (
-            <div className="absolute inset-0 bg-green-500/5 animate-pulse pointer-events-none" />
-          )}
-        </div>
+        <DirectorDashboardCard onClick={() => setCurrentView('director')} />
 
         {/* Sequence Executor Widget — core, always visible */}
         <SequencesDashboardCard onClick={() => setCurrentView('sequences')} />

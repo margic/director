@@ -5,12 +5,20 @@ import {
   DirectorState,
   PortableSequence,
   SequenceStep,
+  CheckinStatus,
+  SessionCheckinRequest,
+  SessionCheckinResponse,
+  SessionCheckinConflict,
+  SessionOperationalConfig,
+  DirectorCapabilities,
 } from './director-types';
 import { randomUUID } from 'crypto';
 import { SequenceExecutor } from './sequence-executor';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
 import { ExtensionHostService } from './extension-host/extension-host';
+import { configService } from './config-service';
+import { app } from 'electron';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -26,6 +34,13 @@ export class DirectorService {
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
 
+  // Session Check-In state
+  private checkinId: string | null = null;
+  private checkinStatus: CheckinStatus = 'unchecked';
+  private sessionConfig: SessionOperationalConfig | null = null;
+  private checkinWarnings: string[] = [];
+  private checkinTtlSeconds: number = 120;
+
   constructor(
     private authService: AuthService, 
     private extensionHost: ExtensionHostService
@@ -39,28 +54,51 @@ export class DirectorService {
     console.log('Starting Director Service...');
     this.isRunning = true;
     
-    // 1. Discover Sessions
-    const sessions = await this.listSessions();
-    if (!sessions || sessions.length === 0) {
-      console.log('No active sessions found. Director will not start loop.');
-      this.isRunning = false;
-      return;
+    // Use pre-selected session if set, otherwise discover and auto-select
+    if (!this.currentRaceSessionId) {
+      const sessions = await this.listSessions();
+      if (!sessions || sessions.length === 0) {
+        console.log('No active sessions found. Director will not start loop.');
+        this.isRunning = false;
+        return;
+      }
+
+      const session = sessions[0];
+      this.currentRaceSessionId = session.raceSessionId;
+      console.log(`Auto-selected session: ${session.name} (${session.raceSessionId})`);
+
+      if (session.obsHost) {
+        console.log(`Configuring OBS connection for session: ${session.obsHost}`);
+      }
+    } else {
+      console.log(`Using pre-selected session: ${this.currentRaceSessionId}`);
     }
 
-    // 2. Auto-select session (for now, pick the first one)
-    const session = sessions[0];
-    this.currentRaceSessionId = session.raceSessionId;
-    console.log(`Joined session: ${session.name} (${session.raceSessionId})`);
-
-    // Configure OBS if host is provided (via extension intent system)
-    if (session.obsHost) {
-      console.log(`Configuring OBS connection for session: ${session.obsHost}`);
-      // TODO: Once OBS extension supports a 'connect' intent or config update,
-      // dispatch it here. For now, OBS extension auto-connects from its settings.
-    }
-
-    // 3. Start Loop
+    // Start Loop
     this.loop();
+  }
+
+  /**
+   * Sets the active race session. If the director is running,
+   * it stops the current loop and restarts with the new session.
+   */
+  async setSession(raceSessionId: string): Promise<DirectorState> {
+    console.log(`[DirectorService] Setting active session: ${raceSessionId}`);
+    const wasRunning = this.isRunning;
+
+    if (wasRunning) {
+      this.stop();
+    }
+
+    this.currentRaceSessionId = raceSessionId;
+    this.lastCompletedSequenceId = null;
+    this.lastError = undefined;
+
+    if (wasRunning) {
+      await this.start();
+    }
+
+    return this.getStatus();
   }
 
   stop() {
@@ -81,8 +119,205 @@ export class DirectorService {
       currentSequenceId: this.currentSequenceId,
       totalCommands: this.totalCommands,
       processedCommands: this.processedCommands,
-      lastError: this.lastError
+      lastError: this.lastError,
+      checkinStatus: this.checkinStatus,
+      checkinId: this.checkinId,
+      sessionConfig: this.sessionConfig,
+      checkinWarnings: this.checkinWarnings,
     };
+  }
+
+  /**
+   * Checks into a session with Race Control, exchanging capabilities.
+   * Transitions: unchecked → checking-in → standby (or error).
+   */
+  async checkinSession(raceSessionId: string, options?: { forceCheckin?: boolean }): Promise<DirectorState> {
+    if (this.checkinStatus === 'checking-in') {
+      console.warn('[Director] Check-in already in progress');
+      return this.getStatus();
+    }
+
+    console.log(`[Director] Checking into session: ${raceSessionId}`);
+    this.checkinStatus = 'checking-in';
+    this.lastError = undefined;
+
+    const token = await this.authService.getAccessToken();
+    if (!token) {
+      this.checkinStatus = 'error';
+      this.lastError = 'No auth token available';
+      return this.getStatus();
+    }
+
+    const capabilities = this.buildCapabilities();
+    const directorId = configService.getOrCreateDirectorId();
+
+    const body: SessionCheckinRequest = {
+      directorId,
+      version: app.getVersion(),
+      capabilities,
+    };
+
+    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.checkin(raceSessionId)}`;
+
+    try {
+      const startTime = Date.now();
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      };
+      if (options?.forceCheckin) {
+        headers['X-Force-Checkin'] = 'true';
+      }
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+
+      const duration = Date.now() - startTime;
+      telemetryService.trackDependency(
+        'RaceControl API', url, duration, response.ok, response.status, 'HTTP',
+        { sessionId: raceSessionId, operation: 'checkin' }
+      );
+
+      if (response.ok) {
+        const data: SessionCheckinResponse = await response.json();
+        this.checkinId = data.checkinId;
+        this.checkinTtlSeconds = data.checkinTtlSeconds;
+        this.sessionConfig = data.sessionConfig;
+        this.checkinWarnings = data.warnings ?? [];
+        this.checkinStatus = 'standby';
+        this.currentRaceSessionId = raceSessionId;
+
+        console.log(`[Director] Checked in: checkinId=${data.checkinId}, TTL=${data.checkinTtlSeconds}s`);
+        if (this.checkinWarnings.length > 0) {
+          console.warn('[Director] Check-in warnings:', this.checkinWarnings);
+        }
+
+        telemetryService.trackEvent('Director.CheckedIn', {
+          sessionId: raceSessionId,
+          checkinId: data.checkinId,
+          warningCount: String(this.checkinWarnings.length),
+        });
+
+        return this.getStatus();
+      }
+
+      if (response.status === 409) {
+        const conflict: SessionCheckinConflict = await response.json();
+        this.checkinStatus = 'error';
+        this.lastError = `Session in use by ${conflict.existingCheckin.displayName ?? conflict.existingCheckin.directorId}`;
+        console.warn(`[Director] Check-in conflict: ${this.lastError}`);
+        return this.getStatus();
+      }
+
+      // Other errors
+      this.checkinStatus = 'error';
+      this.lastError = `Check-in failed: ${response.status} ${response.statusText}`;
+      console.error(`[Director] ${this.lastError}`);
+      return this.getStatus();
+
+    } catch (error) {
+      this.checkinStatus = 'error';
+      this.lastError = `Check-in error: ${(error as Error).message}`;
+      console.error(`[Director] ${this.lastError}`);
+      telemetryService.trackException(error as Error, { operation: 'checkinSession', sessionId: raceSessionId });
+      return this.getStatus();
+    }
+  }
+
+  /**
+   * Wraps (releases) the current session check-in.
+   * Transitions: any → wrapping → unchecked.
+   */
+  async wrapSession(reason?: string): Promise<DirectorState> {
+    if (!this.checkinId || !this.currentRaceSessionId) {
+      console.log('[Director] No active check-in to wrap');
+      this.resetCheckinState();
+      return this.getStatus();
+    }
+
+    console.log(`[Director] Wrapping session: ${this.currentRaceSessionId}`);
+    this.checkinStatus = 'wrapping';
+
+    // Stop the loop if running
+    if (this.isRunning) {
+      this.stop();
+    }
+
+    const token = await this.authService.getAccessToken();
+    if (!token) {
+      console.warn('[Director] No auth token for wrap — clearing state locally');
+      this.resetCheckinState();
+      return this.getStatus();
+    }
+
+    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.wrap(this.currentRaceSessionId)}`;
+
+    try {
+      const startTime = Date.now();
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'X-Checkin-Id': this.checkinId,
+        },
+      });
+
+      const duration = Date.now() - startTime;
+      telemetryService.trackDependency(
+        'RaceControl API', url, duration, response.ok, response.status, 'HTTP',
+        { sessionId: this.currentRaceSessionId, operation: 'wrap' }
+      );
+
+      if (response.ok || response.status === 404) {
+        // 404 means already expired / not found — treat as success
+        console.log('[Director] Session wrapped successfully');
+        telemetryService.trackEvent('Director.SessionWrapped', {
+          sessionId: this.currentRaceSessionId!,
+          reason: reason ?? 'manual',
+        });
+      } else {
+        console.warn(`[Director] Wrap returned ${response.status} — clearing state anyway`);
+      }
+    } catch (error) {
+      console.error('[Director] Wrap error (clearing state anyway):', error);
+      telemetryService.trackException(error as Error, { operation: 'wrapSession' });
+    }
+
+    this.resetCheckinState();
+    return this.getStatus();
+  }
+
+  /**
+   * Builds the capabilities payload from the extension host.
+   */
+  private buildCapabilities(): DirectorCapabilities {
+    const catalog = this.extensionHost.getCapabilityCatalog();
+    const allIntents = catalog.getAllIntents();
+    const connections = this.extensionHost.getConnectionHealth();
+
+    return {
+      intents: allIntents.map(entry => ({
+        intent: entry.intent.intent,
+        extensionId: entry.extensionId,
+        active: entry.enabled,
+        schema: entry.intent.schema as Record<string, unknown> | undefined,
+      })),
+      connections,
+    };
+  }
+
+  /**
+   * Resets all check-in state to initial values.
+   */
+  private resetCheckinState(): void {
+    this.checkinId = null;
+    this.checkinStatus = 'unchecked';
+    this.sessionConfig = null;
+    this.checkinWarnings = [];
+    this.checkinTtlSeconds = 120;
   }
 
   async executeSequenceById(sequenceId: string) {
@@ -210,7 +445,8 @@ export class DirectorService {
       sequenceResult = await this.fetchAndExecuteNextSequence();
     } catch (error) {
       if ((error as any)?.sessionEnded) {
-        console.log('[Director] Session has ended. Stopping director loop.');
+        console.log('[Director] Session has ended. Wrapping and stopping.');
+        await this.wrapSession('session-ended').catch(() => {});
         this.stop();
         return;
       }
@@ -225,6 +461,13 @@ export class DirectorService {
         if (sequenceResult !== false) {
           // If we executed a sequence, use its duration if provided, otherwise default busy interval
           interval = sequenceResult > 0 ? sequenceResult : this.BUSY_INTERVAL_MS;
+        }
+
+        // Heartbeat floor rate contract: poll at min(interval, checkinTtlSeconds / 4)
+        // to prevent check-in TTL from lapsing during long Retry-After intervals.
+        if (this.checkinId && this.checkinTtlSeconds) {
+          const maxIntervalMs = (this.checkinTtlSeconds * 1000) / 4;
+          interval = Math.min(interval, maxIntervalMs);
         }
 
         this.loopInterval = setTimeout(() => this.loop(), interval);
@@ -376,16 +619,26 @@ export class DirectorService {
       params.set('intents', activeIntents.join(','));
     }
 
+    // Fallback: send checkinId as query param in case SWA strips custom headers
+    if (this.checkinId) {
+      params.set('checkinId', this.checkinId);
+    }
+
     const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}?${params}`;
 
     try {
       console.log('Fetching next sequence from:', url);
       
+      const headers: Record<string, string> = {
+        'Authorization': `Bearer ${token}`,
+      };
+      if (this.checkinId) {
+        headers['X-Checkin-Id'] = this.checkinId;
+      }
+
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers,
       });
 
       const duration = Date.now() - startTime;

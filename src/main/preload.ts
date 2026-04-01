@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   directorStop: () => ipcRenderer.invoke('director:stop'),
   directorStatus: () => ipcRenderer.invoke('director:status'),
   directorListSessions: (centerId?: string) => ipcRenderer.invoke('director:list-sessions', centerId),
+  directorSetSession: (raceSessionId: string) => ipcRenderer.invoke('director:set-session', raceSessionId),
+  directorCheckinSession: (raceSessionId: string, options?: { forceCheckin?: boolean }) => ipcRenderer.invoke('director:checkin-session', raceSessionId, options),
+  directorWrapSession: (reason?: string) => ipcRenderer.invoke('director:wrap-session', reason),
   
   // OBS API
   obsGetStatus: () => ipcRenderer.invoke('obs:get-status'),

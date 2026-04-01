@@ -415,6 +415,30 @@ app.on('ready', () => {
     return await directorService.listSessions(centerId);
   });
 
+  ipcMain.handle('director:set-session', async (_, raceSessionId: string) => {
+    return await directorService.setSession(raceSessionId);
+  });
+
+  ipcMain.handle('director:checkin-session', async (_, raceSessionId: string, options?: { forceCheckin?: boolean }) => {
+    try {
+      telemetryService.trackEvent('Director.CheckinRequested', { sessionId: raceSessionId });
+      return await directorService.checkinSession(raceSessionId, options);
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'director.checkin' });
+      throw error;
+    }
+  });
+
+  ipcMain.handle('director:wrap-session', async (_, reason?: string) => {
+    try {
+      telemetryService.trackEvent('Director.WrapRequested');
+      return await directorService.wrapSession(reason);
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'director.wrap' });
+      throw error;
+    }
+  });
+
   // Telemetry IPC Handlers
   ipcMain.handle('telemetry:track-event', async (_, name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => {
     telemetryService.trackEvent(name, properties, measurements);
@@ -544,6 +568,10 @@ app.on('window-all-closed', async () => {
 });
 
 app.on('will-quit', async () => {
+  // Auto-wrap current session on exit
+  if (directorService) {
+    await directorService.wrapSession('app-quit').catch(() => {});
+  }
   if (overlayServer) {
     await overlayServer.stop();
   }
