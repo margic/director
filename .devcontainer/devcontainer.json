@@ -1,14 +1,21 @@
 {
   "name": "Director - Electron Development",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:1-22-bullseye",
-  
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/desktop-lite:1": {}
   },
-
   "customizations": {
+    "repositories": {
+      "margic/racecontrol": {
+        "permissions": {
+          "issues": "write",
+          "contents": "write",
+          "pull_requests": "write"
+        }
+      }
+    },
     "vscode": {
       "extensions": [
         "dbaeumer.vscode-eslint",
@@ -22,29 +29,25 @@
       }
     }
   },
-
-  "forwardPorts": [3000, 5173, 8080, 6080],
-
+  "forwardPorts": [
+    3000,
+    5173,
+    8080,
+    6080
+  ],
   "portsAttributes": {
     "6080": {
       "label": "noVNC Desktop",
       "visibility": "public"
     }
   },
-
   "postCreateCommand": "npm install -g npm@latest && sudo apt-get update && sudo apt-get install -y chromium",
-
   "postStartCommand": "bash ./scripts/restart-vnc.sh",
-
   "remoteUser": "node",
-
   "mounts": [],
-
   "runArgs": [
     "--security-opt",
     "seccomp=unconfined"
   ],
-
-  "containerEnv": {
-  }
+  "containerEnv": {}
 }
