@@ -47,10 +47,10 @@ DirectorOrchestrator (mode controller)
 
 ### 1.1 Create `src/main/cloud-poller.ts`
 
-Extract the polling loop and API fetch logic from `DirectorService` into a focused, single-responsibility class.
+Extract the sequence request loop and API fetch logic from `DirectorService` into a focused, single-responsibility class.
 
 **Responsibilities:**
-- Poll `GET /api/director/v1/sessions/{id}/sequences/next` on a timer.
+- Request sequences from `GET /api/director/v1/sessions/{id}/sequences/next` on a timer.
 - Normalize API responses to `PortableSequence` (delegates to shared normalizer).
 - Emit received sequences to a callback (the Orchestrator wires this to the Scheduler).
 - Respect `Retry-After` header when present (fall back to default 5s).
@@ -62,8 +62,7 @@ Extract the polling loop and API fetch logic from `DirectorService` into a focus
 
 ```typescript
 interface CloudPollerOptions {
-  defaultPollIntervalMs: number;   // Default: 5000
-  busyIntervalMs: number;          // Default: 100 (after sequence received)
+  idleRetryMs: number;   // Default: 5000 (retry interval when RC returns 204)
 }
 
 interface CloudPollerCallbacks {
@@ -88,14 +87,14 @@ class CloudPoller {
 
 **Code to extract from `DirectorService`:**
 - `fetchAndExecuteNextSequence()` → becomes `CloudPoller.fetchNextSequence()` (returns `PortableSequence | null` instead of executing)
-- `POLL_INTERVAL_MS`, `BUSY_INTERVAL_MS` → constructor options
+- `IDLE_RETRY_MS` → constructor option
 - `loop()` timer logic → `CloudPoller.poll()` private method
 - API telemetry tracking → stays in CloudPoller
 
 **New behavior:**
-- On `200 OK`: parse response, normalize to `PortableSequence`, call `callbacks.onSequence(seq)`. Schedule next poll after `metadata.totalDurationMs` or `busyIntervalMs`.
-- On `204 No Content`: read `Retry-After` header (seconds → ms). Schedule next poll after `Retry-After` value or `defaultPollIntervalMs`.
-- On `410 Gone`: call `callbacks.onSessionEnded()`. Stop polling.
+- On `200 OK`: parse response, normalize to `PortableSequence`, call `callbacks.onSequence(seq)`. Schedule next sequence request immediately (execution consumes the time).
+- On `204 No Content`: read `Retry-After` header (seconds → ms). Schedule next sequence request after `Retry-After` value or `idleRetryMs`.
+- On `410 Gone`: call `callbacks.onSessionEnded()`. Stop requesting sequences.
 - On network error or 5xx: call `callbacks.onError(err)`. Schedule retry with exponential backoff (5s → 10s → 20s → 60s max).
 
 ### 1.2 Create `src/main/normalizer.ts`
@@ -152,7 +151,7 @@ cloudPoller = new CloudPoller(authService, {
   }),
   onSessionEnded: () => { /* orchestrator.handleSessionEnded() — Phase 3 */ },
   onError: (err) => { console.error('[CloudPoller]', err); },
-});
+}, { idleRetryMs: 5000 });
 ```
 
 **Changes to `main.ts`:**
@@ -231,13 +230,13 @@ CloudPoller appends `?intents=broadcast.showLiveCam,obs.switchScene,...` to the 
 
 ### 1.7 Acceptance Criteria
 
-- [ ] `director:start` → CloudPoller polls RC API → sequences appear in Scheduler queue/history.
+- [ ] `director:start` → CloudPoller requests sequences from RC API → sequences appear in Scheduler queue/history.
 - [ ] `sequence:progress` events fire for director-loop sequences (overlay + SequencesPanel show them).
 - [ ] `sequence:history` shows director-loop entries with `source: 'director-loop'`.
 - [ ] Priority sequences cancel the current execution and clear the queue.
 - [ ] `Retry-After` header is respected on 204 responses.
-- [ ] `410 Gone` stops the polling loop.
-- [ ] `intents` query parameter is sent on every poll request.
+- [ ] `410 Gone` stops the sequence request loop.
+- [ ] `intents` query parameter is sent on every sequence request.
 - [ ] No duplicate `SequenceExecutor` instances exist at runtime.
 - [ ] Manual `sequence:execute` from SequencesPanel still queues correctly behind director-loop sequences.
 
@@ -356,7 +355,7 @@ sessions: {
 
 ### Problem
 
-There is no coordination between SessionManager, CloudPoller, and the Scheduler. The user can only start/stop. There is no concept of manual mode (session selected but not auto-polling) vs auto mode (polling active).
+There is no coordination between SessionManager, CloudPoller, and the Scheduler. The user can only start/stop. There is no concept of manual mode (session selected but not auto-requesting) vs auto mode (sequence request loop active).
 
 ### 3.1 Create `src/main/director-orchestrator.ts`
 
@@ -431,7 +430,7 @@ director: {
   type: 'object',
   properties: {
     defaultMode: { type: 'string', enum: ['stopped', 'manual', 'auto'], default: 'stopped' },
-    pollIntervalMs: { type: 'number', default: 5000 },
+    idleRetryMs: { type: 'number', default: 5000 },
     autoStartOnSessionSelect: { type: 'boolean', default: false },
   },
   default: {}
@@ -488,7 +487,7 @@ if (sequence) {
 
 - [ ] Mode transitions work: stopped ↔ manual ↔ auto.
 - [ ] Auto mode starts CloudPoller; stopped mode stops it.
-- [ ] Manual mode allows UI-triggered sequence execution against the selected session without auto-polling.
+- [ ] Manual mode allows UI-triggered sequence execution against the selected session without auto-requesting.
 - [ ] `DirectorService` is deleted — no references remain.
 - [ ] `director:set-mode` IPC works from renderer.
 - [ ] `director:stateChanged` push events update the Dashboard in real time.
@@ -677,10 +676,10 @@ Phase 1 ──→ Phase 2 ──→ Phase 3 ──→ Phase 4 ──→ Phase 5
 | Risk | Impact | Mitigation |
 |:---|:---|:---|
 | RC spec update delayed | Phase 4 blocked | Normalizer in Phase 1 handles both formats. Director works with legacy API indefinitely. |
-| Cancel-and-replace causes sequence loss | User-visible — manual sequence cancelled by auto | Log cancelled sequences in history with `status: 'cancelled'`. Show toast notification. Allow "manual mode" to disable auto-polling. |
+| Cancel-and-replace causes sequence loss | User-visible — manual sequence cancelled by auto | Log cancelled sequences in history with `status: 'cancelled'`. Show toast notification. Allow "manual mode" to disable auto-requesting. |
 | `intents` parameter missing handlers | RC emits intents Director can't handle | Soft failure — SequenceExecutor skips unknown intents. But `intents` param prevents this. |
 | Dashboard polling removed too early | UI breaks during Phase 2 | Keep deprecated IPC channels with console.warn until Phase 3 is merged. |
-| `Retry-After` header not present | Polling falls back to default | Already handled — CloudPoller defaults to 5s if header absent. |
+| `Retry-After` header not present | Sequence requests fall back to default | Already handled — CloudPoller defaults to 5s if header absent. |
 
 ---
 

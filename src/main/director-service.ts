@@ -29,8 +29,8 @@ export class DirectorService {
   private processedCommands: number = 0;
   private lastError: string | undefined;
   private loopInterval: NodeJS.Timeout | null = null;
-  private readonly POLL_INTERVAL_MS = 5000; // 5 seconds
-  private readonly BUSY_INTERVAL_MS = 100; // 100ms (rapid fire)
+  // Retry interval when RC returns 204 (no sequence available)
+  private readonly IDLE_RETRY_MS = 5000;
   private executor: SequenceExecutor;
   private currentRaceSessionId: string | null = null;
 
@@ -456,11 +456,11 @@ export class DirectorService {
       // Schedule next iteration
       if (this.isRunning) {
         this.status = 'IDLE';
-        let interval = this.POLL_INTERVAL_MS;
+        let interval = this.IDLE_RETRY_MS;
 
         if (sequenceResult !== false) {
-          // If we executed a sequence, use its duration if provided, otherwise default busy interval
-          interval = sequenceResult > 0 ? sequenceResult : this.BUSY_INTERVAL_MS;
+          // Sequence executed — call back immediately (execution consumed the time)
+          interval = 0;
         }
 
         // Heartbeat floor rate contract: poll at min(interval, checkinTtlSeconds / 4)
@@ -732,9 +732,8 @@ export class DirectorService {
         sessionId: this.currentRaceSessionId,
       });
 
-      // Use metadata.totalDurationMs for poll pacing (per RFC agreement)
-      const totalDurationMs = (portable.metadata as any)?.totalDurationMs ?? 0;
-      return totalDurationMs;
+      // Return non-false to signal loop() to call back immediately
+      return 1;
     } catch (error) {
       // Re-throw session-ended errors so the loop handler can stop
       if ((error as any)?.sessionEnded) throw error;
