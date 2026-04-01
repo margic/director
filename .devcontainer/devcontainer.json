@@ -7,12 +7,14 @@
     "ghcr.io/devcontainers/features/desktop-lite:1": {}
   },
   "customizations": {
-    "repositories": {
-      "margic/racecontrol": {
-        "permissions": {
-          "issues": "write",
-          "contents": "write",
-          "pull_requests": "write"
+    "codespaces": {
+      "repositories": {
+        "margic/racecontrol": {
+          "permissions": {
+            "issues": "write",
+            "contents": "write",
+            "pull_requests": "write"
+          }
         }
       }
     },
