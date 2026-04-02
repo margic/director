@@ -22,7 +22,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   directorSetSession: (raceSessionId: string) => ipcRenderer.invoke('director:set-session', raceSessionId),
   directorCheckinSession: (raceSessionId: string, options?: { forceCheckin?: boolean }) => ipcRenderer.invoke('director:checkin-session', raceSessionId, options),
   directorWrapSession: (reason?: string) => ipcRenderer.invoke('director:wrap-session', reason),
-  
+
+  // Session API
+  session: {
+    getState: () => ipcRenderer.invoke('session:state'),
+    discover: (centerId?: string) => ipcRenderer.invoke('session:discover', centerId),
+    select: (raceSessionId: string) => ipcRenderer.invoke('session:select', raceSessionId),
+    clear: () => ipcRenderer.invoke('session:clear'),
+    onStateChanged: (callback: (state: any) => void) => {
+      const subscription = (_: any, state: any) => callback(state);
+      ipcRenderer.on('session:stateChanged', subscription);
+      // Return unsubscribe function
+      return () => ipcRenderer.removeListener('session:stateChanged', subscription);
+    }
+  },
+
   // OBS API
   obsGetStatus: () => ipcRenderer.invoke('obs:get-status'),
   obsGetScenes: () => ipcRenderer.invoke('obs:get-scenes'),

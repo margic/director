@@ -19,6 +19,7 @@ import { SequenceExecutor } from './sequence-executor';
 import { OverlayBus } from './overlay/overlay-bus';
 import { OverlayServer } from './overlay/overlay-server';
 import { humanizeIntent } from './overlay/intent-humanizer';
+import { SessionManager } from './session-manager';
 
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -29,6 +30,7 @@ if (require('electron-squirrel-startup')) {
 let mainWindow: BrowserWindow | null = null;
 let authService: AuthService;
 let directorService: DirectorService;
+let sessionManager: SessionManager;
 // let iracingService: IracingService;
 let obsService: ObsService;
 let extensionHost: ExtensionHostService;
@@ -85,6 +87,9 @@ app.on('ready', () => {
   discordService.setAuthService(authService);
   discordService.setTelemetryService(telemetryService);
 
+  // Initialize SessionManager
+  sessionManager = new SessionManager(authService);
+
   obsService = new ObsService();
   // OBS auto-connect is deferred until extension host starts.
   // See extensionHost.start().then(...) below.
@@ -116,7 +121,7 @@ app.on('ready', () => {
 
   // Initialize Director Service — no longer depends on ObsService directly.
   // OBS scene switching is now handled by the obs extension via intents.
-  directorService = new DirectorService(authService, extensionHost);
+  directorService = new DirectorService(authService, extensionHost, sessionManager);
 
   // Initialize Event Mapper
   eventMapper = new EventMapper(eventBus, directorService);
@@ -204,6 +209,13 @@ app.on('ready', () => {
     extensionEventCache.set(data.eventName, data);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('extension:event', data);
+    }
+  });
+
+  // Forward SessionManager state changes to Renderer via push events
+  sessionManager.on('stateChanged', (state) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('session:stateChanged', state);
     }
   });
 
@@ -435,6 +447,44 @@ app.on('ready', () => {
       return await directorService.wrapSession(reason);
     } catch (error) {
       telemetryService.trackException(error as Error, { operation: 'director.wrap' });
+      throw error;
+    }
+  });
+
+  // Session IPC Handlers
+  ipcMain.handle('session:state', async () => {
+    return sessionManager.getState();
+  });
+
+  ipcMain.handle('session:discover', async (_, centerId?: string) => {
+    try {
+      telemetryService.trackEvent('Session.DiscoverRequested', { centerId: centerId || 'auto' });
+      await sessionManager.discover(centerId);
+      return sessionManager.getState();
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'session.discover' });
+      throw error;
+    }
+  });
+
+  ipcMain.handle('session:select', async (_, raceSessionId: string) => {
+    try {
+      telemetryService.trackEvent('Session.SelectRequested', { sessionId: raceSessionId });
+      sessionManager.selectSession(raceSessionId);
+      return sessionManager.getState();
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'session.select' });
+      throw error;
+    }
+  });
+
+  ipcMain.handle('session:clear', async () => {
+    try {
+      telemetryService.trackEvent('Session.ClearRequested');
+      sessionManager.clearSession();
+      return sessionManager.getState();
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'session.clear' });
       throw error;
     }
   });
