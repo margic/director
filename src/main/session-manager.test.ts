@@ -46,7 +46,7 @@ describe('SessionManager', () => {
 
     // Mock global fetch
     mockFetch = vi.fn();
-    global.fetch = mockFetch;
+    global.fetch = mockFetch as unknown as typeof fetch;
 
     sessionManager = new SessionManager(mockAuthService as AuthService);
   });
