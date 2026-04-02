@@ -73,7 +73,7 @@ const schema = {
       id: { type: 'string' },
       defaultMode: {
         type: 'string',
-        enum: ['stopped', 'manual', 'auto'],
+        enum: ['stopped', 'manual', 'auto'] as any,
         default: 'stopped'
       },
       autoStartOnSessionSelect: { type: 'boolean', default: false }

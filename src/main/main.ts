@@ -643,8 +643,8 @@ app.on('window-all-closed', async () => {
 
 app.on('will-quit', async () => {
   // Auto-wrap current session on exit
-  if (directorService) {
-    await directorService.wrapSession('app-quit').catch(() => {});
+  if (directorOrchestrator) {
+    await directorOrchestrator.wrapSession('app-quit').catch(() => {});
   }
   if (overlayServer) {
     await overlayServer.stop();
