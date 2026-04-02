@@ -30,6 +30,7 @@ import { normalizeApiResponse } from './normalizer';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
 import { ExtensionHostService } from './extension-host/extension-host';
+import { ExtensionEventBus } from './extension-host/event-bus';
 import { configService } from './config-service';
 import { app } from 'electron';
 import { SessionManager } from './session-manager';
@@ -93,7 +94,8 @@ export class DirectorOrchestrator extends EventEmitter {
     private authService: AuthService,
     private extensionHost: ExtensionHostService,
     private sessionManager: SessionManager,
-    scheduler: SequenceScheduler
+    scheduler: SequenceScheduler,
+    private eventBus?: ExtensionEventBus
   ) {
     super();
     this.scheduler = scheduler;
@@ -116,6 +118,11 @@ export class DirectorOrchestrator extends EventEmitter {
     this.sessionManager.on('stateChanged', (state) => {
       this.handleSessionStateChange(state);
     });
+
+    // Subscribe to extension connection state changes for re-check-in
+    if (this.eventBus) {
+      this.listenForConnectionEvents();
+    }
 
     // Load config and set initial mode
     const config = this.getConfig();
@@ -518,6 +525,38 @@ export class DirectorOrchestrator extends EventEmitter {
     if (this.cloudPoller) {
       this.cloudPoller.clearCheckin();
     }
+  }
+
+  /**
+   * Listen for extension connection state changes and trigger re-check-in.
+   * This ensures Race Control gets updated capabilities when extensions connect/disconnect.
+   */
+  private listenForConnectionEvents(): void {
+    if (!this.eventBus) return;
+
+    // Handle all connection state change events
+    const connectionEvents = [
+      'obs.connectionStateChanged',
+      'iracing.connectionStateChanged',
+      'youtube.status',
+    ];
+
+    connectionEvents.forEach(eventName => {
+      this.eventBus!.on(eventName, async (data: { extensionId: string; payload: any }) => {
+        console.log(`[DirectorOrchestrator] Connection event: ${eventName} from ${data.extensionId}`);
+
+        // Only re-check-in if we're currently checked in
+        if (this.checkinId && this.currentRaceSessionId && this.checkinStatus === 'standby') {
+          console.log('[DirectorOrchestrator] Re-checking in due to connection state change');
+
+          // Re-check-in to update capabilities at Race Control
+          // This allows the Planner to re-generate templates based on new capabilities
+          await this.checkinSession(this.currentRaceSessionId).catch(error => {
+            console.error('[DirectorOrchestrator] Re-check-in failed:', error);
+          });
+        }
+      });
+    });
   }
 
   /**

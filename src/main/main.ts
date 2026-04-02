@@ -126,7 +126,7 @@ app.on('ready', () => {
 
   // Initialize Director Orchestrator — no longer depends on ObsService directly.
   // OBS scene switching is now handled by the obs extension via intents.
-  directorOrchestrator = new DirectorOrchestrator(authService, extensionHost, sessionManager, sequenceScheduler);
+  directorOrchestrator = new DirectorOrchestrator(authService, extensionHost, sessionManager, sequenceScheduler, eventBus);
 
   // Initialize Event Mapper
   eventMapper = new EventMapper(eventBus, sequenceScheduler, authService);
