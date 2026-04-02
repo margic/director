@@ -81,7 +81,7 @@ export interface ExecutionResult {
   sequenceId: string;
   sequenceName: string;
   status: 'completed' | 'partial' | 'failed' | 'cancelled';
-  source: 'manual' | 'director-loop' | 'ai-agent' | 'stream-deck' | 'webhook';
+  source: 'manual' | 'director-loop' | 'ai-agent' | 'stream-deck' | 'webhook' | 'event-mapper';
   priority: boolean;
   startedAt: string;
   completedAt: string;

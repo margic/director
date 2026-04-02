@@ -4,6 +4,9 @@
     "module": "CommonJS",
     "noEmit": false,
     "outDir": "dist-electron",
+    "rootDir": "./src",
+    "types": ["node"],
+    "ignoreDeprecations": "5.0",
     "tsBuildInfoFile": "dist-electron/.tsbuildinfo"
   },
   "include": [
