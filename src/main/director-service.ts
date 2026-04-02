@@ -22,6 +22,7 @@ import { telemetryService } from './telemetry-service';
 import { ExtensionHostService } from './extension-host/extension-host';
 import { configService } from './config-service';
 import { app } from 'electron';
+import { SessionManager } from './session-manager';
 
 export class DirectorService {
   private isRunning: boolean = false;
@@ -44,7 +45,8 @@ export class DirectorService {
 
   constructor(
     private authService: AuthService,
-    private extensionHost: ExtensionHostService
+    private extensionHost: ExtensionHostService,
+    private sessionManager: SessionManager
   ) {
     this.executor = new SequenceExecutor(extensionHost);
     this.scheduler = new SequenceScheduler(this.executor);
@@ -70,24 +72,19 @@ export class DirectorService {
     console.log('Starting Director Service...');
     this.isRunning = true;
 
-    // Use pre-selected session if set, otherwise discover and auto-select
-    if (!this.currentRaceSessionId) {
-      const sessions = await this.listSessions();
-      if (!sessions || sessions.length === 0) {
-        console.log('No active sessions found. Director will not start loop.');
-        this.isRunning = false;
-        return;
-      }
+    // Get selected session from SessionManager
+    const selectedSession = this.sessionManager.getSelectedSession();
+    if (!selectedSession) {
+      console.log('No session selected. Director will not start loop.');
+      this.isRunning = false;
+      return;
+    }
 
-      const session = sessions[0];
-      this.currentRaceSessionId = session.raceSessionId;
-      console.log(`Auto-selected session: ${session.name} (${session.raceSessionId})`);
+    this.currentRaceSessionId = selectedSession.raceSessionId;
+    console.log(`Using selected session: ${selectedSession.name} (${selectedSession.raceSessionId})`);
 
-      if (session.obsHost) {
-        console.log(`Configuring OBS connection for session: ${session.obsHost}`);
-      }
-    } else {
-      console.log(`Using pre-selected session: ${this.currentRaceSessionId}`);
+    if (selectedSession.obsHost) {
+      console.log(`Configuring OBS connection for session: ${selectedSession.obsHost}`);
     }
 
     // Create and start CloudPoller
@@ -108,8 +105,10 @@ export class DirectorService {
   }
 
   /**
-   * Sets the active race session. If the director is running,
+   * Sets the active race session via SessionManager. If the director is running,
    * it stops the current loop and restarts with the new session.
+   *
+   * @deprecated Use SessionManager.selectSession() directly instead
    */
   async setSession(raceSessionId: string): Promise<DirectorState> {
     console.log(`[DirectorService] Setting active session: ${raceSessionId}`);
@@ -119,6 +118,8 @@ export class DirectorService {
       this.stop();
     }
 
+    // Update session via SessionManager
+    this.sessionManager.selectSession(raceSessionId);
     this.currentRaceSessionId = raceSessionId;
     this.lastError = undefined;
 
@@ -168,10 +169,12 @@ export class DirectorService {
 
   /**
    * Handles session ended event from CloudPoller (410 Gone).
+   * Clears the session in SessionManager and stops polling.
    */
   private async handleSessionEnded(): Promise<void> {
     console.log('[DirectorService] Session ended (410 Gone). Wrapping and stopping.');
     await this.wrapSession('session-ended').catch(() => {});
+    this.sessionManager.clearSession();
     this.stop();
   }
 
@@ -430,83 +433,13 @@ export class DirectorService {
     }
   }
 
+  /**
+   * @deprecated Use SessionManager.discover() instead
+   */
   async listSessions(centerId?: string): Promise<RaceSession[]> {
-    const startTime = Date.now();
-    const token = await this.authService.getAccessToken();
-    if (!token) {
-      console.warn('No access token available for session discovery');
-      return [];
-    }
-
-    // Get user profile to obtain centerId if not provided
-    const profile = await this.authService.getUserProfile();
-    const filterCenterId = centerId || profile?.centerId || profile?.center?.id;
-
-    if (!filterCenterId) {
-      console.warn('[DirectorService] No centerId available for session discovery');
-      return [];
-    }
-
-    try {
-      const params = new URLSearchParams({
-        centerId: filterCenterId
-      });
-      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listSessions}?${params}`;
-      console.log('Fetching sessions from:', url);
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      });
-
-      const duration = Date.now() - startTime;
-      const success = response.ok;
-
-      // Track API dependency
-      telemetryService.trackDependency(
-        'RaceControl API',
-        url,
-        duration,
-        success,
-        response.status,
-        'HTTP',
-        {
-          centerId: filterCenterId
-        }
-      );
-
-      if (!response.ok) {
-        console.error(`Failed to fetch sessions: ${response.status} ${response.statusText}`);
-        return [];
-      }
-
-      const sessions: RaceSession[] = await response.json();
-      console.log(`Found ${sessions.length} sessions`);
-      
-      telemetryService.trackMetric('Sessions.Count', sessions.length, {
-        centerId: filterCenterId,
-      });
-
-      return sessions;
-    } catch (error) {
-      console.error('Error fetching sessions:', error);
-      const duration = Date.now() - startTime;
-      telemetryService.trackDependency(
-        'RaceControl API',
-        `${apiConfig.baseUrl}${apiConfig.endpoints.listSessions}`,
-        duration,
-        false,
-        0,
-        'HTTP',
-        {
-          error: (error as Error).message,
-        }
-      );
-      telemetryService.trackException(error as Error, { operation: 'listSessions' });
-      return [];
-    }
+    console.warn('[DirectorService] listSessions() is deprecated. Use SessionManager.discover() instead.');
+    await this.sessionManager.discover(centerId);
+    return this.sessionManager.getSessions();
   }
 
   /**
