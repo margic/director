@@ -1,10 +1,21 @@
+/**
+ * director-orchestrator.ts
+ *
+ * Replaces DirectorService with a mode-based FSM orchestrator.
+ * Coordinates SessionManager, CloudPoller, and SequenceScheduler.
+ *
+ * Mode Model:
+ * STOPPED ──(select session)──→ MANUAL ──(start auto)──→ AUTO
+ *    ↑       ←(clear session)──   ↑      ←(stop auto)──  │
+ *    └─────────────────────────────┘←────(410 Gone)───────┘
+ */
+
+import { EventEmitter } from 'events';
 import { AuthService } from './auth-service';
 import {
   RaceSession,
   DirectorStatus,
-  DirectorState,
   PortableSequence,
-  SequenceStep,
   CheckinStatus,
   SessionCheckinRequest,
   SessionCheckinResponse,
@@ -13,7 +24,6 @@ import {
   DirectorCapabilities,
 } from './director-types';
 import { randomUUID } from 'crypto';
-import { SequenceExecutor } from './sequence-executor';
 import { SequenceScheduler } from './sequence-scheduler';
 import { CloudPoller } from './cloud-poller';
 import { normalizeApiResponse } from './normalizer';
@@ -24,14 +34,50 @@ import { configService } from './config-service';
 import { app } from 'electron';
 import { SessionManager } from './session-manager';
 
-export class DirectorService {
-  private isRunning: boolean = false;
+export type DirectorMode = 'stopped' | 'manual' | 'auto';
+
+export interface DirectorOrchestratorState {
+  mode: DirectorMode;
+  status: DirectorStatus;
+  sessionId: string | null;
+  currentSequenceId?: string | null;
+  totalCommands?: number;
+  processedCommands?: number;
+  lastError?: string;
+  // Session Check-In lifecycle
+  checkinStatus: CheckinStatus;
+  checkinId?: string | null;
+  sessionConfig?: SessionOperationalConfig | null;
+  checkinWarnings?: string[];
+}
+
+export interface DirectorConfig {
+  defaultMode?: DirectorMode;
+  autoStartOnSessionSelect?: boolean;
+}
+
+/**
+ * DirectorOrchestrator manages the director lifecycle with a mode-based state machine.
+ *
+ * Modes:
+ * - stopped: No session selected, no polling
+ * - manual: Session selected, no auto-polling, UI can trigger manual execution
+ * - auto: Session selected, CloudPoller running, sequences executed automatically
+ *
+ * Transitions:
+ * - stopped → manual: When session is selected (if autoStartOnSessionSelect=false)
+ * - stopped → auto: When session is selected (if autoStartOnSessionSelect=true)
+ * - manual → auto: When setMode('auto') is called
+ * - auto → manual: When setMode('manual') is called
+ * - any → stopped: When session is cleared or 410 Gone received
+ */
+export class DirectorOrchestrator extends EventEmitter {
+  private mode: DirectorMode = 'stopped';
   private status: DirectorStatus = 'IDLE';
   private currentSequenceId: string | null = null;
   private totalCommands: number = 0;
   private processedCommands: number = 0;
   private lastError: string | undefined;
-  private executor: SequenceExecutor;
   private scheduler: SequenceScheduler;
   private cloudPoller: CloudPoller | null = null;
   private currentRaceSessionId: string | null = null;
@@ -46,10 +92,11 @@ export class DirectorService {
   constructor(
     private authService: AuthService,
     private extensionHost: ExtensionHostService,
-    private sessionManager: SessionManager
+    private sessionManager: SessionManager,
+    scheduler: SequenceScheduler
   ) {
-    this.executor = new SequenceExecutor(extensionHost);
-    this.scheduler = new SequenceScheduler(this.executor);
+    super();
+    this.scheduler = scheduler;
 
     // Subscribe to scheduler progress events
     this.scheduler.on('progress', (progress) => {
@@ -64,30 +111,133 @@ export class DirectorService {
         this.processedCommands = 0;
       }
     });
+
+    // Subscribe to SessionManager state changes
+    this.sessionManager.on('stateChanged', (state) => {
+      this.handleSessionStateChange(state);
+    });
+
+    // Load config and set initial mode
+    const config = this.getConfig();
+    if (config.defaultMode) {
+      this.mode = config.defaultMode;
+    }
   }
 
-  async start() {
-    if (this.isRunning) return;
+  /**
+   * Get current director configuration from ConfigService.
+   */
+  private getConfig(): DirectorConfig {
+    const config = configService.get('director') as any;
+    return {
+      defaultMode: config?.defaultMode ?? 'stopped',
+      autoStartOnSessionSelect: config?.autoStartOnSessionSelect ?? false,
+    };
+  }
 
-    console.log('Starting Director Service...');
-    this.isRunning = true;
+  /**
+   * Update director configuration in ConfigService.
+   */
+  private updateConfig(updates: Partial<DirectorConfig>): void {
+    const current = configService.get('director') as any;
+    configService.set('director', { ...current, ...updates });
+  }
 
-    // Get selected session from SessionManager
+  /**
+   * Handle SessionManager state changes.
+   * Implements mode transitions based on session selection/clearing.
+   */
+  private async handleSessionStateChange(state: any): Promise<void> {
+    const { state: sessionState, selectedSession } = state;
+
+    if (sessionState === 'selected' && selectedSession) {
+      // Session selected
+      const config = this.getConfig();
+      this.currentRaceSessionId = selectedSession.raceSessionId;
+
+      if (this.mode === 'stopped') {
+        // Transition: stopped → manual or auto (based on config)
+        const targetMode = config.autoStartOnSessionSelect ? 'auto' : 'manual';
+        console.log(`[DirectorOrchestrator] Session selected. Transitioning: stopped → ${targetMode}`);
+        await this.setMode(targetMode);
+      }
+    } else if (sessionState === 'none' || sessionState === 'discovered') {
+      // Session cleared
+      if (this.mode !== 'stopped') {
+        console.log('[DirectorOrchestrator] Session cleared. Transitioning to stopped mode');
+        await this.setMode('stopped');
+      }
+      this.currentRaceSessionId = null;
+    }
+  }
+
+  /**
+   * Set the director operating mode.
+   * Implements FSM transitions: stopped ↔ manual ↔ auto
+   */
+  async setMode(newMode: DirectorMode): Promise<DirectorOrchestratorState> {
+    const oldMode = this.mode;
+
+    if (oldMode === newMode) {
+      console.log(`[DirectorOrchestrator] Already in ${newMode} mode`);
+      return this.getState();
+    }
+
+    console.log(`[DirectorOrchestrator] Mode transition: ${oldMode} → ${newMode}`);
+
+    // Validate transition
     const selectedSession = this.sessionManager.getSelectedSession();
-    if (!selectedSession) {
-      console.log('No session selected. Director will not start loop.');
-      this.isRunning = false;
+    if (newMode !== 'stopped' && !selectedSession) {
+      console.warn('[DirectorOrchestrator] Cannot transition to manual/auto without selected session');
+      this.lastError = 'No session selected';
+      return this.getState();
+    }
+
+    // Stop CloudPoller if running (when leaving auto mode)
+    if (oldMode === 'auto' && this.cloudPoller) {
+      console.log('[DirectorOrchestrator] Stopping CloudPoller');
+      this.cloudPoller.stop();
+      this.cloudPoller = null;
+    }
+
+    // Update mode and session ID
+    this.mode = newMode;
+    this.lastError = undefined;
+
+    // Set or clear session ID based on mode
+    if (newMode !== 'stopped' && selectedSession) {
+      this.currentRaceSessionId = selectedSession.raceSessionId;
+    } else if (newMode === 'stopped') {
+      this.currentRaceSessionId = null;
+    }
+
+    // Start CloudPoller if entering auto mode
+    if (newMode === 'auto') {
+      console.log('[DirectorOrchestrator] Starting CloudPoller');
+      await this.startCloudPoller();
+    }
+
+    // Emit state change
+    this.emitStateChanged();
+
+    telemetryService.trackEvent('Director.ModeChanged', {
+      oldMode,
+      newMode,
+      sessionId: this.currentRaceSessionId || 'none',
+    });
+
+    return this.getState();
+  }
+
+  /**
+   * Start the CloudPoller for auto mode.
+   */
+  private async startCloudPoller(): Promise<void> {
+    if (!this.currentRaceSessionId) {
+      console.warn('[DirectorOrchestrator] Cannot start CloudPoller without session');
       return;
     }
 
-    this.currentRaceSessionId = selectedSession.raceSessionId;
-    console.log(`Using selected session: ${selectedSession.name} (${selectedSession.raceSessionId})`);
-
-    if (selectedSession.obsHost) {
-      console.log(`Configuring OBS connection for session: ${selectedSession.obsHost}`);
-    }
-
-    // Create and start CloudPoller
     this.cloudPoller = new CloudPoller(
       this.authService,
       this.currentRaceSessionId,
@@ -105,82 +255,11 @@ export class DirectorService {
   }
 
   /**
-   * Sets the active race session via SessionManager. If the director is running,
-   * it stops the current loop and restarts with the new session.
-   *
-   * @deprecated Use SessionManager.selectSession() directly instead
+   * Get current orchestrator state.
    */
-  async setSession(raceSessionId: string): Promise<DirectorState> {
-    console.log(`[DirectorService] Setting active session: ${raceSessionId}`);
-    const wasRunning = this.isRunning;
-
-    if (wasRunning) {
-      this.stop();
-    }
-
-    // Update session via SessionManager
-    this.sessionManager.selectSession(raceSessionId);
-    this.currentRaceSessionId = raceSessionId;
-    this.lastError = undefined;
-
-    if (wasRunning) {
-      await this.start();
-    }
-
-    return this.getStatus();
-  }
-
-  stop() {
-    console.log('Stopping Director Service...');
-    this.isRunning = false;
-    if (this.cloudPoller) {
-      this.cloudPoller.stop();
-      this.cloudPoller = null;
-    }
-    this.status = 'IDLE';
-  }
-
-  /**
-   * Handles a sequence received from CloudPoller.
-   * Enqueues it in SequenceScheduler with source='director-loop'.
-   */
-  private async handleSequence(sequence: PortableSequence): Promise<void> {
-    console.log(`[DirectorService] Received sequence from cloud: ${sequence.id} (${sequence.steps.length} steps)`);
-
-    // Enqueue in scheduler with director-loop source
-    await this.scheduler.enqueue(sequence, {}, {
-      source: 'director-loop',
-      priority: sequence.priority,
-    });
-
-    // Listen for completion to notify CloudPoller
-    const executionId = sequence.id;
-    const completionListener = (result: any) => {
-      if (result.sequenceId === sequence.id) {
-        console.log(`[DirectorService] Sequence ${sequence.id} completed with status: ${result.status}`);
-        if (this.cloudPoller) {
-          this.cloudPoller.onSequenceCompleted(sequence.id);
-        }
-        this.scheduler.off('historyChanged', completionListener);
-      }
-    };
-    this.scheduler.on('historyChanged', completionListener);
-  }
-
-  /**
-   * Handles session ended event from CloudPoller (410 Gone).
-   * Clears the session in SessionManager and stops polling.
-   */
-  private async handleSessionEnded(): Promise<void> {
-    console.log('[DirectorService] Session ended (410 Gone). Wrapping and stopping.');
-    await this.wrapSession('session-ended').catch(() => {});
-    this.sessionManager.clearSession();
-    this.stop();
-  }
-
-  getStatus(): DirectorState {
+  getState(): DirectorOrchestratorState {
     return {
-      isRunning: this.isRunning,
+      mode: this.mode,
       status: this.status,
       sessionId: this.currentRaceSessionId,
       currentSequenceId: this.currentSequenceId,
@@ -195,16 +274,60 @@ export class DirectorService {
   }
 
   /**
+   * Emit state changed event.
+   */
+  private emitStateChanged(): void {
+    this.emit('stateChanged', this.getState());
+  }
+
+  /**
+   * Handles a sequence received from CloudPoller.
+   * Enqueues it in SequenceScheduler with source='director-loop'.
+   */
+  private async handleSequence(sequence: PortableSequence): Promise<void> {
+    console.log(`[DirectorOrchestrator] Received sequence from cloud: ${sequence.id} (${sequence.steps.length} steps)`);
+
+    // Enqueue in scheduler with director-loop source
+    await this.scheduler.enqueue(sequence, {}, {
+      source: 'director-loop',
+      priority: sequence.priority,
+    });
+
+    // Listen for completion to notify CloudPoller
+    const completionListener = (result: any) => {
+      if (result.sequenceId === sequence.id) {
+        console.log(`[DirectorOrchestrator] Sequence ${sequence.id} completed with status: ${result.status}`);
+        if (this.cloudPoller) {
+          this.cloudPoller.onSequenceCompleted(sequence.id);
+        }
+        this.scheduler.off('historyChanged', completionListener);
+      }
+    };
+    this.scheduler.on('historyChanged', completionListener);
+  }
+
+  /**
+   * Handles session ended event from CloudPoller (410 Gone).
+   * Clears the session in SessionManager and transitions to stopped mode.
+   */
+  private async handleSessionEnded(): Promise<void> {
+    console.log('[DirectorOrchestrator] Session ended (410 Gone). Wrapping and stopping.');
+    await this.wrapSession('session-ended').catch(() => {});
+    this.sessionManager.clearSession();
+    await this.setMode('stopped');
+  }
+
+  /**
    * Checks into a session with Race Control, exchanging capabilities.
    * Transitions: unchecked → checking-in → standby (or error).
    */
-  async checkinSession(raceSessionId: string, options?: { forceCheckin?: boolean }): Promise<DirectorState> {
+  async checkinSession(raceSessionId: string, options?: { forceCheckin?: boolean }): Promise<DirectorOrchestratorState> {
     if (this.checkinStatus === 'checking-in') {
-      console.warn('[Director] Check-in already in progress');
-      return this.getStatus();
+      console.warn('[DirectorOrchestrator] Check-in already in progress');
+      return this.getState();
     }
 
-    console.log(`[Director] Checking into session: ${raceSessionId}`);
+    console.log(`[DirectorOrchestrator] Checking into session: ${raceSessionId}`);
     this.checkinStatus = 'checking-in';
     this.lastError = undefined;
 
@@ -212,7 +335,7 @@ export class DirectorService {
     if (!token) {
       this.checkinStatus = 'error';
       this.lastError = 'No auth token available';
-      return this.getStatus();
+      return this.getState();
     }
 
     const capabilities = this.buildCapabilities();
@@ -262,9 +385,9 @@ export class DirectorService {
           this.cloudPoller.updateCheckin(data.checkinId, data.checkinTtlSeconds);
         }
 
-        console.log(`[Director] Checked in: checkinId=${data.checkinId}, TTL=${data.checkinTtlSeconds}s`);
+        console.log(`[DirectorOrchestrator] Checked in: checkinId=${data.checkinId}, TTL=${data.checkinTtlSeconds}s`);
         if (this.checkinWarnings.length > 0) {
-          console.warn('[Director] Check-in warnings:', this.checkinWarnings);
+          console.warn('[DirectorOrchestrator] Check-in warnings:', this.checkinWarnings);
         }
 
         telemetryService.trackEvent('Director.CheckedIn', {
@@ -273,29 +396,29 @@ export class DirectorService {
           warningCount: String(this.checkinWarnings.length),
         });
 
-        return this.getStatus();
+        return this.getState();
       }
 
       if (response.status === 409) {
         const conflict: SessionCheckinConflict = await response.json();
         this.checkinStatus = 'error';
         this.lastError = `Session in use by ${conflict.existingCheckin.displayName ?? conflict.existingCheckin.directorId}`;
-        console.warn(`[Director] Check-in conflict: ${this.lastError}`);
-        return this.getStatus();
+        console.warn(`[DirectorOrchestrator] Check-in conflict: ${this.lastError}`);
+        return this.getState();
       }
 
       // Other errors
       this.checkinStatus = 'error';
       this.lastError = `Check-in failed: ${response.status} ${response.statusText}`;
-      console.error(`[Director] ${this.lastError}`);
-      return this.getStatus();
+      console.error(`[DirectorOrchestrator] ${this.lastError}`);
+      return this.getState();
 
     } catch (error) {
       this.checkinStatus = 'error';
       this.lastError = `Check-in error: ${(error as Error).message}`;
-      console.error(`[Director] ${this.lastError}`);
+      console.error(`[DirectorOrchestrator] ${this.lastError}`);
       telemetryService.trackException(error as Error, { operation: 'checkinSession', sessionId: raceSessionId });
-      return this.getStatus();
+      return this.getState();
     }
   }
 
@@ -303,26 +426,26 @@ export class DirectorService {
    * Wraps (releases) the current session check-in.
    * Transitions: any → wrapping → unchecked.
    */
-  async wrapSession(reason?: string): Promise<DirectorState> {
+  async wrapSession(reason?: string): Promise<DirectorOrchestratorState> {
     if (!this.checkinId || !this.currentRaceSessionId) {
-      console.log('[Director] No active check-in to wrap');
+      console.log('[DirectorOrchestrator] No active check-in to wrap');
       this.resetCheckinState();
-      return this.getStatus();
+      return this.getState();
     }
 
-    console.log(`[Director] Wrapping session: ${this.currentRaceSessionId}`);
+    console.log(`[DirectorOrchestrator] Wrapping session: ${this.currentRaceSessionId}`);
     this.checkinStatus = 'wrapping';
 
-    // Stop the loop if running
-    if (this.isRunning) {
-      this.stop();
+    // Stop the loop if in auto mode
+    if (this.mode === 'auto') {
+      await this.setMode('manual');
     }
 
     const token = await this.authService.getAccessToken();
     if (!token) {
-      console.warn('[Director] No auth token for wrap — clearing state locally');
+      console.warn('[DirectorOrchestrator] No auth token for wrap — clearing state locally');
       this.resetCheckinState();
-      return this.getStatus();
+      return this.getState();
     }
 
     const url = `${apiConfig.baseUrl}${apiConfig.endpoints.wrap(this.currentRaceSessionId)}`;
@@ -345,21 +468,21 @@ export class DirectorService {
 
       if (response.ok || response.status === 404) {
         // 404 means already expired / not found — treat as success
-        console.log('[Director] Session wrapped successfully');
+        console.log('[DirectorOrchestrator] Session wrapped successfully');
         telemetryService.trackEvent('Director.SessionWrapped', {
           sessionId: this.currentRaceSessionId!,
           reason: reason ?? 'manual',
         });
       } else {
-        console.warn(`[Director] Wrap returned ${response.status} — clearing state anyway`);
+        console.warn(`[DirectorOrchestrator] Wrap returned ${response.status} — clearing state anyway`);
       }
     } catch (error) {
-      console.error('[Director] Wrap error (clearing state anyway):', error);
+      console.error('[DirectorOrchestrator] Wrap error (clearing state anyway):', error);
       telemetryService.trackException(error as Error, { operation: 'wrapSession' });
     }
 
     this.resetCheckinState();
-    return this.getStatus();
+    return this.getState();
   }
 
   /**
@@ -397,49 +520,44 @@ export class DirectorService {
     }
   }
 
-  async executeSequenceById(sequenceId: string) {
+  /**
+   * Manually execute a sequence by ID.
+   * Available in both manual and auto modes.
+   */
+  async executeSequenceById(sequenceId: string): Promise<void> {
     if (!sequenceId) return;
 
-    console.log(`[Director] Manual execution of sequence: ${sequenceId}`);
+    console.log(`[DirectorOrchestrator] Manual execution of sequence: ${sequenceId}`);
 
     // Fetch sequence definition
     const token = await this.authService.getAccessToken();
     if (!token) {
-        console.warn('[Director] Cannot execute sequence: No auth token.');
-        return;
+      console.warn('[DirectorOrchestrator] Cannot execute sequence: No auth token.');
+      return;
     }
 
     try {
-        const url = `${apiConfig.baseUrl}${apiConfig.endpoints.getSequence(sequenceId)}`;
-        const response = await fetch(url, {
-             headers: { 'Authorization': `Bearer ${token}` }
-        });
+      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.getSequence(sequenceId)}`;
+      const response = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
 
-        if (!response.ok) {
-            console.error(`[Director] Failed to fetch sequence ${sequenceId}: ${response.status}`);
-            return;
-        }
+      if (!response.ok) {
+        console.error(`[DirectorOrchestrator] Failed to fetch sequence ${sequenceId}: ${response.status}`);
+        return;
+      }
 
-        const sequenceData: any = await response.json();
+      const sequenceData: any = await response.json();
 
-        // Normalize API response using centralised normalizer
-        const portable = normalizeApiResponse(sequenceData);
+      // Normalize API response using centralised normalizer
+      const portable = normalizeApiResponse(sequenceData);
 
-        // Enqueue via SequenceScheduler with 'manual' source
-        await this.scheduler.enqueue(portable, {}, { source: 'manual' });
+      // Enqueue via SequenceScheduler with 'manual' source
+      await this.scheduler.enqueue(portable, {}, { source: 'manual' });
 
     } catch (err) {
-        console.error(`[Director] Error executing sequence ${sequenceId}:`, err);
+      console.error(`[DirectorOrchestrator] Error executing sequence ${sequenceId}:`, err);
     }
-  }
-
-  /**
-   * @deprecated Use SessionManager.discover() instead
-   */
-  async listSessions(centerId?: string): Promise<RaceSession[]> {
-    console.warn('[DirectorService] listSessions() is deprecated. Use SessionManager.discover() instead.');
-    await this.sessionManager.discover(centerId);
-    return this.sessionManager.getSessions();
   }
 
   /**

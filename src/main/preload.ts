@@ -15,11 +15,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   logout: () => ipcRenderer.invoke('auth:logout'),
   
   // Director API
-  directorStart: () => ipcRenderer.invoke('director:start'),
-  directorStop: () => ipcRenderer.invoke('director:stop'),
-  directorStatus: () => ipcRenderer.invoke('director:status'),
-  directorListSessions: (centerId?: string) => ipcRenderer.invoke('director:list-sessions', centerId),
-  directorSetSession: (raceSessionId: string) => ipcRenderer.invoke('director:set-session', raceSessionId),
+  directorSetMode: (mode: 'stopped' | 'manual' | 'auto') => ipcRenderer.invoke('director:set-mode', mode),
+  directorState: () => ipcRenderer.invoke('director:state'),
+  directorStart: () => ipcRenderer.invoke('director:start'), // Deprecated: Use directorSetMode('auto')
+  directorStop: () => ipcRenderer.invoke('director:stop'), // Deprecated: Use directorSetMode('stopped')
+  directorStatus: () => ipcRenderer.invoke('director:status'), // Deprecated: Use directorState()
+  directorListSessions: (centerId?: string) => ipcRenderer.invoke('director:list-sessions', centerId), // Deprecated: Use session.discover()
+  directorSetSession: (raceSessionId: string) => ipcRenderer.invoke('director:set-session', raceSessionId), // Deprecated: Use session.select()
   directorCheckinSession: (raceSessionId: string, options?: { forceCheckin?: boolean }) => ipcRenderer.invoke('director:checkin-session', raceSessionId, options),
   directorWrapSession: (reason?: string) => ipcRenderer.invoke('director:wrap-session', reason),
 

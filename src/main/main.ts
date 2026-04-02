@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { url } from 'inspector';
 import { AuthService } from './auth-service';
-import { DirectorService } from './director-service';
+import { DirectorOrchestrator } from './director-orchestrator';
 import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 import { ObsService } from './modules/obs-core/obs-service';
 import { discordService } from './discord-service';
@@ -29,7 +29,7 @@ if (require('electron-squirrel-startup')) {
 
 let mainWindow: BrowserWindow | null = null;
 let authService: AuthService;
-let directorService: DirectorService;
+let directorOrchestrator: DirectorOrchestrator;
 let sessionManager: SessionManager;
 // let iracingService: IracingService;
 let obsService: ObsService;
@@ -119,17 +119,17 @@ app.on('ready', () => {
     return discordService.playTts(text);
   });
 
-  // Initialize Director Service — no longer depends on ObsService directly.
-  // OBS scene switching is now handled by the obs extension via intents.
-  directorService = new DirectorService(authService, extensionHost, sessionManager);
-
-  // Initialize Event Mapper
-  eventMapper = new EventMapper(eventBus, directorService);
-
-  // Initialize Sequence Executor & Scheduler
+  // Initialize Sequence Executor & Scheduler (must be before DirectorOrchestrator)
   sequenceExecutor = new SequenceExecutor(extensionHost);
   sequenceLibrary = new SequenceLibraryService(capabilityCatalog);
   sequenceScheduler = new SequenceScheduler(sequenceExecutor);
+
+  // Initialize Director Orchestrator — no longer depends on ObsService directly.
+  // OBS scene switching is now handled by the obs extension via intents.
+  directorOrchestrator = new DirectorOrchestrator(authService, extensionHost, sessionManager, sequenceScheduler);
+
+  // Initialize Event Mapper
+  eventMapper = new EventMapper(eventBus, sequenceScheduler, authService);
 
   // Register sequence executor overlay contribution
   overlayBus.registerOverlay('sequences', {
@@ -388,16 +388,35 @@ app.on('ready', () => {
   });
 
   // Director IPC Handlers
+  ipcMain.handle('director:set-mode', async (_, mode: 'stopped' | 'manual' | 'auto') => {
+    try {
+      telemetryService.trackEvent('Director.SetModeRequested', { mode });
+      const state = await directorOrchestrator.setMode(mode);
+      telemetryService.trackEvent('Director.ModeSet', {
+        mode,
+        sessionId: state.sessionId || 'none',
+      });
+      return state;
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'director.setMode' });
+      throw error;
+    }
+  });
+
+  ipcMain.handle('director:state', async () => {
+    return directorOrchestrator.getState();
+  });
+
+  // Legacy handlers for backward compatibility (deprecated)
   ipcMain.handle('director:start', async () => {
     try {
       telemetryService.trackEvent('Director.StartRequested');
-      await directorService.start();
-      const status = directorService.getStatus();
+      const state = await directorOrchestrator.setMode('auto');
       telemetryService.trackEvent('Director.Started', {
-        sessionId: status.sessionId || 'none',
-        status: status.status,
+        sessionId: state.sessionId || 'none',
+        status: state.status,
       });
-      return status;
+      return state;
     } catch (error) {
       telemetryService.trackException(error as Error, { operation: 'director.start' });
       throw error;
@@ -407,12 +426,11 @@ app.on('ready', () => {
   ipcMain.handle('director:stop', async () => {
     try {
       telemetryService.trackEvent('Director.StopRequested');
-      directorService.stop();
-      const status = directorService.getStatus();
+      const state = await directorOrchestrator.setMode('stopped');
       telemetryService.trackEvent('Director.Stopped', {
-        status: status.status,
+        status: state.status,
       });
-      return status;
+      return state;
     } catch (error) {
       telemetryService.trackException(error as Error, { operation: 'director.stop' });
       throw error;
@@ -420,21 +438,27 @@ app.on('ready', () => {
   });
 
   ipcMain.handle('director:status', async () => {
-    return directorService.getStatus();
+    return directorOrchestrator.getState();
   });
 
+  // Deprecated: Use session:discover instead
   ipcMain.handle('director:list-sessions', async (_, centerId?: string) => {
-    return await directorService.listSessions(centerId);
+    console.warn('[IPC] director:list-sessions is deprecated. Use session:discover instead.');
+    await sessionManager.discover(centerId);
+    return sessionManager.getSessions();
   });
 
+  // Deprecated: Use session:select instead
   ipcMain.handle('director:set-session', async (_, raceSessionId: string) => {
-    return await directorService.setSession(raceSessionId);
+    console.warn('[IPC] director:set-session is deprecated. Use session:select instead.');
+    sessionManager.selectSession(raceSessionId);
+    return directorOrchestrator.getState();
   });
 
   ipcMain.handle('director:checkin-session', async (_, raceSessionId: string, options?: { forceCheckin?: boolean }) => {
     try {
       telemetryService.trackEvent('Director.CheckinRequested', { sessionId: raceSessionId });
-      return await directorService.checkinSession(raceSessionId, options);
+      return await directorOrchestrator.checkinSession(raceSessionId, options);
     } catch (error) {
       telemetryService.trackException(error as Error, { operation: 'director.checkin' });
       throw error;
@@ -444,7 +468,7 @@ app.on('ready', () => {
   ipcMain.handle('director:wrap-session', async (_, reason?: string) => {
     try {
       telemetryService.trackEvent('Director.WrapRequested');
-      return await directorService.wrapSession(reason);
+      return await directorOrchestrator.wrapSession(reason);
     } catch (error) {
       telemetryService.trackException(error as Error, { operation: 'director.wrap' });
       throw error;
