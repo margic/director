@@ -224,7 +224,21 @@ export class SequenceScheduler extends EventEmitter {
     variables: Record<string, unknown>,
     source: string
   ): Promise<void> {
-    // Fire and don't block the queue
+    // Cancel-and-replace: cancel current execution and clear queue
+    if (this.currentExecution) {
+      console.log(`[SequenceScheduler] Priority sequence: cancelling current execution ${this.currentExecution.executionId}`);
+      this.currentExecution.cancel();
+      this.currentExecution = null;
+    }
+
+    // Clear the queue
+    if (this.queue.length > 0) {
+      console.log(`[SequenceScheduler] Priority sequence: clearing queue of ${this.queue.length} items`);
+      this.queue = [];
+      this.emit('queueChanged', this.queue);
+    }
+
+    // Execute immediately (fire and don't block)
     this.executeSequence(executionId, sequence, variables, source, true);
   }
 

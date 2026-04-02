@@ -1,5 +1,5 @@
 import { AuthService } from './auth-service';
-import { 
+import {
   RaceSession,
   DirectorStatus,
   DirectorState,
@@ -14,6 +14,9 @@ import {
 } from './director-types';
 import { randomUUID } from 'crypto';
 import { SequenceExecutor } from './sequence-executor';
+import { SequenceScheduler } from './sequence-scheduler';
+import { CloudPoller } from './cloud-poller';
+import { normalizeApiResponse } from './normalizer';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
 import { ExtensionHostService } from './extension-host/extension-host';
@@ -24,14 +27,12 @@ export class DirectorService {
   private isRunning: boolean = false;
   private status: DirectorStatus = 'IDLE';
   private currentSequenceId: string | null = null;
-  private lastCompletedSequenceId: string | null = null;
   private totalCommands: number = 0;
   private processedCommands: number = 0;
   private lastError: string | undefined;
-  private loopInterval: NodeJS.Timeout | null = null;
-  // Retry interval when RC returns 204 (no sequence available)
-  private readonly IDLE_RETRY_MS = 5000;
   private executor: SequenceExecutor;
+  private scheduler: SequenceScheduler;
+  private cloudPoller: CloudPoller | null = null;
   private currentRaceSessionId: string | null = null;
 
   // Session Check-In state
@@ -42,18 +43,33 @@ export class DirectorService {
   private checkinTtlSeconds: number = 120;
 
   constructor(
-    private authService: AuthService, 
+    private authService: AuthService,
     private extensionHost: ExtensionHostService
   ) {
     this.executor = new SequenceExecutor(extensionHost);
+    this.scheduler = new SequenceScheduler(this.executor);
+
+    // Subscribe to scheduler progress events
+    this.scheduler.on('progress', (progress) => {
+      // Update current sequence tracking from scheduler progress
+      if (progress.stepStatus === 'running' && progress.stepIntent !== 'sequence.start' && progress.stepIntent !== 'sequence.end') {
+        this.currentSequenceId = progress.sequenceId;
+        this.totalCommands = progress.totalSteps;
+        this.processedCommands = progress.currentStep;
+      } else if (progress.stepIntent === 'sequence.end') {
+        this.currentSequenceId = null;
+        this.totalCommands = 0;
+        this.processedCommands = 0;
+      }
+    });
   }
 
   async start() {
     if (this.isRunning) return;
-    
+
     console.log('Starting Director Service...');
     this.isRunning = true;
-    
+
     // Use pre-selected session if set, otherwise discover and auto-select
     if (!this.currentRaceSessionId) {
       const sessions = await this.listSessions();
@@ -74,8 +90,21 @@ export class DirectorService {
       console.log(`Using pre-selected session: ${this.currentRaceSessionId}`);
     }
 
-    // Start Loop
-    this.loop();
+    // Create and start CloudPoller
+    this.cloudPoller = new CloudPoller(
+      this.authService,
+      this.currentRaceSessionId,
+      {
+        idleRetryMs: 5000,
+        getActiveIntents: () => this.getActiveIntents(),
+        onSequence: (sequence) => this.handleSequence(sequence),
+        onSessionEnded: () => this.handleSessionEnded(),
+        checkinId: this.checkinId || undefined,
+        checkinTtlSeconds: this.checkinTtlSeconds,
+      }
+    );
+
+    this.cloudPoller.start();
   }
 
   /**
@@ -91,7 +120,6 @@ export class DirectorService {
     }
 
     this.currentRaceSessionId = raceSessionId;
-    this.lastCompletedSequenceId = null;
     this.lastError = undefined;
 
     if (wasRunning) {
@@ -104,11 +132,47 @@ export class DirectorService {
   stop() {
     console.log('Stopping Director Service...');
     this.isRunning = false;
-    if (this.loopInterval) {
-      clearTimeout(this.loopInterval);
-      this.loopInterval = null;
+    if (this.cloudPoller) {
+      this.cloudPoller.stop();
+      this.cloudPoller = null;
     }
     this.status = 'IDLE';
+  }
+
+  /**
+   * Handles a sequence received from CloudPoller.
+   * Enqueues it in SequenceScheduler with source='director-loop'.
+   */
+  private async handleSequence(sequence: PortableSequence): Promise<void> {
+    console.log(`[DirectorService] Received sequence from cloud: ${sequence.id} (${sequence.steps.length} steps)`);
+
+    // Enqueue in scheduler with director-loop source
+    await this.scheduler.enqueue(sequence, {}, {
+      source: 'director-loop',
+      priority: sequence.priority,
+    });
+
+    // Listen for completion to notify CloudPoller
+    const executionId = sequence.id;
+    const completionListener = (result: any) => {
+      if (result.sequenceId === sequence.id) {
+        console.log(`[DirectorService] Sequence ${sequence.id} completed with status: ${result.status}`);
+        if (this.cloudPoller) {
+          this.cloudPoller.onSequenceCompleted(sequence.id);
+        }
+        this.scheduler.off('historyChanged', completionListener);
+      }
+    };
+    this.scheduler.on('historyChanged', completionListener);
+  }
+
+  /**
+   * Handles session ended event from CloudPoller (410 Gone).
+   */
+  private async handleSessionEnded(): Promise<void> {
+    console.log('[DirectorService] Session ended (410 Gone). Wrapping and stopping.');
+    await this.wrapSession('session-ended').catch(() => {});
+    this.stop();
   }
 
   getStatus(): DirectorState {
@@ -189,6 +253,11 @@ export class DirectorService {
         this.checkinWarnings = data.warnings ?? [];
         this.checkinStatus = 'standby';
         this.currentRaceSessionId = raceSessionId;
+
+        // Update CloudPoller with check-in credentials
+        if (this.cloudPoller) {
+          this.cloudPoller.updateCheckin(data.checkinId, data.checkinTtlSeconds);
+        }
 
         console.log(`[Director] Checked in: checkinId=${data.checkinId}, TTL=${data.checkinTtlSeconds}s`);
         if (this.checkinWarnings.length > 0) {
@@ -318,13 +387,18 @@ export class DirectorService {
     this.sessionConfig = null;
     this.checkinWarnings = [];
     this.checkinTtlSeconds = 120;
+
+    // Clear CloudPoller's check-in credentials
+    if (this.cloudPoller) {
+      this.cloudPoller.clearCheckin();
+    }
   }
 
   async executeSequenceById(sequenceId: string) {
     if (!sequenceId) return;
-    
+
     console.log(`[Director] Manual execution of sequence: ${sequenceId}`);
-    
+
     // Fetch sequence definition
     const token = await this.authService.getAccessToken();
     if (!token) {
@@ -344,13 +418,13 @@ export class DirectorService {
         }
 
         const sequenceData: any = await response.json();
-        
-        // API now returns PortableSequence format directly (with steps/intent)
-        // Fall back to legacy normalization if it still has old format
-        const portable = this.normalizeApiResponse(sequenceData);
-        
-        this.executor.execute(portable);
-        
+
+        // Normalize API response using centralised normalizer
+        const portable = normalizeApiResponse(sequenceData);
+
+        // Enqueue via SequenceScheduler with 'manual' source
+        await this.scheduler.enqueue(portable, {}, { source: 'manual' });
+
     } catch (err) {
         console.error(`[Director] Error executing sequence ${sequenceId}:`, err);
     }
@@ -432,331 +506,6 @@ export class DirectorService {
       );
       telemetryService.trackException(error as Error, { operation: 'listSessions' });
       return [];
-    }
-  }
-
-  private async loop() {
-    if (!this.isRunning || !this.currentRaceSessionId) return;
-
-    let sequenceResult: number | false = false;
-
-    try {
-      this.status = 'BUSY';
-      sequenceResult = await this.fetchAndExecuteNextSequence();
-    } catch (error) {
-      if ((error as any)?.sessionEnded) {
-        console.log('[Director] Session has ended. Wrapping and stopping.');
-        await this.wrapSession('session-ended').catch(() => {});
-        this.stop();
-        return;
-      }
-      console.error('Error in director loop:', error);
-      this.status = 'ERROR';
-    } finally {
-      // Schedule next iteration
-      if (this.isRunning) {
-        this.status = 'IDLE';
-        // Determine next-iteration delay:
-        //   false          → no sequence and no Retry-After; idle-retry after IDLE_RETRY_MS
-        //   0              → sequence executed; call back immediately (execution itself consumed the time)
-        //   n > 0          → 204 with Retry-After header; wait the specified duration
-        let interval = sequenceResult === false
-          ? this.IDLE_RETRY_MS
-          : sequenceResult;
-
-        // Heartbeat floor rate contract: poll at min(interval, checkinTtlSeconds / 4)
-        // to prevent check-in TTL from lapsing during long Retry-After intervals.
-        if (this.checkinId && this.checkinTtlSeconds) {
-          const maxIntervalMs = (this.checkinTtlSeconds * 1000) / 4;
-          interval = Math.min(interval, maxIntervalMs);
-        }
-
-        this.loopInterval = setTimeout(() => this.loop(), interval);
-      }
-    }
-  }
-
-  /**
-   * Intent mappings for legacy API CommandType values.
-   * Maps the old enum-based command types from the OpenAPI spec
-   * to the semantic intent names registered by extensions.
-   * @deprecated The API now returns PortableSequence with semantic intents directly.
-   */
-  private static readonly LEGACY_INTENT_MAP: Record<string, string> = {
-    'SWITCH_CAMERA': 'broadcast.showLiveCam',
-    'SWITCH_OBS_SCENE': 'obs.switchScene',
-    'DRIVER_TTS': 'communication.announce',
-    'VIEWER_CHAT': 'communication.talkToChat',
-    'PLAY_AUDIO': 'audio.play',          // Future
-    'SHOW_OVERLAY': 'overlay.show',       // Future
-    'HIDE_OVERLAY': 'overlay.hide',       // Future
-  };
-
-  /**
-   * Normalizes a raw API response into a PortableSequence.
-   * The current API returns PortableSequence format directly (with `steps` and semantic `intent` fields).
-   * Legacy format (with `commands` and `commandType` fields) is still supported for backward compatibility.
-   */
-  private normalizeApiResponse(apiData: any): PortableSequence {
-    // New format: API returns PortableSequence directly with `steps`
-    if (apiData.steps && Array.isArray(apiData.steps)) {
-      return {
-        id: apiData.id || randomUUID(),
-        name: apiData.name,
-        version: apiData.version,
-        description: apiData.description,
-        category: apiData.category,
-        priority: apiData.priority,
-        variables: apiData.variables,
-        steps: apiData.steps.map((step: any) => ({
-          id: step.id || randomUUID(),
-          intent: step.intent,
-          payload: step.payload || {},
-          metadata: step.metadata,
-        })),
-        metadata: apiData.metadata,
-      };
-    }
-
-    // Legacy format: API returned DirectorSequence with `commands`
-    console.warn('[Director] Received legacy API format with commands[] — normalizing to PortableSequence');
-    const commands: any[] = apiData.commands || [];
-    
-    const steps: SequenceStep[] = commands.map((cmd: any, index: number) => {
-      const type = cmd.commandType || cmd.type;
-      const id = cmd.id || randomUUID();
-      
-      // Handle WAIT
-      if (type === 'WAIT') {
-        const durationMs = cmd.payload?.durationMs ?? cmd.durationMs ?? 0;
-        return { id, intent: 'system.wait', payload: { durationMs } };
-      }
-      
-      // Handle LOG
-      if (type === 'LOG') {
-        const payload = cmd.payload || { message: cmd.message || '', level: cmd.level || 'INFO' };
-        return { id, intent: 'system.log', payload };
-      }
-      
-      // Handle EXECUTE_INTENT (already intent-based, unwrap)
-      if (type === 'EXECUTE_INTENT') {
-        return {
-          id,
-          intent: cmd.payload?.intent || 'system.log',
-          payload: cmd.payload?.payload || {},
-        };
-      }
-      
-      // Map legacy command types to semantic intents
-      const intent = DirectorService.LEGACY_INTENT_MAP[type];
-      if (intent) {
-        let payload = cmd.payload || {};
-        
-        if (cmd.target) {
-          if (type === 'SWITCH_CAMERA') {
-            payload = {
-              carNum: cmd.target.carNumber?.toString(),
-              camGroup: cmd.target.cameraGroup?.toString(),
-              ...cmd.target,
-            };
-          } else if (type === 'SWITCH_OBS_SCENE') {
-            payload = {
-              sceneName: cmd.target.obsSceneId || cmd.target.sceneName,
-              ...cmd.target,
-            };
-          } else {
-            payload = { ...cmd.target };
-          }
-        }
-        
-        return { id, intent, payload };
-      }
-      
-      // Unknown command — emit a warning log step
-      console.warn(`[Director] Unknown API command type: ${type}`);
-      return {
-        id,
-        intent: 'system.log',
-        payload: { message: `Unknown API command type: ${type}`, level: 'WARN' },
-      };
-    });
-
-    return {
-      id: apiData.sequenceId || apiData.id || randomUUID(),
-      name: apiData.name,
-      steps,
-      metadata: {
-        priority: apiData.priority,
-        generatedAt: apiData.generatedAt || apiData.metadata?.generatedAt,
-        totalDurationMs: apiData.totalDurationMs || apiData.metadata?.totalDurationMs,
-      },
-    };
-  }
-
-  private async fetchAndExecuteNextSequence(): Promise<number | false> {
-    const startTime = Date.now();
-    const token = await this.authService.getAccessToken();
-    if (!token) {
-      console.warn('No access token available for fetching sequence');
-      return false;
-    }
-
-    if (!this.currentRaceSessionId) {
-      console.warn('No active race session ID');
-      return false;
-    }
-
-    // Build query parameters per updated OpenAPI spec:
-    //   lastSequenceId — ID of the sequence just completed (for chaining/logging)
-    //   intents — comma-separated list of active intent handlers (capability reporting)
-    const params = new URLSearchParams();
-    if (this.lastCompletedSequenceId) {
-      params.set('lastSequenceId', this.lastCompletedSequenceId);
-    }
-
-    // Report active intents so RC constrains sequence generation to what we can execute
-    const activeIntents = this.getActiveIntents();
-    if (activeIntents.length > 0) {
-      params.set('intents', activeIntents.join(','));
-    }
-
-    // Fallback: send checkinId as query param in case SWA strips custom headers
-    if (this.checkinId) {
-      params.set('checkinId', this.checkinId);
-    }
-
-    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.currentRaceSessionId)}?${params}`;
-
-    try {
-      console.log('Fetching next sequence from:', url);
-      
-      const headers: Record<string, string> = {
-        'Authorization': `Bearer ${token}`,
-      };
-      if (this.checkinId) {
-        headers['X-Checkin-Id'] = this.checkinId;
-      }
-
-      const response = await fetch(url, {
-        method: 'GET',
-        headers,
-      });
-
-      const duration = Date.now() - startTime;
-
-      // Handle 410 Gone — session has ended (COMPLETED or CANCELED)
-      if (response.status === 410) {
-        console.log('[Director] Session ended (410 Gone). Stopping polling.');
-        telemetryService.trackDependency(
-          'RaceControl API', url, duration, true, 410, 'HTTP',
-          { sessionId: this.currentRaceSessionId, result: 'session-ended' }
-        );
-        const error: any = new Error('Session has ended');
-        error.sessionEnded = true;
-        throw error;
-      }
-
-      if (response.status === 204) {
-        // No new sequence available — respect Retry-After header if present
-        const retryAfter = response.headers.get('Retry-After');
-        console.log(`No new sequence available (204)${retryAfter ? `, Retry-After: ${retryAfter}s` : ''}`);
-        telemetryService.trackDependency(
-          'RaceControl API',
-          url,
-          duration,
-          true,
-          204,
-          'HTTP',
-          {
-            sessionId: this.currentRaceSessionId,
-            result: 'no-sequence',
-          }
-        );
-        // Return the Retry-After interval so the loop waits the specified duration before retrying
-        if (retryAfter) {
-          const retryMs = parseInt(retryAfter, 10) * 1000;
-          if (!isNaN(retryMs) && retryMs > 0) {
-            return retryMs;
-          }
-        }
-        return false;
-      }
-
-      const success = response.ok;
-      telemetryService.trackDependency(
-        'RaceControl API',
-        url,
-        duration,
-        success,
-        response.status,
-        'HTTP',
-        {
-          sessionId: this.currentRaceSessionId,
-        }
-      );
-
-      if (!response.ok) {
-        console.error(`Failed to fetch next sequence: ${response.status} ${response.statusText}`);
-        return false;
-      }
-
-      const sequenceData: any = await response.json();
-      console.log('Received sequence:', JSON.stringify(sequenceData, null, 2));
-
-      // Normalize API response — handles both new PortableSequence format (steps/intent)
-      // and legacy DirectorSequence format (commands/commandType) for backward compatibility
-      const portable = this.normalizeApiResponse(sequenceData);
-
-      this.currentSequenceId = portable.id;
-      this.totalCommands = portable.steps.length;
-      this.processedCommands = 0;
-
-      telemetryService.trackEvent('Sequence.Received', {
-        sequenceId: portable.id,
-        sessionId: this.currentRaceSessionId,
-        commandCount: portable.steps.length.toString(),
-        priority: String(portable.priority || false),
-      });
-
-      await this.executor.execute(portable, (completed, total) => {
-        this.processedCommands = completed;
-        this.totalCommands = total;
-      });
-
-      this.lastCompletedSequenceId = portable.id;
-      this.currentSequenceId = null;
-      this.totalCommands = 0;
-      this.processedCommands = 0;
-
-      telemetryService.trackEvent('Sequence.Executed', {
-        sequenceId: portable.id,
-        sessionId: this.currentRaceSessionId,
-      });
-
-      // Sequence executed — signal the loop to call back immediately (execution itself consumed the time)
-      return 0;
-    } catch (error) {
-      // Re-throw session-ended errors so the loop handler can stop
-      if ((error as any)?.sessionEnded) throw error;
-
-      console.error('Error fetching/executing sequence:', error);
-      const duration = Date.now() - startTime;
-      telemetryService.trackDependency(
-        'RaceControl API',
-        url,
-        duration,
-        false,
-        0,
-        'HTTP',
-        {
-          error: (error as Error).message,
-        }
-      );
-      telemetryService.trackException(error as Error, {
-        operation: 'fetchAndExecuteNextSequence',
-        sessionId: this.currentRaceSessionId || 'unknown',
-      });
-      return false;
     }
   }
 
