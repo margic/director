@@ -118,7 +118,7 @@ export class SequenceScheduler extends EventEmitter {
     sequence: PortableSequence,
     variables: Record<string, unknown> = {},
     options?: {
-      source?: 'manual' | 'director-loop' | 'ai-agent' | 'stream-deck' | 'webhook';
+      source?: 'manual' | 'director-loop' | 'ai-agent' | 'stream-deck' | 'webhook' | 'event-mapper';
       priority?: boolean;
     }
   ): Promise<string> {
