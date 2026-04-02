@@ -37,6 +37,7 @@ describe('DirectorOrchestrator', () => {
   let mockExtensionHost: any;
   let mockSessionManager: any;
   let mockScheduler: any;
+  let mockEventBus: any;
 
   beforeEach(() => {
     // Create mock instances
@@ -66,11 +67,16 @@ describe('DirectorOrchestrator', () => {
       enqueue: vi.fn(),
     });
 
+    mockEventBus = Object.assign(new EventEmitter(), {
+      emitExtensionEvent: vi.fn(),
+    });
+
     orchestrator = new DirectorOrchestrator(
       mockAuthService,
       mockExtensionHost,
       mockSessionManager,
-      mockScheduler
+      mockScheduler,
+      mockEventBus
     );
   });
 
@@ -321,6 +327,85 @@ describe('DirectorOrchestrator', () => {
 
       const intents = (orchestrator as any).getActiveIntents();
       expect(intents).toEqual(['system.wait', 'system.log']);
+    });
+  });
+
+  describe('Re-check-in on Extension Events', () => {
+    beforeEach(() => {
+      // Mock fetch for check-in calls
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          checkinId: 'checkin-123',
+          checkinTtlSeconds: 120,
+          sessionConfig: {
+            raceSessionId: 'session-1',
+            name: 'Test Session',
+            status: 'ACTIVE',
+            simulator: 'iRacing',
+            drivers: [],
+            obsScenes: [],
+          },
+          warnings: [],
+        }),
+      }) as any;
+    });
+
+    it('should re-check-in when extension connects after initial check-in', async () => {
+      // First check in
+      await orchestrator.checkinSession('session-1');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Simulate OBS connection event
+      mockEventBus.emit('obs.connectionStateChanged', {
+        extensionId: 'director-obs',
+        payload: { connected: true },
+      });
+
+      // Wait for async re-check-in
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Should have called fetch again for re-check-in
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not re-check-in if not currently checked in', async () => {
+      // Simulate connection event without being checked in
+      mockEventBus.emit('obs.connectionStateChanged', {
+        extensionId: 'director-obs',
+        payload: { connected: true },
+      });
+
+      // Wait for potential async operations
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Should not have called fetch
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should handle re-check-in failure gracefully', async () => {
+      // First check in successfully
+      await orchestrator.checkinSession('session-1');
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+
+      // Mock fetch to fail on re-check-in
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: 'Internal Server Error',
+      }) as any;
+
+      // Simulate connection event
+      mockEventBus.emit('iracing.connectionStateChanged', {
+        extensionId: 'director-iracing',
+        payload: { connected: true },
+      });
+
+      // Wait for async re-check-in
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Should have attempted re-check-in without throwing
+      expect(global.fetch).toHaveBeenCalledTimes(1);
     });
   });
 });
