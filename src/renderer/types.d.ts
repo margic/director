@@ -162,10 +162,14 @@ export interface IElectronAPI {
   getAccount: () => Promise<any>;
   getUserProfile: () => Promise<UserProfile | null>;
   logout: () => Promise<void>;
+  directorSetMode: (mode: 'stopped' | 'manual' | 'auto') => Promise<any>;
+  directorState: () => Promise<any>;
   directorStart: () => Promise<any>;
   directorStop: () => Promise<any>;
   directorStatus: () => Promise<any>;
   directorListSessions: (centerId?: string) => Promise<RaceSession[]>;
+  directorCheckinSession: (raceSessionId: string, options?: { forceCheckin?: boolean }) => Promise<any>;
+  directorWrapSession: (reason?: string) => Promise<any>;
   obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[]; currentScene: string; host: string; autoConnect: boolean }>;
   obsGetScenes: () => Promise<string[]>;
   obsSetScene: (sceneName: string) => Promise<void>;
