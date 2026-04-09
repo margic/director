@@ -50,7 +50,7 @@ echo "[INFO] Starting VNC Server (Display :1)..."
 # Start VNC server in a background loop to ensure persistence
 nohup bash -c 'while :; do 
     echo "Starting Xtigervnc..."
-    tigervncserver :1 -geometry 1440x768 -depth 16 -rfbport 5901 -dpi 96 -localhost -SecurityTypes None -fg
+    tigervncserver :1 -geometry 1920x1080 -depth 16 -rfbport 5901 -dpi 96 -localhost -SecurityTypes None -fg
     echo "Xtigervnc exited, restarting in 2s..."
     sleep 2
 done' > /tmp/vnc-server.log 2>&1 &

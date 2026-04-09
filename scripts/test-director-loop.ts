@@ -5,7 +5,7 @@
  * 1. Hit RC dev API with realistic check-in payload (capabilities, sequences)
  * 2. Wait for planner to generate templates (poll or fixed delay)
  * 3. Request `sequences/next` — expect 200 with PortableSequence
- * 4. Validate canonical intents + Director field names (`carNum`, `camGroup`, `sceneName`)
+ * 4. Validate canonical intents + Director field names (`carNumber`, `cameraGroup`, `sceneName`)
  * 5. Verify `metadata.totalDurationMs` present and >= 10000
  * 6. Verify `intents` query parameter was sent
  * 7. Verify `X-Checkin-Id` header was sent
@@ -17,6 +17,7 @@
 
 import * as dotenv from 'dotenv';
 import { randomUUID } from 'crypto';
+import { execSync } from 'child_process';
 import { PortableSequence } from '../src/main/director-types';
 
 // Load environment variables
@@ -56,6 +57,24 @@ function logResult(test: string, passed: boolean, details: string) {
 
 async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Attempt to acquire a bearer token via Azure CLI (`az account get-access-token`).
+ * Uses the Race Control API scope so the token audience matches the RC API.
+ * Returns null if az CLI is not installed, not logged in, or the call fails.
+ */
+function getAzBearerToken(): string | null {
+  const scope = 'api://racecontrol-api-a780e279-1cb6-4ed0-9ef6-49029aa50a42/access_as_user';
+  try {
+    const token = execSync(
+      `az account get-access-token --scope "${scope}" --query accessToken -o tsv`,
+      { stdio: ['pipe', 'pipe', 'pipe'] }
+    ).toString().trim();
+    return token || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -317,16 +336,18 @@ function validateFieldNames(sequence: any): void {
     if (intent === 'broadcast.showLiveCam' || intent === 'SWITCH_CAMERA') {
       foundCameraCommand = true;
 
-      // Check for correct field names: carNum (not carNumber), camGroup (not cameraGroupNumber)
-      const hasCarNum = 'carNum' in payload || 'carNumber' in payload;
-      const hasCamGroup = 'camGroup' in payload || 'cameraGroup' in payload || 'cameraGroupNumber' in payload;
+      // Check for correct field names: carNumber, cameraGroup (canonical API names)
+      const hasCarNum = 'carNumber' in payload || 'carNum' in payload;
+      const hasCamGroup = 'cameraGroup' in payload || 'camGroup' in payload || 'cameraGroupNumber' in payload;
 
-      if ('carNum' in payload && ('camGroup' in payload || 'cameraGroup' in payload)) {
+      if (hasCarNum && hasCamGroup) {
         cameraFieldsCorrect = true;
-        logResult('Camera Field Names', true, `carNum="${payload.carNum}", camGroup="${payload.camGroup || payload.cameraGroup}"`);
+        const carNum = payload.carNumber ?? payload.carNum;
+        const camGroup = payload.cameraGroup ?? payload.camGroup ?? payload.cameraGroupNumber;
+        logResult('Camera Field Names', true, `carNumber="${carNum}", cameraGroup="${camGroup}"`);
       } else {
         const fields = Object.keys(payload).join(', ');
-        logResult('Camera Field Names', false, `Expected carNum and camGroup, found: ${fields}`);
+        logResult('Camera Field Names', false, `Expected carNumber and cameraGroup, found: ${fields}`);
       }
     }
 
@@ -506,22 +527,39 @@ async function runE2ETest() {
   console.log(`  API Base URL: ${CONFIG.apiBaseUrl}`);
   console.log(`  Session ID: ${CONFIG.testSessionId || '(not set)'}`);
   console.log(`  Director ID: ${CONFIG.directorId}`);
-  console.log(`  Bearer Token: ${CONFIG.bearerToken ? '(set)' : '(not set)'}`);
+  // Resolve bearer token: prefer TEST_BEARER_TOKEN env var, then try az CLI
+  if (!CONFIG.bearerToken) {
+    process.stdout.write('  Bearer Token: (not set) — attempting acquisition via Azure CLI... ');
+    const azToken = getAzBearerToken();
+    if (azToken) {
+      CONFIG.bearerToken = azToken;
+      console.log('\x1b[32m(acquired via az CLI)\x1b[0m');
+    } else {
+      console.log('\x1b[31m(failed)\x1b[0m');
+    }
+  } else {
+    console.log(`  Bearer Token: (set via TEST_BEARER_TOKEN)`);
+  }
   console.log(`  Planner Wait: ${CONFIG.plannerWaitTime}ms`);
   console.log(`  Max Poll Attempts: ${CONFIG.maxPollAttempts}`);
 
   if (!CONFIG.bearerToken || !CONFIG.testSessionId) {
     console.log('\n\x1b[31m✗ Missing required configuration\x1b[0m');
-    console.log('\nTo run this test, set the following environment variables:');
-    console.log('  TEST_BEARER_TOKEN=<your-bearer-token>');
-    console.log('  TEST_SESSION_ID=<active-session-id>');
+    if (!CONFIG.testSessionId) {
+      console.log('\n  TEST_SESSION_ID is required — set it to an ACTIVE Race Control session ID:');
+      console.log('    export TEST_SESSION_ID=<active-session-id>');
+    }
+    if (!CONFIG.bearerToken) {
+      console.log('\n  No bearer token available. Options:');
+      console.log('    1. Log in with the Azure CLI:  az login');
+      console.log('       (token will be auto-acquired on next run)');
+      console.log('    2. Set TEST_BEARER_TOKEN manually:');
+      console.log('       export TEST_BEARER_TOKEN=<your-bearer-token>');
+    }
     console.log('\nOptional configuration:');
     console.log('  VITE_API_BASE_URL=https://simracecenter.com (default)');
     console.log('  TEST_PLANNER_WAIT_MS=10000 (default)');
     console.log('  TEST_MAX_POLL_ATTEMPTS=10 (default)');
-    console.log('\nHow to obtain a bearer token:');
-    console.log('  1. Use MSAL authentication in a real Director instance');
-    console.log('  2. Or use the Azure CLI: az account get-access-token --resource <resource-id>');
     process.exit(1);
   }
 
