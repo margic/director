@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:director-loop": "ts-node --transpile-only -P tsconfig.test.json -r tsconfig-paths/register scripts/test-director-loop.ts"
+    "test:director-loop": "ts-node --transpile-only -P tsconfig.scripts.json scripts/test-director-loop.ts"
   },
   "build": {
     "appId": "com.simracecenter.director",
@@ -104,6 +104,7 @@
     "postcss": "^8.5.6",
     "sharp": "^0.34.5",
     "tailwindcss": "^4.1.18",
+    "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",

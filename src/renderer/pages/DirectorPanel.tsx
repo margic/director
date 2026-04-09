@@ -12,13 +12,9 @@ import {
   Square,
   Radio,
   Clock,
-  Wifi,
-  WifiOff,
   AlertTriangle,
-  CheckCircle2,
   Loader2,
   Zap,
-  RotateCw,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -48,8 +44,6 @@ export const DirectorPanel: React.FC = () => {
     sessionId: null,
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [pollCount, setPollCount] = useState(0);
-  const [lastPollTime, setLastPollTime] = useState<Date | null>(null);
   const [sequencesExecuted, setSequencesExecuted] = useState(0);
   const logEndRef = useRef<HTMLDivElement>(null);
   const prevStatusRef = useRef<DirectorState | null>(null);
@@ -80,8 +74,6 @@ export const DirectorPanel: React.FC = () => {
       try {
         const status = await window.electronAPI.directorStatus();
         setDirectorStatus(status);
-        setLastPollTime(new Date());
-        setPollCount((c) => c + 1);
 
         // Detect state transitions and log them
         const prev = prevStatusRef.current;
@@ -215,7 +207,7 @@ export const DirectorPanel: React.FC = () => {
       </div>
 
       {/* Status Cards Row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Session Card */}
         <Card className="bg-card border-border">
           <CardHeader className="pb-2">
@@ -231,27 +223,6 @@ export const DirectorPanel: React.FC = () => {
               </span>
             ) : (
               <span className="text-sm text-muted-foreground italic">No session</span>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Connection Card */}
-        <Card className="bg-card border-border">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
-              {directorStatus.isRunning ? <Wifi className="w-3.5 h-3.5 text-green-500" /> : <WifiOff className="w-3.5 h-3.5" />}
-              Polling
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <span className="text-2xl font-jetbrains font-bold text-foreground">
-              {pollCount}
-            </span>
-            <span className="text-xs text-muted-foreground ml-2">cycles</span>
-            {lastPollTime && (
-              <div className="text-xs text-muted-foreground mt-1">
-                Last: {lastPollTime.toLocaleTimeString()}
-              </div>
             )}
           </CardContent>
         </Card>
