@@ -169,7 +169,7 @@ export const SequenceLibrary: React.FC<SequenceLibraryProps> = ({
             {search
               ? 'No sequences match your search'
               : filterCategory === 'cloud'
-                ? 'No cloud sequences available for your center'
+                ? 'Check in to a session to load cloud templates'
                 : 'No sequences available'}
           </div>
         )}

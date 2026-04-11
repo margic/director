@@ -20,10 +20,16 @@ import { SequenceDetail } from '../components/sequences/SequenceDetail';
 import { SequenceBuilder } from '../components/sequences/SequenceBuilder';
 import { SequenceExecutionHistory } from '../components/sequences/SequenceExecutionHistory';
 import { ExecutionProgressBar } from '../components/sequences/ExecutionProgressBar';
-import { Zap, History, ChevronDown, ChevronRight } from 'lucide-react';
+import { SequenceLiveView } from '../components/sequences/SequenceLiveView';
+import { Zap, History, ChevronDown, ChevronRight, Pencil, Radio } from 'lucide-react';
 import { useSetPageHeader } from '../contexts/PageHeaderContext';
 
-export const SequencesPanel: React.FC = () => {
+interface SequencesPanelProps {
+  initialTab?: 'editor' | 'live';
+}
+
+export const SequencesPanel: React.FC<SequencesPanelProps> = ({ initialTab = 'editor' }) => {
+  const [activeTab, setActiveTab] = useState<'editor' | 'live'>(initialTab);
   // Data state
   const [sequences, setSequences] = useState<PortableSequence[]>([]);
   const [intents, setIntents] = useState<IntentCatalogEntry[]>([]);
@@ -214,6 +220,41 @@ export const SequencesPanel: React.FC = () => {
 
   return (
     <div className="w-full h-full flex flex-col">
+      {/* Tab Bar */}
+      <div className="flex items-center gap-1 mb-4">
+        <button
+          onClick={() => setActiveTab('editor')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-rajdhani uppercase tracking-wider font-bold transition-colors ${
+            activeTab === 'editor'
+              ? 'bg-white/10 text-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+          }`}
+        >
+          <Pencil className="w-3.5 h-3.5" />
+          Editor
+        </button>
+        <button
+          onClick={() => setActiveTab('live')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-rajdhani uppercase tracking-wider font-bold transition-colors ${
+            activeTab === 'live'
+              ? 'bg-white/10 text-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-white/5'
+          }`}
+        >
+          <Radio className="w-3.5 h-3.5" />
+          Live
+          {isExecuting && (
+            <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+          )}
+        </button>
+      </div>
+
+      {activeTab === 'live' ? (
+        <div className="flex-1 min-h-0">
+          <SequenceLiveView />
+        </div>
+      ) : (
+        <>
       {/* Execution Progress Bar */}
       <ExecutionProgressBar
         progress={currentProgress}
@@ -299,6 +340,8 @@ export const SequencesPanel: React.FC = () => {
           )}
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 };

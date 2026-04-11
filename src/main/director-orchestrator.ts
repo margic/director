@@ -13,17 +13,11 @@
 import { EventEmitter } from 'events';
 import { AuthService } from './auth-service';
 import {
-  RaceSession,
   DirectorStatus,
   PortableSequence,
   CheckinStatus,
-  SessionCheckinRequest,
-  SessionCheckinResponse,
-  SessionCheckinConflict,
   SessionOperationalConfig,
-  DirectorCapabilities,
 } from './director-types';
-import { randomUUID } from 'crypto';
 import { SequenceScheduler } from './sequence-scheduler';
 import { CloudPoller } from './cloud-poller';
 import { normalizeApiResponse } from './normalizer';
@@ -32,8 +26,8 @@ import { telemetryService } from './telemetry-service';
 import { ExtensionHostService } from './extension-host/extension-host';
 import { ExtensionEventBus } from './extension-host/event-bus';
 import { configService } from './config-service';
-import { app } from 'electron';
 import { SessionManager } from './session-manager';
+import { SequenceLibraryService } from './sequence-library-service';
 
 export type DirectorMode = 'stopped' | 'manual' | 'auto';
 
@@ -83,19 +77,13 @@ export class DirectorOrchestrator extends EventEmitter {
   private cloudPoller: CloudPoller | null = null;
   private currentRaceSessionId: string | null = null;
 
-  // Session Check-In state
-  private checkinId: string | null = null;
-  private checkinStatus: CheckinStatus = 'unchecked';
-  private sessionConfig: SessionOperationalConfig | null = null;
-  private checkinWarnings: string[] = [];
-  private checkinTtlSeconds: number = 120;
-
   constructor(
     private authService: AuthService,
     private extensionHost: ExtensionHostService,
     private sessionManager: SessionManager,
     scheduler: SequenceScheduler,
-    private eventBus?: ExtensionEventBus
+    private eventBus?: ExtensionEventBus,
+    private sequenceLibrary?: SequenceLibraryService
   ) {
     super();
     this.scheduler = scheduler;
@@ -157,8 +145,8 @@ export class DirectorOrchestrator extends EventEmitter {
   private async handleSessionStateChange(state: any): Promise<void> {
     const { state: sessionState, selectedSession } = state;
 
-    if (sessionState === 'selected' && selectedSession) {
-      // Session selected
+    if ((sessionState === 'selected' || sessionState === 'checked-in') && selectedSession) {
+      // Session selected or checked in
       const config = this.getConfig();
       this.currentRaceSessionId = selectedSession.raceSessionId;
 
@@ -167,6 +155,17 @@ export class DirectorOrchestrator extends EventEmitter {
         const targetMode = config.autoStartOnSessionSelect ? 'auto' : 'manual';
         console.log(`[DirectorOrchestrator] Session selected. Transitioning: stopped → ${targetMode}`);
         await this.setMode(targetMode);
+      } else {
+        // Session state changed while already in manual/auto — update CloudPoller if needed
+        if (sessionState === 'checked-in' && this.cloudPoller) {
+          const checkinId = this.sessionManager.getCheckinId();
+          const ttl = this.sessionManager.getCheckinTtlSeconds();
+          if (checkinId) {
+            this.cloudPoller.updateCheckin(checkinId, ttl);
+          }
+        }
+        // Emit state change so renderer sees updated checkin status
+        this.emitStateChanged();
       }
     } else if (sessionState === 'none' || sessionState === 'discovered') {
       // Session cleared
@@ -211,12 +210,9 @@ export class DirectorOrchestrator extends EventEmitter {
     this.mode = newMode;
     this.lastError = undefined;
 
-    // Set or clear session ID based on mode
-    if (newMode !== 'stopped' && selectedSession) {
-      this.currentRaceSessionId = selectedSession.raceSessionId;
-    } else if (newMode === 'stopped') {
-      this.currentRaceSessionId = null;
-    }
+    // Always reflect SessionManager's selected session
+    const currentSelected = this.sessionManager.getSelectedSession();
+    this.currentRaceSessionId = currentSelected?.raceSessionId ?? null;
 
     // Start CloudPoller if entering auto mode
     if (newMode === 'auto') {
@@ -245,16 +241,22 @@ export class DirectorOrchestrator extends EventEmitter {
       return;
     }
 
+    // Use server-provided timing config if available from session check-in
+    const sessionConfig = this.sessionManager.getSessionConfig();
+    const idleRetryMs = sessionConfig?.timingConfig?.idleRetryIntervalMs ?? 5000;
+    const checkinId = this.sessionManager.getCheckinId();
+    const checkinTtlSeconds = this.sessionManager.getCheckinTtlSeconds();
+
     this.cloudPoller = new CloudPoller(
       this.authService,
       this.currentRaceSessionId,
       {
-        idleRetryMs: 5000,
+        idleRetryMs,
         getActiveIntents: () => this.getActiveIntents(),
         onSequence: (sequence) => this.handleSequence(sequence),
         onSessionEnded: () => this.handleSessionEnded(),
-        checkinId: this.checkinId || undefined,
-        checkinTtlSeconds: this.checkinTtlSeconds,
+        checkinId: checkinId || undefined,
+        checkinTtlSeconds,
       }
     );
 
@@ -265,18 +267,21 @@ export class DirectorOrchestrator extends EventEmitter {
    * Get current orchestrator state.
    */
   getState(): DirectorOrchestratorState {
+    // sessionId always reflects SessionManager's selected session
+    const selected = this.sessionManager.getSelectedSession();
+    const smState = this.sessionManager.getState();
     return {
       mode: this.mode,
       status: this.status,
-      sessionId: this.currentRaceSessionId,
+      sessionId: selected?.raceSessionId ?? this.currentRaceSessionId,
       currentSequenceId: this.currentSequenceId,
       totalCommands: this.totalCommands,
       processedCommands: this.processedCommands,
       lastError: this.lastError,
-      checkinStatus: this.checkinStatus,
-      checkinId: this.checkinId,
-      sessionConfig: this.sessionConfig,
-      checkinWarnings: this.checkinWarnings,
+      checkinStatus: smState.checkinStatus,
+      checkinId: smState.checkinId,
+      sessionConfig: smState.sessionConfig,
+      checkinWarnings: smState.checkinWarnings,
     };
   }
 
@@ -321,212 +326,39 @@ export class DirectorOrchestrator extends EventEmitter {
    */
   private async handleSessionEnded(): Promise<void> {
     console.log('[DirectorOrchestrator] Session ended (410 Gone). Wrapping and stopping.');
-    await this.wrapSession('session-ended').catch(() => {});
-    this.sessionManager.clearSession();
+    await this.sessionManager.wrapSession('session-ended').catch(() => {});
+    await this.sessionManager.clearSession();
     await this.setMode('stopped');
   }
 
   /**
-   * Checks into a session with Race Control, exchanging capabilities.
-   * Transitions: unchecked → checking-in → standby (or error).
+   * Delegates check-in to SessionManager.
+   * @deprecated Use sessionManager.checkinSession() directly via session:checkin IPC.
    */
   async checkinSession(raceSessionId: string, options?: { forceCheckin?: boolean }): Promise<DirectorOrchestratorState> {
-    if (this.checkinStatus === 'checking-in') {
-      console.warn('[DirectorOrchestrator] Check-in already in progress');
-      return this.getState();
-    }
-
-    console.log(`[DirectorOrchestrator] Checking into session: ${raceSessionId}`);
-    this.checkinStatus = 'checking-in';
-    this.lastError = undefined;
-
-    const token = await this.authService.getAccessToken();
-    if (!token) {
-      this.checkinStatus = 'error';
-      this.lastError = 'No auth token available';
-      return this.getState();
-    }
-
-    const capabilities = this.buildCapabilities();
-    const directorId = configService.getOrCreateDirectorId();
-
-    const body: SessionCheckinRequest = {
-      directorId,
-      version: app.getVersion(),
-      capabilities,
-    };
-
-    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.checkin(raceSessionId)}`;
-
-    try {
-      const startTime = Date.now();
-      const headers: Record<string, string> = {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      };
-      if (options?.forceCheckin) {
-        headers['X-Force-Checkin'] = 'true';
-      }
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      });
-
-      const duration = Date.now() - startTime;
-      telemetryService.trackDependency(
-        'RaceControl API', url, duration, response.ok, response.status, 'HTTP',
-        { sessionId: raceSessionId, operation: 'checkin' }
-      );
-
-      if (response.ok) {
-        const data: SessionCheckinResponse = await response.json();
-        this.checkinId = data.checkinId;
-        this.checkinTtlSeconds = data.checkinTtlSeconds;
-        this.sessionConfig = data.sessionConfig;
-        this.checkinWarnings = data.warnings ?? [];
-        this.checkinStatus = 'standby';
-        this.currentRaceSessionId = raceSessionId;
-
-        // Update CloudPoller with check-in credentials
-        if (this.cloudPoller) {
-          this.cloudPoller.updateCheckin(data.checkinId, data.checkinTtlSeconds);
-        }
-
-        console.log(`[DirectorOrchestrator] Checked in: checkinId=${data.checkinId}, TTL=${data.checkinTtlSeconds}s`);
-        if (this.checkinWarnings.length > 0) {
-          console.warn('[DirectorOrchestrator] Check-in warnings:', this.checkinWarnings);
-        }
-
-        telemetryService.trackEvent('Director.CheckedIn', {
-          sessionId: raceSessionId,
-          checkinId: data.checkinId,
-          warningCount: String(this.checkinWarnings.length),
-        });
-
-        return this.getState();
-      }
-
-      if (response.status === 409) {
-        const conflict: SessionCheckinConflict = await response.json();
-        this.checkinStatus = 'error';
-        this.lastError = `Session in use by ${conflict.existingCheckin.displayName ?? conflict.existingCheckin.directorId}`;
-        console.warn(`[DirectorOrchestrator] Check-in conflict: ${this.lastError}`);
-        return this.getState();
-      }
-
-      // Other errors
-      this.checkinStatus = 'error';
-      this.lastError = `Check-in failed: ${response.status} ${response.statusText}`;
-      console.error(`[DirectorOrchestrator] ${this.lastError}`);
-      return this.getState();
-
-    } catch (error) {
-      this.checkinStatus = 'error';
-      this.lastError = `Check-in error: ${(error as Error).message}`;
-      console.error(`[DirectorOrchestrator] ${this.lastError}`);
-      telemetryService.trackException(error as Error, { operation: 'checkinSession', sessionId: raceSessionId });
-      return this.getState();
-    }
-  }
-
-  /**
-   * Wraps (releases) the current session check-in.
-   * Transitions: any → wrapping → unchecked.
-   */
-  async wrapSession(reason?: string): Promise<DirectorOrchestratorState> {
-    if (!this.checkinId || !this.currentRaceSessionId) {
-      console.log('[DirectorOrchestrator] No active check-in to wrap');
-      this.resetCheckinState();
-      return this.getState();
-    }
-
-    console.log(`[DirectorOrchestrator] Wrapping session: ${this.currentRaceSessionId}`);
-    this.checkinStatus = 'wrapping';
-
-    // Stop the loop if in auto mode
-    if (this.mode === 'auto') {
-      await this.setMode('manual');
-    }
-
-    const token = await this.authService.getAccessToken();
-    if (!token) {
-      console.warn('[DirectorOrchestrator] No auth token for wrap — clearing state locally');
-      this.resetCheckinState();
-      return this.getState();
-    }
-
-    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.wrap(this.currentRaceSessionId)}`;
-
-    try {
-      const startTime = Date.now();
-      const response = await fetch(url, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-Checkin-Id': this.checkinId,
-        },
-      });
-
-      const duration = Date.now() - startTime;
-      telemetryService.trackDependency(
-        'RaceControl API', url, duration, response.ok, response.status, 'HTTP',
-        { sessionId: this.currentRaceSessionId, operation: 'wrap' }
-      );
-
-      if (response.ok || response.status === 404) {
-        // 404 means already expired / not found — treat as success
-        console.log('[DirectorOrchestrator] Session wrapped successfully');
-        telemetryService.trackEvent('Director.SessionWrapped', {
-          sessionId: this.currentRaceSessionId!,
-          reason: reason ?? 'manual',
-        });
-      } else {
-        console.warn(`[DirectorOrchestrator] Wrap returned ${response.status} — clearing state anyway`);
-      }
-    } catch (error) {
-      console.error('[DirectorOrchestrator] Wrap error (clearing state anyway):', error);
-      telemetryService.trackException(error as Error, { operation: 'wrapSession' });
-    }
-
-    this.resetCheckinState();
+    await this.sessionManager.checkinSession(options);
     return this.getState();
   }
 
   /**
-   * Builds the capabilities payload from the extension host.
+   * Delegates refresh to SessionManager.
    */
-  private buildCapabilities(): DirectorCapabilities {
-    const catalog = this.extensionHost.getCapabilityCatalog();
-    const allIntents = catalog.getAllIntents();
-    const connections = this.extensionHost.getConnectionHealth();
-
-    return {
-      intents: allIntents.map(entry => ({
-        intent: entry.intent.intent,
-        extensionId: entry.extensionId,
-        active: entry.enabled,
-        schema: entry.intent.schema as Record<string, unknown> | undefined,
-      })),
-      connections,
-    };
+  async refreshCheckin(): Promise<DirectorOrchestratorState> {
+    await this.sessionManager.refreshCheckin();
+    return this.getState();
   }
 
   /**
-   * Resets all check-in state to initial values.
+   * Delegates wrap to SessionManager.
+   * @deprecated Use sessionManager.wrapSession() directly via session:wrap IPC.
    */
-  private resetCheckinState(): void {
-    this.checkinId = null;
-    this.checkinStatus = 'unchecked';
-    this.sessionConfig = null;
-    this.checkinWarnings = [];
-    this.checkinTtlSeconds = 120;
-
-    // Clear CloudPoller's check-in credentials
-    if (this.cloudPoller) {
-      this.cloudPoller.clearCheckin();
+  async wrapSession(reason?: string): Promise<DirectorOrchestratorState> {
+    // Stop the loop if in auto mode
+    if (this.mode === 'auto') {
+      await this.setMode('manual');
     }
+    await this.sessionManager.wrapSession(reason);
+    return this.getState();
   }
 
   /**
@@ -547,14 +379,12 @@ export class DirectorOrchestrator extends EventEmitter {
       this.eventBus!.on(eventName, async (data: { extensionId: string; payload: any }) => {
         console.log(`[DirectorOrchestrator] Connection event: ${eventName} from ${data.extensionId}`);
 
-        // Only re-check-in if we're currently checked in
-        if (this.checkinId && this.currentRaceSessionId && this.checkinStatus === 'standby') {
-          console.log('[DirectorOrchestrator] Re-checking in due to connection state change');
-
-          // Re-check-in to update capabilities at Race Control
-          // This allows the Planner to re-generate templates based on new capabilities
-          await this.checkinSession(this.currentRaceSessionId).catch(error => {
-            console.error('[DirectorOrchestrator] Re-check-in failed:', error);
+        // Only refresh if we're currently checked in (delegate to SessionManager)
+        const smState = this.sessionManager.getState();
+        if (smState.checkinId && smState.checkinStatus === 'standby') {
+          console.log('[DirectorOrchestrator] Refreshing check-in due to connection state change');
+          await this.sessionManager.refreshCheckin().catch(error => {
+            console.error('[DirectorOrchestrator] Capability refresh failed:', error);
           });
         }
       });

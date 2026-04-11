@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     discover: (centerId?: string) => ipcRenderer.invoke('session:discover', centerId),
     select: (raceSessionId: string) => ipcRenderer.invoke('session:select', raceSessionId),
     clear: () => ipcRenderer.invoke('session:clear'),
+    checkin: (options?: { forceCheckin?: boolean }) => ipcRenderer.invoke('session:checkin', options),
+    wrap: (reason?: string) => ipcRenderer.invoke('session:wrap', reason),
     onStateChanged: (callback: (state: any) => void) => {
       const subscription = (_: any, state: any) => callback(state);
       ipcRenderer.on('session:stateChanged', subscription);
@@ -93,6 +95,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       cancelQueued: (executionId: string) => ipcRenderer.invoke('sequence:cancel-queued', executionId),
       queue: () => ipcRenderer.invoke('sequence:queue'),
       history: () => ipcRenderer.invoke('sequence:history'),
+      getExecuting: (sequenceId: string) => ipcRenderer.invoke('sequence:get-executing', sequenceId),
       onProgress: (callback: (progress: any) => void) => {
         const subscription = (_: any, progress: any) => callback(progress);
         ipcRenderer.on('sequence:progress', subscription);

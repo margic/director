@@ -127,7 +127,51 @@ app.on('ready', () => {
 
   // Initialize Director Orchestrator — no longer depends on ObsService directly.
   // OBS scene switching is now handled by the obs extension via intents.
-  directorOrchestrator = new DirectorOrchestrator(authService, extensionHost, sessionManager, sequenceScheduler, eventBus);
+  directorOrchestrator = new DirectorOrchestrator(authService, extensionHost, sessionManager, sequenceScheduler, eventBus, sequenceLibrary);
+
+  // Wire SessionManager with capabilities builder and local sequences getter.
+  // These depend on extensionHost and sequenceLibrary being initialized.
+  sessionManager.setCapabilitiesBuilder(() => {
+    const catalog = extensionHost.getCapabilityCatalog();
+    const allIntents = catalog.getAllIntents();
+    const connections = extensionHost.getConnectionHealth();
+    return {
+      intents: allIntents.map(entry => ({
+        intent: entry.intent.intent,
+        extensionId: entry.extensionId,
+        active: entry.enabled,
+        schema: entry.intent.schema as Record<string, unknown> | undefined,
+      })),
+      connections,
+    };
+  });
+  sessionManager.setLocalSequencesGetter(async () => {
+    const custom = await sequenceLibrary.listSequences({ category: 'custom' });
+    const builtin = await sequenceLibrary.listSequences({ category: 'builtin' });
+    return [...builtin, ...custom].slice(0, 50);
+  });
+
+  // Wire session lifecycle to sequence library — load cloud templates when session is available
+  // Templates are generated server-side after check-in, but we attempt to load them early
+  // in case a previous check-in already triggered the Planner.
+  sessionManager.on('stateChanged', (state: any) => {
+    if (state.state === 'selected' && state.selectedSession) {
+      sequenceLibrary.setSession(state.selectedSession.raceSessionId).then((result) => {
+        console.log(`[Main] Cloud templates for session ${state.selectedSession.raceSessionId}: ${result}`);
+      }).catch((err) => {
+        console.warn('[Main] Failed to load cloud templates:', err);
+      });
+    } else if (state.state === 'checked-in' && state.selectedSession) {
+      // Refresh templates after check-in (Planner runs asynchronously after checkin)
+      sequenceLibrary.setSession(state.selectedSession.raceSessionId).then((result) => {
+        console.log(`[Main] Cloud templates after check-in: ${result}`);
+      }).catch((err) => {
+        console.warn('[Main] Failed to refresh cloud templates after check-in:', err);
+      });
+    } else if (state.state === 'none' || state.state === 'discovered') {
+      sequenceLibrary.clearSession();
+    }
+  });
 
   // Initialize Event Mapper
   eventMapper = new EventMapper(eventBus, sequenceScheduler, authService);
@@ -506,10 +550,30 @@ app.on('ready', () => {
   ipcMain.handle('session:clear', async () => {
     try {
       telemetryService.trackEvent('Session.ClearRequested');
-      sessionManager.clearSession();
+      await sessionManager.clearSession();
       return sessionManager.getState();
     } catch (error) {
       telemetryService.trackException(error as Error, { operation: 'session.clear' });
+      throw error;
+    }
+  });
+
+  ipcMain.handle('session:checkin', async (_, options?: { forceCheckin?: boolean }) => {
+    try {
+      telemetryService.trackEvent('Session.CheckinRequested');
+      return await sessionManager.checkinSession(options);
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'session.checkin' });
+      throw error;
+    }
+  });
+
+  ipcMain.handle('session:wrap', async (_, reason?: string) => {
+    try {
+      telemetryService.trackEvent('Session.WrapRequested');
+      return await sessionManager.wrapSession(reason);
+    } catch (error) {
+      telemetryService.trackException(error as Error, { operation: 'session.wrap' });
       throw error;
     }
   });
@@ -612,6 +676,10 @@ app.on('ready', () => {
     return sequenceScheduler.getHistory();
   });
 
+  ipcMain.handle('sequence:get-executing', async (_, sequenceId: string) => {
+    return sequenceScheduler.getExecutingSequence(sequenceId);
+  });
+
   // Overlay IPC
   ipcMain.handle('overlay:getUrl', () => overlayServer.getUrl());
   ipcMain.handle('overlay:getOverlays', () => overlayBus.getOverlays());
@@ -644,8 +712,8 @@ app.on('window-all-closed', async () => {
 
 app.on('will-quit', async () => {
   // Auto-wrap current session on exit
-  if (directorOrchestrator) {
-    await directorOrchestrator.wrapSession('app-quit').catch(() => {});
+  if (sessionManager) {
+    await sessionManager.wrapSession('app-quit').catch(() => {});
   }
   if (overlayServer) {
     await overlayServer.stop();

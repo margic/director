@@ -15,6 +15,8 @@ import {
   AlertTriangle,
   Loader2,
   Zap,
+  ShieldCheck,
+  ShieldAlert,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,7 +30,11 @@ interface LogEntry {
   message: string;
 }
 
-export const DirectorPanel: React.FC = () => {
+interface DirectorPanelProps {
+  onNavigate?: (view: string) => void;
+}
+
+export const DirectorPanel: React.FC<DirectorPanelProps> = ({ onNavigate }) => {
   const [directorStatus, setDirectorStatus] = useState<DirectorOrchestratorState>({
     mode: 'stopped',
     status: 'IDLE',
@@ -93,6 +99,14 @@ export const DirectorPanel: React.FC = () => {
 
           if (prev.sessionId !== status.sessionId && status.sessionId) {
             addLog('info', `Joined session: ${status.sessionId}`);
+          }
+
+          if (prev.checkinStatus !== status.checkinStatus) {
+            if (status.checkinStatus === 'standby') {
+              addLog('success', 'Checked in to session');
+            } else if (status.checkinStatus === 'unchecked' && prev.checkinStatus !== 'unchecked') {
+              addLog('info', 'Checked out of session');
+            }
           }
 
           if (status.lastError && status.lastError !== prev.lastError) {
@@ -214,9 +228,31 @@ export const DirectorPanel: React.FC = () => {
           </CardHeader>
           <CardContent>
             {directorStatus.sessionId ? (
-              <span className="text-sm font-jetbrains text-foreground break-all">
-                {directorStatus.sessionId}
-              </span>
+              <div className="space-y-2">
+                <span className="text-sm font-jetbrains text-foreground break-all">
+                  {directorStatus.sessionId}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {directorStatus.checkinStatus === 'standby' || directorStatus.checkinStatus === 'directing' ? (
+                    <ShieldCheck className="w-3.5 h-3.5 text-green-500" />
+                  ) : directorStatus.checkinStatus === 'error' ? (
+                    <ShieldAlert className="w-3.5 h-3.5 text-destructive" />
+                  ) : null}
+                  <span className={`text-xs uppercase font-rajdhani tracking-wide ${
+                    directorStatus.checkinStatus === 'standby' || directorStatus.checkinStatus === 'directing'
+                      ? 'text-green-500'
+                      : directorStatus.checkinStatus === 'error'
+                        ? 'text-destructive'
+                        : 'text-muted-foreground'
+                  }`}>
+                    {directorStatus.checkinStatus === 'unchecked' ? 'Not checked in'
+                      : directorStatus.checkinStatus === 'standby' ? 'Checked in'
+                      : directorStatus.checkinStatus === 'directing' ? 'Directing'
+                      : directorStatus.checkinStatus === 'error' ? 'Check-in error'
+                      : directorStatus.checkinStatus}
+                  </span>
+                </div>
+              </div>
             ) : (
               <span className="text-sm text-muted-foreground italic">No session</span>
             )}
@@ -224,7 +260,10 @@ export const DirectorPanel: React.FC = () => {
         </Card>
 
         {/* Current Sequence Card */}
-        <Card className="bg-card border-border">
+        <Card
+          className={`bg-card border-border ${onNavigate ? 'cursor-pointer hover:border-primary/50 transition-colors' : ''}`}
+          onClick={() => onNavigate?.('sequences-live')}
+        >
           <CardHeader className="pb-2">
             <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
               <Zap className="w-3.5 h-3.5" />

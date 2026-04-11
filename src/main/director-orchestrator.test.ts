@@ -57,10 +57,25 @@ describe('DirectorOrchestrator', () => {
     mockSessionManager = Object.assign(new EventEmitter(), {
       getSelectedSession: vi.fn(() => null),
       selectSession: vi.fn(),
-      clearSession: vi.fn(),
-      getState: vi.fn(() => ({ state: 'none', sessions: [], selectedSession: null })),
+      clearSession: vi.fn().mockResolvedValue(undefined),
+      getState: vi.fn(() => ({
+        state: 'none',
+        sessions: [],
+        selectedSession: null,
+        checkinStatus: 'unchecked',
+        checkinId: null,
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
+      })),
       getSessions: vi.fn(() => []),
       discover: vi.fn(),
+      checkinSession: vi.fn().mockResolvedValue({}),
+      wrapSession: vi.fn().mockResolvedValue({}),
+      refreshCheckin: vi.fn().mockResolvedValue({}),
+      getCheckinId: vi.fn(() => null),
+      getCheckinTtlSeconds: vi.fn(() => 120),
+      getSessionConfig: vi.fn(() => null),
     });
 
     mockScheduler = Object.assign(new EventEmitter(), {
@@ -232,23 +247,20 @@ describe('DirectorOrchestrator', () => {
   });
 
   describe('Check-in and Wrap', () => {
-    it('should track check-in status', () => {
+    it('should track check-in status from SessionManager', () => {
       const state = orchestrator.getState();
       expect(state.checkinStatus).toBe('unchecked');
       expect(state.checkinId).toBeNull();
     });
 
-    it('should handle check-in error when no auth token', async () => {
-      mockAuthService.getAccessToken.mockResolvedValue(null);
-
+    it('should delegate check-in to SessionManager', async () => {
       const state = await orchestrator.checkinSession('session-1');
-      expect(state.checkinStatus).toBe('error');
-      expect(state.lastError).toBe('No auth token available');
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
-    it('should handle wrap with no active check-in', async () => {
+    it('should delegate wrap to SessionManager', async () => {
       const state = await orchestrator.wrapSession();
-      expect(state.checkinStatus).toBe('unchecked');
+      expect(mockSessionManager.wrapSession).toHaveBeenCalled();
     });
   });
 
@@ -331,30 +343,18 @@ describe('DirectorOrchestrator', () => {
   });
 
   describe('Re-check-in on Extension Events', () => {
-    beforeEach(() => {
-      // Mock fetch for check-in calls
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          checkinId: 'checkin-123',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-1',
-            name: 'Test Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-          warnings: [],
-        }),
-      }) as any;
-    });
-
-    it('should re-check-in when extension connects after initial check-in', async () => {
-      // First check in
-      await orchestrator.checkinSession('session-1');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+    it('should refresh check-in via SessionManager when extension connects after initial check-in', async () => {
+      // Set SessionManager to appear checked-in
+      mockSessionManager.getState.mockReturnValue({
+        state: 'checked-in',
+        sessions: [],
+        selectedSession: { raceSessionId: 'session-1', name: 'Test Session' },
+        checkinStatus: 'standby',
+        checkinId: 'checkin-123',
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
+      });
 
       // Simulate OBS connection event
       mockEventBus.emit('obs.connectionStateChanged', {
@@ -362,14 +362,16 @@ describe('DirectorOrchestrator', () => {
         payload: { connected: true },
       });
 
-      // Wait for async re-check-in
+      // Wait for async refresh
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      // Should have called fetch again for re-check-in
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      // Should have called SessionManager.refreshCheckin
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
     });
 
-    it('should not re-check-in if not currently checked in', async () => {
+    it('should not refresh check-in if not currently checked in', async () => {
+      // SessionManager is in default unchecked state
+
       // Simulate connection event without being checked in
       mockEventBus.emit('obs.connectionStateChanged', {
         extensionId: 'director-obs',
@@ -379,21 +381,25 @@ describe('DirectorOrchestrator', () => {
       // Wait for potential async operations
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      // Should not have called fetch
-      expect(global.fetch).not.toHaveBeenCalled();
+      // Should not have called refreshCheckin
+      expect(mockSessionManager.refreshCheckin).not.toHaveBeenCalled();
     });
 
-    it('should handle re-check-in failure gracefully', async () => {
-      // First check in successfully
-      await orchestrator.checkinSession('session-1');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+    it('should handle refresh failure gracefully', async () => {
+      // Set SessionManager to appear checked-in
+      mockSessionManager.getState.mockReturnValue({
+        state: 'checked-in',
+        sessions: [],
+        selectedSession: { raceSessionId: 'session-1', name: 'Test Session' },
+        checkinStatus: 'standby',
+        checkinId: 'checkin-123',
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
+      });
 
-      // Mock fetch to fail on re-check-in
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        statusText: 'Internal Server Error',
-      }) as any;
+      // Mock refreshCheckin to fail
+      mockSessionManager.refreshCheckin.mockRejectedValue(new Error('Network error'));
 
       // Simulate connection event
       mockEventBus.emit('iracing.connectionStateChanged', {
@@ -401,11 +407,10 @@ describe('DirectorOrchestrator', () => {
         payload: { connected: true },
       });
 
-      // Wait for async re-check-in
+      // Wait for async operations — should not throw
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      // Should have attempted re-check-in without throwing
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
     });
   });
 });
