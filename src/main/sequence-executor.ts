@@ -1,11 +1,14 @@
 import {
   SequenceStep,
   PortableSequence,
-  DirectorSequence,
-  normalizeApiSequence,
-  LogLevel,
 } from './director-types';
 import { ExtensionHostService } from './extension-host/extension-host';
+import { OverlayBus } from './overlay/overlay-bus';
+
+// Forward-declared to avoid circular dependency — set via setSequenceLibrary()
+interface SequenceLibraryLike {
+  getSequence(id: string): Promise<PortableSequence | null>;
+}
 
 /**
  * Sequence Executor — Intent-Driven, Headless Runtime
@@ -14,16 +17,27 @@ import { ExtensionHostService } from './extension-host/extension-host';
  * AI, API, manual JSON). It only operates on the PortableSequence format.
  *
  * Architecture:
- * - Built-in handlers for `system.*` intents (wait, log)
+ * - Built-in handlers for `system.*` intents (wait, log, executeSequence)
+ * - Built-in handlers for `overlay.*` intents (show, hide)
  * - All other intents dispatched to ExtensionHostService
  * - Soft Failure: missing handlers result in a skip + warning, not an abort
  *
  * See: documents/feature_sequence_executor.md
  */
 export class SequenceExecutor {
+  private sequenceLibrary: SequenceLibraryLike | null = null;
+
   constructor(
-    private extensionHost: ExtensionHostService
+    private extensionHost: ExtensionHostService,
+    private overlayBus?: OverlayBus,
   ) {}
+
+  /**
+   * Set the sequence library reference (avoids circular constructor dependency).
+   */
+  setSequenceLibrary(library: SequenceLibraryLike): void {
+    this.sequenceLibrary = library;
+  }
 
   /**
    * Execute a PortableSequence (the canonical format).
@@ -59,18 +73,6 @@ export class SequenceExecutor {
   }
 
   /**
-   * Execute a legacy DirectorSequence by normalizing it first.
-   * Provides backward compatibility with the Race Control API format.
-   */
-  async executeLegacy(
-    legacy: DirectorSequence,
-    onProgress?: (completed: number, total: number) => void
-  ): Promise<void> {
-    const portable = normalizeApiSequence(legacy);
-    return this.execute(portable, onProgress);
-  }
-
-  /**
    * Dispatch a single step to the appropriate handler.
    * Public so that SequenceScheduler can invoke steps individually
    * for fine-grained progress reporting and cancellation.
@@ -97,6 +99,57 @@ export class SequenceExecutor {
         case 'WARN':  console.warn(logMessage); break;
         default:      console.log(logMessage); break;
       }
+      return;
+    }
+
+    if (intent === 'system.executeSequence') {
+      const sequenceId = (payload as any).sequenceId;
+      if (!sequenceId) {
+        console.warn('[SequenceExecutor] system.executeSequence: missing sequenceId');
+        return;
+      }
+      if (!this.sequenceLibrary) {
+        console.warn('[SequenceExecutor] system.executeSequence: no sequence library configured');
+        return;
+      }
+      const nested = await this.sequenceLibrary.getSequence(sequenceId);
+      if (!nested) {
+        console.warn(`[SequenceExecutor] system.executeSequence: sequence '${sequenceId}' not found`);
+        return;
+      }
+      console.log(`[SequenceExecutor] Executing nested sequence '${sequenceId}'`);
+      await this.execute(nested);
+      return;
+    }
+
+    // --- Built-in Overlay Intents ---
+    if (intent === 'overlay.show') {
+      if (!this.overlayBus) {
+        console.warn('[SequenceExecutor] overlay.show: no OverlayBus configured');
+        return;
+      }
+      const extensionId = (payload as any).extensionId;
+      const overlayId = (payload as any).overlayId;
+      if (!extensionId || !overlayId) {
+        console.warn('[SequenceExecutor] overlay.show: missing extensionId or overlayId');
+        return;
+      }
+      this.overlayBus.showOverlay(extensionId, overlayId);
+      return;
+    }
+
+    if (intent === 'overlay.hide') {
+      if (!this.overlayBus) {
+        console.warn('[SequenceExecutor] overlay.hide: no OverlayBus configured');
+        return;
+      }
+      const extensionId = (payload as any).extensionId;
+      const overlayId = (payload as any).overlayId;
+      if (!extensionId || !overlayId) {
+        console.warn('[SequenceExecutor] overlay.hide: missing extensionId or overlayId');
+        return;
+      }
+      this.overlayBus.hideOverlay(extensionId, overlayId);
       return;
     }
 

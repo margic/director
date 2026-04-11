@@ -120,8 +120,9 @@ app.on('ready', () => {
   });
 
   // Initialize Sequence Executor & Scheduler (must be before DirectorOrchestrator)
-  sequenceExecutor = new SequenceExecutor(extensionHost);
-  sequenceLibrary = new SequenceLibraryService(capabilityCatalog);
+  sequenceExecutor = new SequenceExecutor(extensionHost, overlayBus);
+  sequenceLibrary = new SequenceLibraryService(capabilityCatalog, authService);
+  sequenceExecutor.setSequenceLibrary(sequenceLibrary);
   sequenceScheduler = new SequenceScheduler(sequenceExecutor);
 
   // Initialize Director Orchestrator — no longer depends on ObsService directly.

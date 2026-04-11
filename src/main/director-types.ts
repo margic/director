@@ -136,115 +136,9 @@ export interface EventCatalogEntry {
   payloadSchema?: Record<string, unknown>;
 }
 
-// ============================================================================
-// LEGACY: API-Compatible Types
-// Kept for backward compatibility with the Race Control OpenAPI spec.
-// The normalizeApiSequence() function converts these to PortableSequence.
-// ============================================================================
-
-export type CommandType = 'WAIT' | 'LOG' | 'SWITCH_CAMERA' | 'SWITCH_OBS_SCENE' | 'DRIVER_TTS' | 'VIEWER_CHAT' | 'EXECUTE_INTENT';
-
 export type LogLevel = 'INFO' | 'WARN' | 'ERROR';
 
 export type DirectorStatus = 'IDLE' | 'BUSY' | 'ERROR';
-
-// --- Command Payloads ---
-
-export interface WaitCommandPayload {
-  durationMs: number;
-}
-
-export interface LogCommandPayload {
-  message: string;
-  level: LogLevel;
-}
-
-export interface SwitchCameraCommandPayload {
-  carNumber: string;
-  cameraGroupNumber: number;
-  cameraGroupName?: string;
-}
-
-export interface SwitchObsSceneCommandPayload {
-  sceneName: string;
-  transition?: string;
-  duration?: number;
-}
-
-export interface DriverTtsCommandPayload {
-  text: string;
-  voiceId?: string;
-  channelId?: string;
-}
-
-export interface ExecuteIntentCommandPayload {
-  intent: string;
-  payload: any;
-}
-
-export interface ViewerChatCommandPayload {
-  platform: 'YOUTUBE' | 'TWITCH';
-  message: string;
-}
-
-// --- Commands ---
-
-export interface BaseCommand {
-  id: string;
-  type: CommandType;
-}
-
-export interface WaitCommand extends BaseCommand {
-  type: 'WAIT';
-  payload: WaitCommandPayload;
-}
-
-export interface LogCommand extends BaseCommand {
-  type: 'LOG';
-  payload: LogCommandPayload;
-}
-
-export interface SwitchCameraCommand extends BaseCommand {
-  type: 'SWITCH_CAMERA';
-  payload: SwitchCameraCommandPayload;
-}
-
-export interface SwitchObsSceneCommand extends BaseCommand {
-  type: 'SWITCH_OBS_SCENE';
-  payload: SwitchObsSceneCommandPayload;
-}
-
-export interface DriverTtsCommand extends BaseCommand {
-  type: 'DRIVER_TTS';
-  payload: DriverTtsCommandPayload;
-}
-
-export interface ViewerChatCommand extends BaseCommand {
-  type: 'VIEWER_CHAT';
-  payload: ViewerChatCommandPayload;
-}
-
-export interface ExecuteIntentCommand extends BaseCommand {
-  type: 'EXECUTE_INTENT';
-  payload: ExecuteIntentCommandPayload;
-}
-
-export type DirectorCommand = 
-  | WaitCommand 
-  | LogCommand 
-  | SwitchCameraCommand 
-  | SwitchObsSceneCommand 
-  | DriverTtsCommand 
-  | ViewerChatCommand
-  | ExecuteIntentCommand;
-
-// --- Sequences ---
-
-export interface DirectorSequence {
-  id: string;
-  commands: DirectorCommand[];
-  metadata?: Record<string, unknown>;
-}
 
 // --- API Responses ---
 
@@ -309,20 +203,6 @@ export interface ActiveSessionResponse {
   name: string;
 }
 
-export type SequencePriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
-
-/**
- * @deprecated The /sequences/next endpoint now returns PortableSequence directly.
- * Kept for backward compatibility with any remaining code paths.
- */
-export interface GetNextSequenceResponse {
-  sequenceId: string;
-  createdAt: string;
-  priority?: SequencePriority;
-  commands: DirectorCommand[];
-  totalDurationMs?: number;
-}
-
 // --- Extension Protocol ---
 
 export type ExtensionMessageType = 'EXTENSION_INTENT' | 'EXTENSION_EVENT' | 'EXTENSION_STATUS';
@@ -348,82 +228,6 @@ export interface ExtensionEventMessage extends ExtensionMessage {
 export interface ExtensionStatusMessage extends ExtensionMessage {
   type: 'EXTENSION_STATUS';
   data: Record<string, { active: boolean; [key: string]: any }>;
-}
-
-// ============================================================================
-// API Normalizer
-// Converts legacy DirectorCommand[] (from Race Control API) into the
-// PortableSequence format consumed by the Sequence Executor.
-// ============================================================================
-
-/**
- * Intent mappings for legacy CommandType values.
- * Maps the old enum-based command types to the semantic intent names
- * registered by extensions in their package.json manifests.
- */
-const LEGACY_INTENT_MAP: Record<string, string> = {
-  'SWITCH_CAMERA': 'broadcast.showLiveCam',
-  'SWITCH_OBS_SCENE': 'obs.switchScene',
-  'DRIVER_TTS': 'communication.announce',
-  'VIEWER_CHAT': 'communication.talkToChat',
-};
-
-/**
- * Normalizes a single legacy DirectorCommand into a SequenceStep.
- */
-function normalizeCommand(cmd: DirectorCommand, index: number): SequenceStep {
-  const id = cmd.id || `step_${index}`;
-
-  switch (cmd.type) {
-    case 'WAIT':
-      return { id, intent: 'system.wait', payload: { ...cmd.payload } };
-    case 'LOG':
-      return { id, intent: 'system.log', payload: { ...cmd.payload } };
-    case 'EXECUTE_INTENT': {
-      // Already intent-based, unwrap
-      const intentPayload = cmd.payload as ExecuteIntentCommandPayload;
-      return {
-        id,
-        intent: intentPayload.intent,
-        payload: (intentPayload.payload ?? {}) as Record<string, unknown>,
-      };
-    }
-    default: {
-      // Map legacy command type to a semantic intent
-      const intent = LEGACY_INTENT_MAP[cmd.type];
-      if (intent) {
-        return { id, intent, payload: { ...cmd.payload } };
-      }
-      // Unknown command — log a warning step
-      return {
-        id,
-        intent: 'system.log',
-        payload: { message: `Unknown legacy command type: ${cmd.type}`, level: 'WARN' },
-      };
-    }
-  }
-}
-
-/**
- * Normalizes a legacy DirectorSequence (from API) into a PortableSequence.
- */
-export function normalizeApiSequence(legacy: DirectorSequence): PortableSequence {
-  return {
-    id: legacy.id,
-    steps: legacy.commands.map((cmd, i) => normalizeCommand(cmd, i)),
-    metadata: legacy.metadata,
-  };
-}
-
-/**
- * Normalizes a GetNextSequenceResponse (from polling API) into a PortableSequence.
- */
-export function normalizeNextSequenceResponse(response: GetNextSequenceResponse): PortableSequence {
-  return {
-    id: response.sequenceId,
-    steps: response.commands.map((cmd, i) => normalizeCommand(cmd, i)),
-    metadata: { priority: response.priority },
-  };
 }
 
 // ============================================================================
