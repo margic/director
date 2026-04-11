@@ -287,7 +287,7 @@ function App() {
               <DirectorPanel />
             </div>
           ) : currentView === 'sequences' ? (
-            <div className="w-full h-full">
+            <div className="w-full h-full min-h-[600px]">
               <SequencesPanel />
             </div>
           ) : currentView === 'overlay' ? (

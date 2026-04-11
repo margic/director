@@ -45,6 +45,7 @@ function mockFetchResponse(data: any, ok = true, status = 200) {
     status,
     statusText: ok ? 'OK' : 'Error',
     json: () => Promise.resolve(data),
+    text: () => Promise.resolve(data ? JSON.stringify(data) : ''),
   });
 }
 
@@ -129,7 +130,10 @@ describe('SequenceLibraryService — Cloud Tier', () => {
 
       await service.loadCloud();
 
-      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cloud fetch failed'));
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Cloud fetch failed'),
+        expect.anything()
+      );
       // Should not throw
     });
 

@@ -291,19 +291,22 @@ export class SequenceLibraryService {
       }
 
       const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listSequences}`;
+      console.log(`[SequenceLibrary] Fetching cloud sequences from: ${url}`);
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!response.ok) {
-        console.warn(`[SequenceLibrary] Cloud fetch failed: ${response.status} ${response.statusText}`);
+        const body = await response.text().catch(() => '');
+        console.warn(`[SequenceLibrary] Cloud fetch failed: ${response.status} ${response.statusText}`, body);
         return;
       }
 
       const data: PortableSequence[] = await response.json();
       this.cloudCache = data.map((s) => ({ ...s, category: 'cloud' as const }));
       this.cloudCacheTimestamp = Date.now();
-      console.log(`[SequenceLibrary] Loaded ${this.cloudCache.length} cloud sequences`);
+      console.log(`[SequenceLibrary] Loaded ${this.cloudCache.length} cloud sequence(s)`, 
+        this.cloudCache.map(s => s.id));
     } catch (err) {
       // Network failure — keep stale cache, don't crash
       console.warn('[SequenceLibrary] Cloud fetch error (offline?):', err);
