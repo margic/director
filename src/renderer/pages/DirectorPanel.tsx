@@ -20,16 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useSetPageHeader } from '@/contexts/PageHeaderContext';
 import { clientTelemetry } from '@/telemetry';
-
-interface DirectorState {
-  isRunning: boolean;
-  status: string;
-  sessionId: string | null;
-  currentSequenceId?: string | null;
-  totalCommands?: number;
-  processedCommands?: number;
-  lastError?: string;
-}
+import type { DirectorOrchestratorState } from '../../main/director-orchestrator';
 
 interface LogEntry {
   timestamp: Date;
@@ -38,21 +29,24 @@ interface LogEntry {
 }
 
 export const DirectorPanel: React.FC = () => {
-  const [directorStatus, setDirectorStatus] = useState<DirectorState>({
-    isRunning: false,
+  const [directorStatus, setDirectorStatus] = useState<DirectorOrchestratorState>({
+    mode: 'stopped',
     status: 'IDLE',
     sessionId: null,
+    checkinStatus: 'unchecked',
   });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [sequencesExecuted, setSequencesExecuted] = useState(0);
   const logEndRef = useRef<HTMLDivElement>(null);
-  const prevStatusRef = useRef<DirectorState | null>(null);
+  const prevStatusRef = useRef<DirectorOrchestratorState | null>(null);
+
+  const isRunning = directorStatus.mode !== 'stopped';
 
   useSetPageHeader({
     title: 'Agent',
     icon: Activity,
-    subtitle: directorStatus.isRunning ? directorStatus.status : 'Stopped',
-    subtitleVariant: directorStatus.isRunning
+    subtitle: isRunning ? directorStatus.status : 'Stopped',
+    subtitleVariant: isRunning
       ? directorStatus.status === 'ERROR'
         ? 'danger'
         : 'success'
@@ -70,17 +64,19 @@ export const DirectorPanel: React.FC = () => {
   // Poll director status
   useEffect(() => {
     const pollStatus = async () => {
-      if (!window.electronAPI?.directorStatus) return;
+      if (!window.electronAPI?.directorState) return;
       try {
-        const status = await window.electronAPI.directorStatus();
+        const status = await window.electronAPI.directorState();
         setDirectorStatus(status);
 
         // Detect state transitions and log them
         const prev = prevStatusRef.current;
         if (prev) {
-          if (!prev.isRunning && status.isRunning) {
+          const wasRunning = prev.mode !== 'stopped';
+          const nowRunning = status.mode !== 'stopped';
+          if (!wasRunning && nowRunning) {
             addLog('success', 'Agent started');
-          } else if (prev.isRunning && !status.isRunning) {
+          } else if (wasRunning && !nowRunning) {
             addLog('info', 'Agent stopped');
           }
 
@@ -137,18 +133,18 @@ export const DirectorPanel: React.FC = () => {
   const toggleDirector = async () => {
     try {
       clientTelemetry.trackEvent('UI.DirectorToggleClicked', {
-        currentState: directorStatus.isRunning ? 'running' : 'stopped',
+        currentState: isRunning ? 'running' : 'stopped',
       });
 
       if (!window.electronAPI) return;
 
-      if (directorStatus.isRunning) {
+      if (isRunning) {
         addLog('info', 'Stopping agent...');
-        const status = await window.electronAPI.directorStop();
+        const status = await window.electronAPI.directorSetMode('stopped');
         setDirectorStatus(status);
       } else {
         addLog('info', 'Starting agent...');
-        const status = await window.electronAPI.directorStart();
+        const status = await window.electronAPI.directorSetMode('auto');
         setDirectorStatus(status);
       }
     } catch (error) {
@@ -160,7 +156,7 @@ export const DirectorPanel: React.FC = () => {
 
   const clearLogs = () => setLogs([]);
 
-  const statusColor = directorStatus.isRunning
+  const statusColor = isRunning
     ? directorStatus.status === 'ERROR'
       ? 'text-destructive'
       : directorStatus.status === 'BUSY'
@@ -168,7 +164,7 @@ export const DirectorPanel: React.FC = () => {
         : 'text-green-500'
     : 'text-muted-foreground';
 
-  const statusDotColor = directorStatus.isRunning
+  const statusDotColor = isRunning
     ? directorStatus.status === 'ERROR'
       ? 'bg-destructive'
       : 'bg-green-500'
@@ -179,20 +175,20 @@ export const DirectorPanel: React.FC = () => {
       {/* Top control bar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className={`w-4 h-4 rounded-full ${statusDotColor} ${directorStatus.isRunning ? 'animate-pulse' : ''}`} />
+          <div className={`w-4 h-4 rounded-full ${statusDotColor} ${isRunning ? 'animate-pulse' : ''}`} />
           <span className={`text-3xl font-jetbrains font-bold ${statusColor}`}>
-            {directorStatus.isRunning ? directorStatus.status : 'STOPPED'}
+            {isRunning ? directorStatus.status : 'STOPPED'}
           </span>
         </div>
         <Button
           onClick={toggleDirector}
           className={
-            directorStatus.isRunning
+            isRunning
               ? 'bg-destructive text-white hover:bg-destructive/90 shadow-[0_0_20px_rgba(239,51,64,0.4)]'
               : 'bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)]'
           }
         >
-          {directorStatus.isRunning ? (
+          {isRunning ? (
             <>
               <Square className="w-4 h-4 mr-2 fill-current" />
               STOP AGENT
@@ -306,7 +302,7 @@ export const DirectorPanel: React.FC = () => {
           <div className="bg-background border border-border rounded-lg p-4 h-80 overflow-y-auto font-jetbrains text-xs">
             {logs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground">
-                {directorStatus.isRunning ? (
+                {isRunning ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
                     Waiting for activity...

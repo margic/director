@@ -301,9 +301,11 @@ export class DirectorOrchestrator extends EventEmitter {
     });
 
     // Listen for completion to notify CloudPoller
-    const completionListener = (result: any) => {
-      if (result.sequenceId === sequence.id) {
-        console.log(`[DirectorOrchestrator] Sequence ${sequence.id} completed with status: ${result.status}`);
+    // historyChanged emits the full history array, so find the matching entry
+    const completionListener = (history: any[]) => {
+      const entry = history.find((r: any) => r.sequenceId === sequence.id);
+      if (entry) {
+        console.log(`[DirectorOrchestrator] Sequence ${sequence.id} completed with status: ${entry.status}`);
         if (this.cloudPoller) {
           this.cloudPoller.onSequenceCompleted(sequence.id);
         }

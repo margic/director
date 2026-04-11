@@ -9,33 +9,27 @@
 import React, { useState, useEffect } from 'react';
 import { Activity, Play, Square } from 'lucide-react';
 import { clientTelemetry } from '../../telemetry';
-
-interface DirectorState {
-  isRunning: boolean;
-  status: string;
-  sessionId: string | null;
-  currentSequenceId?: string | null;
-  totalCommands?: number;
-  processedCommands?: number;
-  lastError?: string;
-}
+import type { DirectorOrchestratorState } from '../../../main/director-orchestrator';
 
 interface DirectorDashboardCardProps {
   onClick: () => void;
 }
 
 export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ onClick }) => {
-  const [directorStatus, setDirectorStatus] = useState<DirectorState>({
-    isRunning: false,
+  const [directorStatus, setDirectorStatus] = useState<DirectorOrchestratorState>({
+    mode: 'stopped',
     status: 'IDLE',
     sessionId: null,
+    checkinStatus: 'unchecked',
   });
+
+  const isRunning = directorStatus.mode !== 'stopped';
 
   useEffect(() => {
     const pollStatus = async () => {
-      if (!window.electronAPI?.directorStatus) return;
+      if (!window.electronAPI?.directorState) return;
       try {
-        const status = await window.electronAPI.directorStatus();
+        const status = await window.electronAPI.directorState();
         setDirectorStatus(status);
       } catch (e) {
         console.error('Failed to poll director status', e);
@@ -51,16 +45,16 @@ export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ on
     e.stopPropagation();
     try {
       clientTelemetry.trackEvent('UI.DirectorToggleClicked', {
-        currentState: directorStatus.isRunning ? 'running' : 'stopped',
+        currentState: isRunning ? 'running' : 'stopped',
       });
 
       if (!window.electronAPI) return;
 
-      if (directorStatus.isRunning) {
-        const status = await window.electronAPI.directorStop();
+      if (isRunning) {
+        const status = await window.electronAPI.directorSetMode('stopped');
         setDirectorStatus(status);
       } else {
-        const status = await window.electronAPI.directorStart();
+        const status = await window.electronAPI.directorSetMode('auto');
         setDirectorStatus(status);
       }
     } catch (error) {
@@ -79,7 +73,7 @@ export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ on
           <Activity className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
           <h3 className="text-muted-foreground text-sm font-bold uppercase tracking-wider">Agent Control</h3>
         </div>
-        <div className={`w-3 h-3 rounded-full ${directorStatus.isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+        <div className={`w-3 h-3 rounded-full ${isRunning ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
       </div>
 
       <div className="z-10">
@@ -94,12 +88,12 @@ export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ on
       <button
         onClick={toggleDirector}
         className={`z-10 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
-          directorStatus.isRunning
+          isRunning
             ? 'bg-destructive text-white hover:bg-destructive/90 shadow-[0_0_20px_rgba(239,51,64,0.4)]'
             : 'bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)]'
         }`}
       >
-        {directorStatus.isRunning ? (
+        {isRunning ? (
           <>
             <Square className="w-4 h-4 fill-current" />
             <span>STOP</span>
@@ -112,7 +106,7 @@ export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ on
         )}
       </button>
 
-      {directorStatus.isRunning && (
+      {isRunning && (
         <div className="absolute inset-0 bg-green-500/5 animate-pulse pointer-events-none" />
       )}
     </div>
