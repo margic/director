@@ -10,10 +10,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   PortableSequence,
-  DirectorSequence,
-  normalizeApiSequence,
   SequenceStep,
 } from '../../main/director-types';
+import { normalizeApiResponse } from '../../main/normalizer';
 
 describe('PortableSequence Contract Tests', () => {
   describe('New format passthrough', () => {
@@ -79,167 +78,88 @@ describe('PortableSequence Contract Tests', () => {
     });
   });
 
-  describe('Legacy format conversion', () => {
-    it('should convert legacy commands array to PortableSequence with correct intents', () => {
-      const legacySeq: DirectorSequence = {
-        id: 'legacy-seq-1',
-        commands: [
+  describe('Normalizer passthrough for PortableSequence', () => {
+    it('should pass through a PortableSequence via normalizeApiResponse unchanged', () => {
+      const portableSeq: PortableSequence = {
+        id: 'normalizer-test-1',
+        name: 'Normalizer Test',
+        steps: [
           {
-            id: 'cmd-1',
-            type: 'WAIT',
+            id: 'step-1',
+            intent: 'system.wait',
             payload: { durationMs: 3000 },
           },
           {
-            id: 'cmd-2',
-            type: 'SWITCH_CAMERA',
-            payload: { carNumber: '5', cameraGroupNumber: 2 },
-          },
-          {
-            id: 'cmd-3',
-            type: 'SWITCH_OBS_SCENE',
-            payload: { sceneName: 'MainBroadcast' },
-          },
-          {
-            id: 'cmd-4',
-            type: 'LOG',
-            payload: { message: 'Sequence complete', level: 'INFO' },
+            id: 'step-2',
+            intent: 'broadcast.showLiveCam',
+            payload: { carNum: '5', camGroup: 2 },
           },
         ],
+        metadata: { source: 'ai-director', totalDurationMs: 15000 },
       };
 
-      const result = normalizeApiSequence(legacySeq);
+      const result = normalizeApiResponse(portableSeq);
 
-      // Verify normalized to PortableSequence format
-      expect(result.id).toBe('legacy-seq-1');
-      expect(result.steps).toBeDefined();
-      expect(Array.isArray(result.steps)).toBe(true);
-      expect(result.steps.length).toBe(4);
-
-      // Verify intents are correctly mapped
+      expect(result.id).toBe('normalizer-test-1');
+      expect(result.steps).toHaveLength(2);
       expect(result.steps[0].intent).toBe('system.wait');
       expect(result.steps[1].intent).toBe('broadcast.showLiveCam');
-      expect(result.steps[2].intent).toBe('obs.switchScene');
-      expect(result.steps[3].intent).toBe('system.log');
-
-      // Verify payloads are preserved
-      expect(result.steps[0].payload).toEqual({ durationMs: 3000 });
-      expect(result.steps[1].payload).toEqual({ carNumber: '5', cameraGroupNumber: 2 });
-      expect(result.steps[2].payload).toEqual({ sceneName: 'MainBroadcast' });
-      expect(result.steps[3].payload).toEqual({ message: 'Sequence complete', level: 'INFO' });
-    });
-
-    it('should convert DRIVER_TTS to communication.announce intent', () => {
-      const legacySeq: DirectorSequence = {
-        id: 'tts-seq',
-        commands: [
-          {
-            id: 'cmd-1',
-            type: 'DRIVER_TTS',
-            payload: { text: 'Good luck!', voiceId: 'en-US-1' },
-          },
-        ],
-      };
-
-      const result = normalizeApiSequence(legacySeq);
-
-      expect(result.steps[0].intent).toBe('communication.announce');
-      expect(result.steps[0].payload).toEqual({ text: 'Good luck!', voiceId: 'en-US-1' });
-    });
-
-    it('should convert VIEWER_CHAT to communication.talkToChat intent', () => {
-      const legacySeq: DirectorSequence = {
-        id: 'chat-seq',
-        commands: [
-          {
-            id: 'cmd-1',
-            type: 'VIEWER_CHAT',
-            payload: { platform: 'YOUTUBE', message: 'Welcome to the stream!' },
-          },
-        ],
-      };
-
-      const result = normalizeApiSequence(legacySeq);
-
-      expect(result.steps[0].intent).toBe('communication.talkToChat');
-      expect(result.steps[0].payload).toEqual({ platform: 'YOUTUBE', message: 'Welcome to the stream!' });
+      expect(result.steps[1].payload).toEqual({ carNum: '5', camGroup: 2 });
     });
   });
 
   describe('Required fields validation', () => {
-    it('should have id field after normalization', () => {
-      const legacySeq: DirectorSequence = {
+    it('should have id and steps fields on a valid PortableSequence', () => {
+      const seq: PortableSequence = {
         id: 'test-id-123',
-        commands: [
+        steps: [
           {
-            id: 'cmd-1',
-            type: 'LOG',
+            id: 'step-1',
+            intent: 'system.log',
             payload: { message: 'test', level: 'INFO' },
           },
         ],
       };
 
-      const result = normalizeApiSequence(legacySeq);
-
-      expect(result.id).toBe('test-id-123');
-      expect(typeof result.id).toBe('string');
-      expect(result.id.length).toBeGreaterThan(0);
+      expect(seq.id).toBe('test-id-123');
+      expect(typeof seq.id).toBe('string');
+      expect(seq.id.length).toBeGreaterThan(0);
+      expect(seq.steps).toBeDefined();
+      expect(Array.isArray(seq.steps)).toBe(true);
+      expect(seq.steps.length).toBeGreaterThan(0);
     });
 
-    it('should have steps field after normalization', () => {
-      const legacySeq: DirectorSequence = {
-        id: 'test-seq',
-        commands: [
-          {
-            id: 'cmd-1',
-            type: 'WAIT',
-            payload: { durationMs: 1000 },
-          },
-        ],
-      };
-
-      const result = normalizeApiSequence(legacySeq);
-
-      expect(result.steps).toBeDefined();
-      expect(Array.isArray(result.steps)).toBe(true);
-      expect(result.steps.length).toBeGreaterThan(0);
-    });
-
-    it('should preserve empty steps array', () => {
-      const legacySeq: DirectorSequence = {
+    it('should allow empty steps array', () => {
+      const seq: PortableSequence = {
         id: 'empty-seq',
-        commands: [],
+        steps: [],
       };
 
-      const result = normalizeApiSequence(legacySeq);
-
-      expect(result.steps).toBeDefined();
-      expect(Array.isArray(result.steps)).toBe(true);
-      expect(result.steps.length).toBe(0);
+      expect(seq.steps).toBeDefined();
+      expect(Array.isArray(seq.steps)).toBe(true);
+      expect(seq.steps.length).toBe(0);
     });
   });
 
   describe('Step shape validation', () => {
     it('should ensure each step has id, intent, and payload fields', () => {
-      const legacySeq: DirectorSequence = {
+      const seq: PortableSequence = {
         id: 'shape-test-seq',
-        commands: [
+        steps: [
           {
-            id: 'cmd-1',
-            type: 'WAIT',
+            id: 'step-1',
+            intent: 'system.wait',
             payload: { durationMs: 2000 },
           },
           {
-            id: 'cmd-2',
-            type: 'SWITCH_CAMERA',
-            payload: { carNumber: '3', cameraGroupNumber: 4 },
+            id: 'step-2',
+            intent: 'broadcast.showLiveCam',
+            payload: { carNum: '3', camGroup: 4 },
           },
         ],
       };
 
-      const result = normalizeApiSequence(legacySeq);
-
-      result.steps.forEach((step: SequenceStep) => {
-        // Required fields
+      seq.steps.forEach((step: SequenceStep) => {
         expect(step.id).toBeDefined();
         expect(typeof step.id).toBe('string');
 
@@ -251,70 +171,22 @@ describe('PortableSequence Contract Tests', () => {
         expect(step.payload).not.toBeNull();
       });
     });
-
-    it('should generate step IDs when missing in legacy format', () => {
-      const legacySeq: DirectorSequence = {
-        id: 'no-ids-seq',
-        commands: [
-          {
-            type: 'WAIT',
-            payload: { durationMs: 1000 },
-          } as any,
-          {
-            type: 'LOG',
-            payload: { message: 'test', level: 'INFO' },
-          } as any,
-        ],
-      };
-
-      const result = normalizeApiSequence(legacySeq);
-
-      expect(result.steps[0].id).toBe('step_0');
-      expect(result.steps[1].id).toBe('step_1');
-    });
   });
 
   describe('Canonical intent names', () => {
-    it('should resolve all standard intents correctly', () => {
-      const legacySeq: DirectorSequence = {
+    it('should use standard intent names in PortableSequence steps', () => {
+      const seq: PortableSequence = {
         id: 'intent-mapping-seq',
-        commands: [
-          {
-            id: 'cmd-1',
-            type: 'WAIT',
-            payload: { durationMs: 1000 },
-          },
-          {
-            id: 'cmd-2',
-            type: 'LOG',
-            payload: { message: 'test', level: 'INFO' },
-          },
-          {
-            id: 'cmd-3',
-            type: 'SWITCH_CAMERA',
-            payload: { carNumber: '1', cameraGroupNumber: 1 },
-          },
-          {
-            id: 'cmd-4',
-            type: 'SWITCH_OBS_SCENE',
-            payload: { sceneName: 'Scene1' },
-          },
-          {
-            id: 'cmd-5',
-            type: 'DRIVER_TTS',
-            payload: { text: 'Message', voiceId: 'voice-1' },
-          },
-          {
-            id: 'cmd-6',
-            type: 'VIEWER_CHAT',
-            payload: { platform: 'TWITCH', message: 'Hello' },
-          },
+        steps: [
+          { id: 's1', intent: 'system.wait', payload: { durationMs: 1000 } },
+          { id: 's2', intent: 'system.log', payload: { message: 'test', level: 'INFO' } },
+          { id: 's3', intent: 'broadcast.showLiveCam', payload: { carNum: '1', camGroup: 1 } },
+          { id: 's4', intent: 'obs.switchScene', payload: { sceneName: 'Scene1' } },
+          { id: 's5', intent: 'communication.announce', payload: { text: 'Message' } },
+          { id: 's6', intent: 'communication.talkToChat', payload: { platform: 'TWITCH', message: 'Hello' } },
         ],
       };
 
-      const result = normalizeApiSequence(legacySeq);
-
-      // Map of expected intent resolutions
       const expectedIntents = [
         'system.wait',
         'system.log',
@@ -324,30 +196,9 @@ describe('PortableSequence Contract Tests', () => {
         'communication.talkToChat',
       ];
 
-      result.steps.forEach((step, index) => {
+      seq.steps.forEach((step, index) => {
         expect(step.intent).toBe(expectedIntents[index]);
       });
-    });
-
-    it('should handle EXECUTE_INTENT by unwrapping to the specified intent', () => {
-      const legacySeq: DirectorSequence = {
-        id: 'execute-intent-seq',
-        commands: [
-          {
-            id: 'cmd-1',
-            type: 'EXECUTE_INTENT',
-            payload: {
-              intent: 'custom.myExtension.action',
-              payload: { customField: 'value' },
-            },
-          },
-        ],
-      };
-
-      const result = normalizeApiSequence(legacySeq);
-
-      expect(result.steps[0].intent).toBe('custom.myExtension.action');
-      expect(result.steps[0].payload).toEqual({ customField: 'value' });
     });
   });
 
@@ -424,44 +275,38 @@ describe('PortableSequence Contract Tests', () => {
       expect(portableSeq.steps[1].payload).toHaveProperty('message');
     });
 
-    it('should accept legacy field names for backward compatibility during normalization', () => {
-      // When normalizing from legacy format, the API may use old field names
-      // The normalizer should pass them through (payload transformation is executor's job)
-      const legacySeq: DirectorSequence = {
-        id: 'legacy-fields-seq',
-        commands: [
+    it('should document canonical field names for camera payloads', () => {
+      // The canonical PortableSequence format uses carNum/camGroup (not carNumber/cameraGroupNumber)
+      const seq: PortableSequence = {
+        id: 'canonical-fields-seq',
+        steps: [
           {
-            id: 'cmd-1',
-            type: 'SWITCH_CAMERA',
-            payload: { carNumber: '42', cameraGroupNumber: 2 },
+            id: 'step-1',
+            intent: 'broadcast.showLiveCam',
+            payload: { carNum: '42', camGroup: 2 },
           },
         ],
       };
 
-      const result = normalizeApiSequence(legacySeq);
-
-      // Normalizer preserves payload as-is, including legacy field names
-      expect(result.steps[0].payload).toHaveProperty('carNumber');
-      expect(result.steps[0].payload).toHaveProperty('cameraGroupNumber');
+      expect(seq.steps[0].payload).toHaveProperty('carNum');
+      expect(seq.steps[0].payload).toHaveProperty('camGroup');
+      expect(seq.steps[0].payload).not.toHaveProperty('carNumber');
+      expect(seq.steps[0].payload).not.toHaveProperty('cameraGroupNumber');
     });
   });
 
   describe('Malformed sequence rejection', () => {
-    it('should handle sequence without steps or commands gracefully', () => {
+    it('should handle sequence without steps gracefully', () => {
       const malformedSeq = {
         id: 'malformed-seq',
-        // Missing both 'steps' and 'commands'
+        // Missing 'steps'
       } as any;
 
       // The Director should detect this and handle it
-      // For now, we verify that a proper sequence has the required structure
       expect(malformedSeq.steps).toBeUndefined();
-      expect(malformedSeq.commands).toBeUndefined();
 
       // This would be caught by runtime validation before execution
-      const hasValidFormat =
-        Array.isArray(malformedSeq.steps) ||
-        Array.isArray(malformedSeq.commands);
+      const hasValidFormat = Array.isArray(malformedSeq.steps);
 
       expect(hasValidFormat).toBe(false);
     });

@@ -19,14 +19,24 @@ import {
   EventCatalogEntry,
 } from './director-types';
 import { CapabilityCatalog } from './extension-host/capability-catalog';
+import { AuthService } from './auth-service';
+import { apiConfig } from './auth-config';
+
+/** Cloud cache TTL: 5 minutes */
+const CLOUD_CACHE_TTL_MS = 5 * 60 * 1000;
 
 export class SequenceLibraryService {
   private builtInDir: string;
   private customDir: string;
   private builtInCache: PortableSequence[] = [];
+  private cloudCache: PortableSequence[] = [];
+  private cloudCacheTimestamp = 0;
   private customCache: PortableSequence[] = [];
 
-  constructor(private capabilityCatalog: CapabilityCatalog) {
+  constructor(
+    private capabilityCatalog: CapabilityCatalog,
+    private authService?: AuthService,
+  ) {
     // Built-in sequences are bundled in the app resources
     // In development: src/renderer/sequences/built-in/ compiled alongside the app
     // At runtime: relative to __dirname (dist-electron/main/) → ../sequences/built-in/
@@ -45,11 +55,12 @@ export class SequenceLibraryService {
 
     await Promise.all([
       this.loadBuiltIn(),
+      this.loadCloud(),
       this.loadCustom(),
     ]);
 
     console.log(
-      `[SequenceLibrary] Initialized: ${this.builtInCache.length} built-in, ${this.customCache.length} custom sequences`
+      `[SequenceLibrary] Initialized: ${this.builtInCache.length} built-in, ${this.cloudCache.length} cloud, ${this.customCache.length} custom sequences`
     );
   }
 
@@ -57,7 +68,12 @@ export class SequenceLibraryService {
    * List all sequences, optionally filtered by category and/or search text.
    */
   async listSequences(filter?: SequenceFilter): Promise<PortableSequence[]> {
-    let all = [...this.builtInCache, ...this.customCache];
+    // Refresh cloud cache if stale
+    if (Date.now() - this.cloudCacheTimestamp > CLOUD_CACHE_TTL_MS) {
+      await this.loadCloud();
+    }
+
+    let all = [...this.builtInCache, ...this.cloudCache, ...this.customCache];
 
     if (filter?.category) {
       all = all.filter((s) => s.category === filter.category);
@@ -80,8 +96,14 @@ export class SequenceLibraryService {
    * Get a single sequence by ID.
    */
   async getSequence(id: string): Promise<PortableSequence | null> {
+    // Refresh cloud cache if stale
+    if (Date.now() - this.cloudCacheTimestamp > CLOUD_CACHE_TTL_MS) {
+      await this.loadCloud();
+    }
+
     return (
       this.builtInCache.find((s) => s.id === id) ||
+      this.cloudCache.find((s) => s.id === id) ||
       this.customCache.find((s) => s.id === id) ||
       null
     );
@@ -249,6 +271,42 @@ export class SequenceLibraryService {
       // Built-in dir may not exist yet in dev — that's okay
       console.warn('[SequenceLibrary] No built-in sequences directory found:', this.builtInDir);
       this.builtInCache = [];
+    }
+  }
+
+  /**
+   * Fetch cloud sequences from Race Control API.
+   * Gracefully degrades when offline or unauthenticated.
+   */
+  async loadCloud(): Promise<void> {
+    if (!this.authService) {
+      return;
+    }
+
+    try {
+      const token = await this.authService.getAccessToken();
+      if (!token) {
+        console.warn('[SequenceLibrary] No access token — skipping cloud fetch');
+        return;
+      }
+
+      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listSequences}`;
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!response.ok) {
+        console.warn(`[SequenceLibrary] Cloud fetch failed: ${response.status} ${response.statusText}`);
+        return;
+      }
+
+      const data: PortableSequence[] = await response.json();
+      this.cloudCache = data.map((s) => ({ ...s, category: 'cloud' as const }));
+      this.cloudCacheTimestamp = Date.now();
+      console.log(`[SequenceLibrary] Loaded ${this.cloudCache.length} cloud sequences`);
+    } catch (err) {
+      // Network failure — keep stale cache, don't crash
+      console.warn('[SequenceLibrary] Cloud fetch error (offline?):', err);
     }
   }
 

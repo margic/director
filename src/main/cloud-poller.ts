@@ -265,8 +265,7 @@ export class CloudPoller {
         { sessionId: this.raceSessionId }
       );
 
-      // Normalize API response — handles both new PortableSequence format (steps/intent)
-      // and legacy DirectorSequence format (commands/commandType) for backward compatibility
+      // Normalize API response — validates PortableSequence format (steps/intent)
       const portable = normalizeApiResponse(sequenceData);
 
       telemetryService.trackEvent('Sequence.Received', {
