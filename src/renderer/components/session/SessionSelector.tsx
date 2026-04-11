@@ -7,7 +7,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Radio, Search, CheckCircle2, AlertCircle, Loader2, ChevronDown } from 'lucide-react';
+import { Radio, Search, CheckCircle2, AlertCircle, Loader2, ChevronDown, ShieldCheck, ShieldAlert, LogIn, LogOut } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { clientTelemetry } from '@/telemetry';
@@ -21,10 +21,12 @@ interface RaceSession {
 }
 
 interface SessionManagerState {
-  state: 'none' | 'searching' | 'discovered' | 'selected';
+  state: 'none' | 'searching' | 'discovered' | 'selected' | 'checked-in';
   sessions: RaceSession[];
   selectedSession: RaceSession | null;
   lastError?: string;
+  checkinStatus?: string;
+  checkinWarnings?: string[];
 }
 
 export const SessionSelector: React.FC = () => {
@@ -99,6 +101,36 @@ export const SessionSelector: React.FC = () => {
     }
   };
 
+  const [checkinLoading, setCheckinLoading] = useState(false);
+
+  const handleCheckin = async () => {
+    if (!window.electronAPI?.session?.checkin) return;
+    try {
+      setCheckinLoading(true);
+      clientTelemetry.trackEvent('UI.SessionCheckinClicked');
+      await window.electronAPI.session.checkin();
+    } catch (error) {
+      console.error('[SessionSelector] Failed to check in:', error);
+      clientTelemetry.trackException(error as Error, { context: 'checkinSession' });
+    } finally {
+      setCheckinLoading(false);
+    }
+  };
+
+  const handleWrap = async () => {
+    if (!window.electronAPI?.session?.wrap) return;
+    try {
+      setCheckinLoading(true);
+      clientTelemetry.trackEvent('UI.SessionWrapClicked');
+      await window.electronAPI.session.wrap('manual');
+    } catch (error) {
+      console.error('[SessionSelector] Failed to wrap session:', error);
+      clientTelemetry.trackException(error as Error, { context: 'wrapSession' });
+    } finally {
+      setCheckinLoading(false);
+    }
+  };
+
   const getStateIcon = () => {
     switch (sessionState.state) {
       case 'none':
@@ -109,6 +141,8 @@ export const SessionSelector: React.FC = () => {
         return <Search className="w-4 h-4 text-primary" />;
       case 'selected':
         return <CheckCircle2 className="w-4 h-4 text-green-500" />;
+      case 'checked-in':
+        return <ShieldCheck className="w-4 h-4 text-green-500" />;
     }
   };
 
@@ -122,6 +156,8 @@ export const SessionSelector: React.FC = () => {
         return `${sessionState.sessions.length} Available`;
       case 'selected':
         return 'Selected';
+      case 'checked-in':
+        return 'Checked In';
     }
   };
 
@@ -141,7 +177,7 @@ export const SessionSelector: React.FC = () => {
       <CardContent className="space-y-3">
         {/* Selected Session Display */}
         {sessionState.selectedSession ? (
-          <div className="p-3 bg-background border border-border rounded-lg">
+          <div className="p-3 bg-background border border-border rounded-lg space-y-3">
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-semibold text-foreground truncate">
@@ -160,6 +196,65 @@ export const SessionSelector: React.FC = () => {
                 Clear
               </Button>
             </div>
+
+            {/* Check-in controls */}
+            <div className="flex items-center justify-between pt-2 border-t border-border">
+              <div className="flex items-center gap-1.5">
+                {sessionState.state === 'checked-in' ? (
+                  <ShieldCheck className="w-3.5 h-3.5 text-green-500" />
+                ) : sessionState.checkinStatus === 'error' ? (
+                  <ShieldAlert className="w-3.5 h-3.5 text-destructive" />
+                ) : sessionState.checkinStatus === 'checking-in' || sessionState.checkinStatus === 'wrapping' ? (
+                  <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin" />
+                ) : null}
+                <span className={`text-xs uppercase font-rajdhani tracking-wide ${
+                  sessionState.state === 'checked-in'
+                    ? 'text-green-500'
+                    : sessionState.checkinStatus === 'error'
+                      ? 'text-destructive'
+                      : 'text-muted-foreground'
+                }`}>
+                  {sessionState.state === 'checked-in' ? 'Checked In'
+                    : sessionState.checkinStatus === 'checking-in' ? 'Checking in…'
+                    : sessionState.checkinStatus === 'wrapping' ? 'Checking out…'
+                    : sessionState.checkinStatus === 'error' ? 'Check-in error'
+                    : 'Not checked in'}
+                </span>
+              </div>
+              {sessionState.state === 'selected' && (sessionState.checkinStatus === 'unchecked' || sessionState.checkinStatus === 'error') ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleCheckin}
+                  disabled={checkinLoading}
+                  className="text-xs h-7 gap-1.5 border-primary/30 hover:bg-primary/10 hover:text-primary"
+                >
+                  {checkinLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <LogIn className="w-3 h-3" />}
+                  CHECK IN
+                </Button>
+              ) : sessionState.state === 'checked-in' ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={handleWrap}
+                  disabled={checkinLoading}
+                  className="text-xs h-7 gap-1.5 text-muted-foreground hover:text-destructive"
+                >
+                  {checkinLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <LogOut className="w-3 h-3" />}
+                  CHECK OUT
+                </Button>
+              ) : null}
+            </div>
+
+            {/* Check-in warnings */}
+            {sessionState.checkinWarnings && sessionState.checkinWarnings.length > 0 && (
+              <div className="flex items-start gap-1.5 p-2 bg-[var(--yellow-flag)]/10 border border-[var(--yellow-flag)]/20 rounded">
+                <AlertCircle className="w-3.5 h-3.5 text-[var(--yellow-flag)] shrink-0 mt-0.5" />
+                <span className="text-xs text-[var(--yellow-flag)]">
+                  {sessionState.checkinWarnings.join('; ')}
+                </span>
+              </div>
+            )}
           </div>
         ) : (
           /* Session Dropdown */

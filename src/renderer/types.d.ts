@@ -170,6 +170,15 @@ export interface IElectronAPI {
   directorListSessions: (centerId?: string) => Promise<RaceSession[]>;
   directorCheckinSession: (raceSessionId: string, options?: { forceCheckin?: boolean }) => Promise<any>;
   directorWrapSession: (reason?: string) => Promise<any>;
+  session: {
+    getState: () => Promise<any>;
+    discover: (centerId?: string) => Promise<any>;
+    select: (raceSessionId: string) => Promise<any>;
+    clear: () => Promise<any>;
+    checkin: (options?: { forceCheckin?: boolean }) => Promise<any>;
+    wrap: (reason?: string) => Promise<any>;
+    onStateChanged: (callback: (state: any) => void) => () => void;
+  };
   obsGetStatus: () => Promise<{ connected: boolean; missingScenes: string[]; availableScenes: string[]; currentScene: string; host: string; autoConnect: boolean }>;
   obsGetScenes: () => Promise<string[]>;
   obsSetScene: (sceneName: string) => Promise<void>;
@@ -207,6 +216,7 @@ export interface IElectronAPI {
       cancelQueued: (executionId: string) => Promise<void>;
       queue: () => Promise<QueuedSequence[]>;
       history: () => Promise<ExecutionResult[]>;
+      getExecuting: (sequenceId: string) => Promise<PortableSequence | null>;
       onProgress: (callback: (progress: SequenceProgress) => void) => () => void;
   };
   catalog: {

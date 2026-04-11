@@ -101,6 +101,7 @@ export class SequenceScheduler extends EventEmitter {
   private maxHistory: number;
   private currentExecution: { executionId: string; cancel: () => void } | null = null;
   private isProcessing = false;
+  private executingSequences: Map<string, PortableSequence> = new Map();
 
   constructor(
     private executor: SequenceExecutor,
@@ -184,6 +185,14 @@ export class SequenceScheduler extends EventEmitter {
     // Recalculate positions
     this.queue.forEach((q, i) => (q.position = i + 1));
     this.emit('queueChanged', this.queue);
+  }
+
+  /**
+   * Get the PortableSequence for a currently or recently executing sequence.
+   * Used by the renderer to display sequences not in the library (e.g. cloud/agent).
+   */
+  getExecutingSequence(sequenceId: string): PortableSequence | null {
+    return this.executingSequences.get(sequenceId) ?? null;
   }
 
   /**
@@ -298,6 +307,9 @@ export class SequenceScheduler extends EventEmitter {
     }
 
     const totalSteps = resolvedSequence.steps.length;
+
+    // Track the executing sequence so the renderer can look it up
+    this.executingSequences.set(sequence.id, sequence);
 
     // Emit start
     this.emitProgress({

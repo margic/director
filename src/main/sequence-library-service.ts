@@ -15,6 +15,7 @@ import fs from 'fs/promises';
 import {
   PortableSequence,
   SequenceFilter,
+  SequenceTemplate,
   IntentCatalogEntry,
   EventCatalogEntry,
 } from './director-types';
@@ -32,6 +33,7 @@ export class SequenceLibraryService {
   private cloudCache: PortableSequence[] = [];
   private cloudCacheTimestamp = 0;
   private customCache: PortableSequence[] = [];
+  private activeSessionId: string | null = null;
 
   constructor(
     private capabilityCatalog: CapabilityCatalog,
@@ -48,6 +50,7 @@ export class SequenceLibraryService {
 
   /**
    * Initialize the library by loading built-in and custom sequences from disk.
+   * Cloud templates are not loaded until a session is set via setSession().
    */
   async initialize(): Promise<void> {
     // Ensure custom directory exists
@@ -55,13 +58,34 @@ export class SequenceLibraryService {
 
     await Promise.all([
       this.loadBuiltIn(),
-      this.loadCloud(),
       this.loadCustom(),
     ]);
 
     console.log(
-      `[SequenceLibrary] Initialized: ${this.builtInCache.length} built-in, ${this.cloudCache.length} cloud, ${this.customCache.length} custom sequences`
+      `[SequenceLibrary] Initialized: ${this.builtInCache.length} built-in, ${this.customCache.length} custom sequences`
     );
+  }
+
+  /**
+   * Set the active session for cloud template loading.
+   * Clears any existing cloud cache and fetches templates for the new session.
+   * Returns 'ready' if templates loaded, 'pending' if planner still running.
+   */
+  async setSession(raceSessionId: string): Promise<'ready' | 'pending'> {
+    this.activeSessionId = raceSessionId;
+    this.cloudCache = [];
+    this.cloudCacheTimestamp = 0;
+    return this.loadCloud();
+  }
+
+  /**
+   * Clear the active session and cloud template cache.
+   */
+  clearSession(): void {
+    this.activeSessionId = null;
+    this.cloudCache = [];
+    this.cloudCacheTimestamp = 0;
+    console.log('[SequenceLibrary] Session cleared — cloud templates purged');
   }
 
   /**
@@ -275,39 +299,75 @@ export class SequenceLibraryService {
   }
 
   /**
-   * Fetch cloud sequences from Race Control API.
+   * Fetch session templates from Race Control API and convert to PortableSequences.
+   * Uses GET /api/director/v1/sessions/{raceSessionId}/templates.
+   *
+   * Returns 'ready' when templates are loaded (HTTP 200),
+   * 'pending' when the Planner is still generating (HTTP 204).
    * Gracefully degrades when offline or unauthenticated.
    */
-  async loadCloud(): Promise<void> {
-    if (!this.authService) {
-      return;
+  async loadCloud(): Promise<'ready' | 'pending'> {
+    if (!this.authService || !this.activeSessionId) {
+      return 'pending';
     }
 
     try {
       const token = await this.authService.getAccessToken();
       if (!token) {
         console.warn('[SequenceLibrary] No access token — skipping cloud fetch');
-        return;
+        return 'pending';
       }
 
-      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listSequences}`;
+      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listTemplates(this.activeSessionId)}`;
+      console.log(`[SequenceLibrary] Fetching session templates from: ${url}`);
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (!response.ok) {
-        console.warn(`[SequenceLibrary] Cloud fetch failed: ${response.status} ${response.statusText}`);
-        return;
+      if (response.status === 204) {
+        console.log('[SequenceLibrary] Templates not ready yet (Planner still running)');
+        return 'pending';
       }
 
-      const data: PortableSequence[] = await response.json();
-      this.cloudCache = data.map((s) => ({ ...s, category: 'cloud' as const }));
+      if (!response.ok) {
+        const body = await response.text().catch(() => '');
+        console.warn(`[SequenceLibrary] Template fetch failed: ${response.status} ${response.statusText}`, body);
+        return 'pending';
+      }
+
+      const templates: SequenceTemplate[] = await response.json();
+      this.cloudCache = templates.map((t) => this.templateToSequence(t));
       this.cloudCacheTimestamp = Date.now();
-      console.log(`[SequenceLibrary] Loaded ${this.cloudCache.length} cloud sequences`);
+      console.log(`[SequenceLibrary] Loaded ${this.cloudCache.length} cloud template(s)`,
+        this.cloudCache.map(t => t.id));
+      return 'ready';
     } catch (err) {
       // Network failure — keep stale cache, don't crash
-      console.warn('[SequenceLibrary] Cloud fetch error (offline?):', err);
+      console.warn('[SequenceLibrary] Template fetch error (offline?):', err);
+      return 'pending';
     }
+  }
+
+  /**
+   * Convert a SequenceTemplate (from Planner) to a PortableSequence (for UI/executor).
+   */
+  private templateToSequence(template: SequenceTemplate): PortableSequence {
+    return {
+      id: template.id,
+      name: template.name,
+      description: template.description ?? template.applicability,
+      category: 'cloud',
+      priority: template.priority === 'incident',
+      variables: template.variables,
+      steps: template.steps,
+      metadata: {
+        source: template.source,
+        applicability: template.applicability,
+        priority: template.priority,
+        durationRange: template.durationRange,
+        raceSessionId: template.raceSessionId,
+      },
+    };
   }
 
   private async loadCustom(): Promise<void> {

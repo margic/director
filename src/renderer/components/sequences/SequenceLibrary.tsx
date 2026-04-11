@@ -29,7 +29,7 @@ interface SequenceLibraryProps {
 }
 
 const categoryConfig: Record<string, { icon: React.ElementType; label: string; color: string }> = {
-  'built-in': { icon: Package, label: 'Built-in', color: 'text-secondary' },
+  builtin: { icon: Package, label: 'Built-in', color: 'text-secondary' },
   cloud: { icon: Cloud, label: 'Cloud', color: 'text-primary' },
   custom: { icon: User, label: 'Custom', color: 'text-green-400' },
 };
@@ -77,7 +77,7 @@ export const SequenceLibrary: React.FC<SequenceLibraryProps> = ({
     return g;
   }, [filtered]);
 
-  const categoryOrder = ['built-in', 'cloud', 'custom'];
+  const categoryOrder = ['builtin', 'cloud', 'custom'];
 
   return (
     <div className="flex flex-col h-full">
@@ -166,7 +166,11 @@ export const SequenceLibrary: React.FC<SequenceLibraryProps> = ({
 
         {filtered.length === 0 && (
           <div className="text-center py-8 text-sm text-muted-foreground">
-            {search ? 'No sequences match your search' : 'No sequences available'}
+            {search
+              ? 'No sequences match your search'
+              : filterCategory === 'cloud'
+                ? 'Check in to a session to load cloud templates'
+                : 'No sequences available'}
           </div>
         )}
       </div>

@@ -194,7 +194,7 @@ function App() {
           {/* Sequences — core view, always visible */}
           <button
             onClick={() => setCurrentView('sequences')}
-            className={`p-3 rounded-lg transition-colors ${currentView === 'sequences' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
+            className={`p-3 rounded-lg transition-colors ${currentView === 'sequences' || currentView === 'sequences-live' ? 'bg-white/5 text-primary' : 'hover:bg-white/5 text-muted-foreground hover:text-primary'}`}
             title="Sequences"
           >
             <Zap className="w-6 h-6" />
@@ -283,15 +283,19 @@ function App() {
               />
             </>
           ) : currentView === 'director' ? (
-            <div className="w-full h-full">
-              <DirectorPanel />
+            <div className="w-full">
+              <DirectorPanel onNavigate={setCurrentView} />
             </div>
           ) : currentView === 'sequences' ? (
-            <div className="w-full h-full">
+            <div className="w-full flex-1 min-h-0">
               <SequencesPanel />
             </div>
+          ) : currentView === 'sequences-live' ? (
+            <div className="w-full flex-1 min-h-0">
+              <SequencesPanel initialTab="live" />
+            </div>
           ) : currentView === 'overlay' ? (
-            <div className="w-full h-full">
+            <div className="w-full">
               <OverlayPanel />
             </div>
           ) : currentView === 'settings' ? (

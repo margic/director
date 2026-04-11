@@ -63,6 +63,11 @@ describe('SessionManager', () => {
         sessions: [],
         selectedSession: null,
         lastError: undefined,
+        checkinStatus: 'unchecked',
+        checkinId: null,
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
       });
     });
   });
@@ -242,11 +247,11 @@ describe('SessionManager', () => {
       sessionManager.selectSession('session-1');
     });
 
-    it('should transition from selected to discovered', () => {
+    it('should transition from selected to discovered', async () => {
       const stateChangedSpy = vi.fn();
       sessionManager.on('stateChanged', stateChangedSpy);
 
-      sessionManager.clearSession();
+      await sessionManager.clearSession();
 
       expect(stateChangedSpy).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -260,15 +265,15 @@ describe('SessionManager', () => {
       expect(state.selectedSession).toBeNull();
     });
 
-    it('should do nothing if no session selected', () => {
+    it('should do nothing if no session selected', async () => {
       // Clear first selection
-      sessionManager.clearSession();
+      await sessionManager.clearSession();
 
       const stateChangedSpy = vi.fn();
       sessionManager.on('stateChanged', stateChangedSpy);
 
       // Try to clear again
-      sessionManager.clearSession();
+      await sessionManager.clearSession();
 
       // Should not emit state change
       expect(stateChangedSpy).not.toHaveBeenCalled();

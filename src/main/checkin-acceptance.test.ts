@@ -4,6 +4,9 @@
  * Comprehensive acceptance criteria tests for Session Check-In feature.
  * Based on issue: "Implement Check-In Client for Race Control API"
  *
+ * Check-in lifecycle is owned by SessionManager. The DirectorOrchestrator
+ * delegates to SessionManager and reads check-in state from it.
+ *
  * Acceptance Criteria:
  * 1. Check-in call succeeds and returns checkinId + sessionConfig + warnings
  * 2. Warnings display in UI (via state exposure)
@@ -45,9 +48,23 @@ describe('Session Check-In Acceptance Criteria', () => {
   let mockScheduler: any;
   let mockEventBus: any;
 
+  // Shared helper to configure SessionManager mock state
+  let sessionManagerState: any;
+
   beforeEach(() => {
     // Reset all mocks
     vi.clearAllMocks();
+
+    sessionManagerState = {
+      state: 'selected',
+      sessions: [],
+      selectedSession: { raceSessionId: 'session-abc-123', name: 'Test Race Session' },
+      checkinStatus: 'unchecked',
+      checkinId: null,
+      sessionConfig: null,
+      checkinWarnings: [],
+      checkinTtlSeconds: 120,
+    };
 
     // Create mock instances
     mockAuthService = {
@@ -81,14 +98,16 @@ describe('Session Check-In Acceptance Criteria', () => {
         name: 'Test Race Session',
       })),
       selectSession: vi.fn(),
-      clearSession: vi.fn(),
-      getState: vi.fn(() => ({
-        state: 'selected',
-        sessions: [],
-        selectedSession: { raceSessionId: 'session-abc-123', name: 'Test Race Session' }
-      })),
+      clearSession: vi.fn().mockResolvedValue(undefined),
+      getState: vi.fn(() => sessionManagerState),
       getSessions: vi.fn(() => []),
       discover: vi.fn(),
+      checkinSession: vi.fn().mockResolvedValue({}),
+      wrapSession: vi.fn().mockResolvedValue({}),
+      refreshCheckin: vi.fn().mockResolvedValue({}),
+      getCheckinId: vi.fn(() => sessionManagerState.checkinId),
+      getCheckinTtlSeconds: vi.fn(() => sessionManagerState.checkinTtlSeconds),
+      getSessionConfig: vi.fn(() => sessionManagerState.sessionConfig),
     });
 
     mockScheduler = Object.assign(new EventEmitter(), {
@@ -109,121 +128,69 @@ describe('Session Check-In Acceptance Criteria', () => {
   });
 
   describe('AC1: Check-in call succeeds and returns checkinId + sessionConfig + warnings', () => {
-    it('should successfully check in and receive all expected fields', async () => {
-      // Mock successful check-in response
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'checkin-xyz-789',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Test Race Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [
-              {
-                driverId: 'driver-1',
-                carNumber: '42',
-                rigId: 'rig-1',
-                obsSceneId: 'scene-1',
-                displayName: 'John Doe',
-              },
-            ],
-            obsScenes: ['scene-1', 'scene-2'],
-            obsHost: 'ws://localhost:4455',
-            timingConfig: {
-              idleRetryIntervalMs: 5000,
-              retryBackoffMs: 1000,
+    it('should delegate check-in to SessionManager and expose state', async () => {
+      // Configure mock to update state on checkinSession
+      mockSessionManager.checkinSession.mockImplementation(async () => {
+        sessionManagerState.checkinStatus = 'standby';
+        sessionManagerState.checkinId = 'checkin-xyz-789';
+        sessionManagerState.checkinTtlSeconds = 120;
+        sessionManagerState.sessionConfig = {
+          raceSessionId: 'session-abc-123',
+          name: 'Test Race Session',
+          status: 'ACTIVE',
+          simulator: 'iRacing',
+          drivers: [
+            {
+              driverId: 'driver-1',
+              carNumber: '42',
+              rigId: 'rig-1',
+              obsSceneId: 'scene-1',
+              displayName: 'John Doe',
             },
+          ],
+          obsScenes: ['scene-1', 'scene-2'],
+          obsHost: 'ws://localhost:4455',
+          timingConfig: {
+            idleRetryIntervalMs: 5000,
+            retryBackoffMs: 1000,
           },
-          warnings: ['OBS connected but iRacing is offline', 'No YouTube extension detected'],
-        }),
-      }) as any;
+        };
+        sessionManagerState.checkinWarnings = ['OBS connected but iRacing is offline', 'No YouTube extension detected'];
+        sessionManagerState.state = 'checked-in';
+        return sessionManagerState;
+      });
 
-      // Execute check-in
+      // Execute check-in via orchestrator (delegates to SessionManager)
       const state = await orchestrator.checkinSession('session-abc-123');
 
-      // Verify check-in was successful
+      // Verify SessionManager.checkinSession was called
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
+
+      // Verify state reflects SessionManager
       expect(state.checkinStatus).toBe('standby');
       expect(state.checkinId).toBe('checkin-xyz-789');
 
-      // Verify sessionConfig is present
+      // Verify sessionConfig
       expect(state.sessionConfig).toBeDefined();
       expect(state.sessionConfig?.raceSessionId).toBe('session-abc-123');
       expect(state.sessionConfig?.drivers).toHaveLength(1);
       expect(state.sessionConfig?.obsScenes).toEqual(['scene-1', 'scene-2']);
       expect(state.sessionConfig?.timingConfig?.idleRetryIntervalMs).toBe(5000);
 
-      // Verify warnings are captured
+      // Verify warnings
       expect(state.checkinWarnings).toHaveLength(2);
       expect(state.checkinWarnings).toContain('OBS connected but iRacing is offline');
       expect(state.checkinWarnings).toContain('No YouTube extension detected');
-
-      // Verify request was made with correct payload
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://simracecenter.com/api/director/v1/sessions/session-abc-123/checkin',
-        expect.objectContaining({
-          method: 'POST',
-          headers: expect.objectContaining({
-            'Authorization': 'Bearer test-bearer-token',
-            'Content-Type': 'application/json',
-          }),
-          body: expect.stringContaining('d_inst_test-uuid-12345'),
-        })
-      );
-
-      // Verify payload includes capabilities
-      const requestBody = JSON.parse((global.fetch as any).mock.calls[0][1].body);
-      expect(requestBody.directorId).toBe('d_inst_test-uuid-12345');
-      expect(requestBody.capabilities).toBeDefined();
-      expect(requestBody.capabilities.intents).toBeDefined();
-      expect(requestBody.capabilities.connections).toBeDefined();
     });
 
     it('should handle check-in with empty warnings array', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'checkin-no-warnings',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Test Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-          warnings: [],
-        }),
-      }) as any;
-
-      const state = await orchestrator.checkinSession('session-abc-123');
-      expect(state.checkinWarnings).toEqual([]);
-    });
-
-    it('should handle check-in with missing warnings field (undefined)', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'checkin-no-warnings-field',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Test Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-          // No warnings field
-        }),
-      }) as any;
+      mockSessionManager.checkinSession.mockImplementation(async () => {
+        sessionManagerState.checkinStatus = 'standby';
+        sessionManagerState.checkinId = 'checkin-no-warnings';
+        sessionManagerState.checkinWarnings = [];
+        sessionManagerState.state = 'checked-in';
+        return sessionManagerState;
+      });
 
       const state = await orchestrator.checkinSession('session-abc-123');
       expect(state.checkinWarnings).toEqual([]);
@@ -232,30 +199,17 @@ describe('Session Check-In Acceptance Criteria', () => {
 
   describe('AC2: Warnings display in UI (exposed in state)', () => {
     it('should expose warnings in state for UI consumption', async () => {
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'checkin-123',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Test Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-          warnings: ['Warning 1', 'Warning 2', 'Warning 3'],
-        }),
-      }) as any;
+      mockSessionManager.checkinSession.mockImplementation(async () => {
+        sessionManagerState.checkinWarnings = ['Warning 1', 'Warning 2', 'Warning 3'];
+        sessionManagerState.checkinStatus = 'standby';
+        sessionManagerState.checkinId = 'checkin-123';
+        sessionManagerState.state = 'checked-in';
+        return sessionManagerState;
+      });
 
       await orchestrator.checkinSession('session-abc-123');
 
-      // Get state (as UI would)
       const state = orchestrator.getState();
-
-      // Verify warnings are accessible
       expect(state.checkinWarnings).toBeDefined();
       expect(state.checkinWarnings).toHaveLength(3);
       expect(state.checkinWarnings).toEqual(['Warning 1', 'Warning 2', 'Warning 3']);
@@ -264,27 +218,7 @@ describe('Session Check-In Acceptance Criteria', () => {
 
   describe('AC3: X-Checkin-Id is sent on every sequence request', () => {
     it('should include X-Checkin-Id header in CloudPoller sequence requests', async () => {
-      // First, check in
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'checkin-for-polling',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Test Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-        }),
-      }) as any;
-
-      await orchestrator.checkinSession('session-abc-123');
-
-      // Now create a CloudPoller with the checkinId
+      // Create a CloudPoller with the checkinId
       const poller = new CloudPoller(
         mockAuthService,
         'session-abc-123',
@@ -329,48 +263,26 @@ describe('Session Check-In Acceptance Criteria', () => {
   });
 
   describe('AC4: Wrap call releases the check-in on session stop', () => {
-    it('should send DELETE request with X-Checkin-Id on wrap', async () => {
-      // First check in
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'checkin-to-wrap',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Test Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-        }),
-      }) as any;
+    it('should delegate wrap to SessionManager', async () => {
+      // Set up checked-in state
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-to-wrap';
+      sessionManagerState.state = 'checked-in';
 
-      await orchestrator.checkinSession('session-abc-123');
-      expect(orchestrator.getState().checkinId).toBe('checkin-to-wrap');
-
-      // Mock successful wrap response
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-      }) as any;
+      mockSessionManager.wrapSession.mockImplementation(async () => {
+        sessionManagerState.checkinStatus = 'unchecked';
+        sessionManagerState.checkinId = null;
+        sessionManagerState.sessionConfig = null;
+        sessionManagerState.checkinWarnings = [];
+        sessionManagerState.state = 'selected';
+        return sessionManagerState;
+      });
 
       // Execute wrap
       await orchestrator.wrapSession('test-stop');
 
-      // Verify DELETE request was made with X-Checkin-Id header
-      expect(global.fetch).toHaveBeenCalledWith(
-        'https://simracecenter.com/api/director/v1/sessions/session-abc-123/checkin',
-        expect.objectContaining({
-          method: 'DELETE',
-          headers: expect.objectContaining({
-            'Authorization': 'Bearer test-bearer-token',
-            'X-Checkin-Id': 'checkin-to-wrap',
-          }),
-        })
-      );
+      // Verify SessionManager.wrapSession was called
+      expect(mockSessionManager.wrapSession).toHaveBeenCalledWith('test-stop');
 
       // Verify state was reset
       const state = orchestrator.getState();
@@ -379,68 +291,21 @@ describe('Session Check-In Acceptance Criteria', () => {
       expect(state.sessionConfig).toBeNull();
     });
 
-    it('should handle 404 on wrap as success (already expired)', async () => {
-      // Check in first
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'checkin-expired',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Test Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-        }),
-      }) as any;
-
-      await orchestrator.checkinSession('session-abc-123');
-
-      // Mock 404 response (check-in already expired)
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: false,
-        status: 404,
-      }) as any;
-
-      // Wrap should succeed even with 404
+    it('should handle wrap when not checked in', async () => {
+      // No check-in active (default state)
       await orchestrator.wrapSession();
 
-      // Verify state was still reset
-      const state = orchestrator.getState();
-      expect(state.checkinStatus).toBe('unchecked');
-      expect(state.checkinId).toBeNull();
+      // Should still call SessionManager
+      expect(mockSessionManager.wrapSession).toHaveBeenCalled();
     });
   });
 
   describe('AC5: Re-check-in fires on extension connect/disconnect', () => {
-    beforeEach(() => {
-      // Mock successful check-in response for all tests
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'checkin-123',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Test Session',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-        }),
-      }) as any;
-    });
-
-    it('should re-check-in when OBS connects', async () => {
-      // Initial check-in
-      await orchestrator.checkinSession('session-abc-123');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+    it('should refresh check-in via SessionManager when OBS connects', async () => {
+      // Set checked-in state
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-123';
+      sessionManagerState.state = 'checked-in';
 
       // Emit OBS connection event
       mockEventBus.emit('obs.connectionStateChanged', {
@@ -448,16 +313,15 @@ describe('Session Check-In Acceptance Criteria', () => {
         payload: { connected: true },
       });
 
-      // Wait for async re-check-in
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      // Should have re-checked in
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
     });
 
-    it('should re-check-in when iRacing connects', async () => {
-      await orchestrator.checkinSession('session-abc-123');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+    it('should refresh check-in via SessionManager when iRacing connects', async () => {
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-123';
+      sessionManagerState.state = 'checked-in';
 
       mockEventBus.emit('iracing.connectionStateChanged', {
         extensionId: 'director-iracing',
@@ -465,12 +329,13 @@ describe('Session Check-In Acceptance Criteria', () => {
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
     });
 
-    it('should re-check-in when YouTube status changes', async () => {
-      await orchestrator.checkinSession('session-abc-123');
-      expect(global.fetch).toHaveBeenCalledTimes(1);
+    it('should refresh check-in via SessionManager when YouTube status changes', async () => {
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-123';
+      sessionManagerState.state = 'checked-in';
 
       mockEventBus.emit('youtube.status', {
         extensionId: 'director-youtube',
@@ -478,27 +343,25 @@ describe('Session Check-In Acceptance Criteria', () => {
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));
-      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
     });
 
-    it('should NOT re-check-in if not currently checked in', async () => {
-      // No initial check-in
+    it('should NOT refresh if not currently checked in', async () => {
+      // Default unchecked state
 
-      // Emit connection event
       mockEventBus.emit('obs.connectionStateChanged', {
         extensionId: 'director-obs',
         payload: { connected: true },
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));
-
-      // Should not have called fetch
-      expect(global.fetch).not.toHaveBeenCalled();
+      expect(mockSessionManager.refreshCheckin).not.toHaveBeenCalled();
     });
 
     it('should handle multiple rapid connection events gracefully', async () => {
-      await orchestrator.checkinSession('session-abc-123');
-      const initialCallCount = (global.fetch as any).mock.calls.length;
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-123';
+      sessionManagerState.state = 'checked-in';
 
       // Emit multiple connection events rapidly
       mockEventBus.emit('obs.connectionStateChanged', {
@@ -516,46 +379,39 @@ describe('Session Check-In Acceptance Criteria', () => {
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Should have re-checked in for each event
-      expect((global.fetch as any).mock.calls.length).toBeGreaterThan(initialCallCount);
+      // Should have called refreshCheckin for each event
+      expect(mockSessionManager.refreshCheckin.mock.calls.length).toBeGreaterThanOrEqual(3);
     });
   });
 
   describe('Integration: Complete Check-In Flow', () => {
-    it('should complete full lifecycle: check-in → poll → wrap', async () => {
+    it('should complete full lifecycle: check-in → state → wrap', async () => {
       // 1. Check in
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          status: 'standby',
-          checkinId: 'full-lifecycle-checkin',
-          checkinTtlSeconds: 120,
-          sessionConfig: {
-            raceSessionId: 'session-abc-123',
-            name: 'Full Lifecycle Test',
-            status: 'ACTIVE',
-            simulator: 'iRacing',
-            drivers: [],
-            obsScenes: [],
-          },
-          warnings: ['Test warning'],
-        }),
-      }) as any;
+      mockSessionManager.checkinSession.mockImplementation(async () => {
+        sessionManagerState.checkinStatus = 'standby';
+        sessionManagerState.checkinId = 'full-lifecycle-checkin';
+        sessionManagerState.checkinWarnings = ['Test warning'];
+        sessionManagerState.state = 'checked-in';
+        return sessionManagerState;
+      });
 
       const checkinState = await orchestrator.checkinSession('session-abc-123');
       expect(checkinState.checkinStatus).toBe('standby');
       expect(checkinState.checkinId).toBe('full-lifecycle-checkin');
       expect(checkinState.checkinWarnings).toContain('Test warning');
 
-      // 2. Verify CloudPoller would use the checkinId
-      // (This is tested separately in AC3, just verify state is correct)
+      // 2. Verify state is correct
       expect(checkinState.checkinId).toBeTruthy();
 
       // 3. Wrap the session
-      global.fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        status: 200,
-      }) as any;
+      mockSessionManager.wrapSession.mockImplementation(async () => {
+        sessionManagerState.checkinStatus = 'unchecked';
+        sessionManagerState.checkinId = null;
+        sessionManagerState.sessionConfig = null;
+        sessionManagerState.checkinWarnings = [];
+        sessionManagerState.state = 'selected';
+        return sessionManagerState;
+      });
 
       const wrapState = await orchestrator.wrapSession('test-complete');
       expect(wrapState.checkinStatus).toBe('unchecked');

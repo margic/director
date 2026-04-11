@@ -46,10 +46,12 @@ function deriveStepStatus(
   }
 
   // During execution, check position relative to current step
-  if (isExecuting && currentStepIndex !== undefined) {
+  if (currentStepIndex !== undefined) {
     const oneIndexed = stepIndex + 1;
-    if (oneIndexed === currentStepIndex) return 'active';
+    if (isExecuting && oneIndexed === currentStepIndex) return 'active';
     if (oneIndexed < currentStepIndex) return 'completed';
+    // After execution ends, the last step (currentStepIndex == steps count) is also completed
+    if (!isExecuting && oneIndexed <= currentStepIndex) return 'completed';
   }
 
   return 'pending';
