@@ -6,7 +6,8 @@ import {
   VoiceConnection, 
   VoiceConnectionStatus,
   AudioPlayer,
-  NoSubscriberBehavior
+  NoSubscriberBehavior,
+  entersState
 } from '@discordjs/voice';
 import { Readable } from 'stream';
 import { app } from 'electron';
@@ -147,11 +148,6 @@ export class DiscordService {
       });
 
       return new Promise<void>((resolve, reject) => {
-          // Timeout protection
-          const connectionTimeout = setTimeout(() => {
-              reject(new Error('Connection timed out'));
-          }, 15000);
-
           this.client!.once('clientReady', async () => {
               console.log(`[DiscordService] Bot logged in as ${this.client?.user?.tag}`);
               try {
@@ -180,8 +176,19 @@ export class DiscordService {
                       adapterCreator: guildCallback.voiceAdapterCreator,
                   });
 
-                  this.connection.on(VoiceConnectionStatus.Ready, () => {
-                      clearTimeout(connectionTimeout);
+                  this.connection.on(VoiceConnectionStatus.Disconnected, () => {
+                       console.log('[DiscordService] Voice Disconnected');
+                       this.status.connected = false;
+                  });
+                  
+                  this.connection.on(VoiceConnectionStatus.Signalling, () => {
+                      console.log('[DiscordService] Voice Signalling...');
+                  });
+
+                  // Wait for the connection to become ready (max 30 seconds)
+                  try {
+                      await entersState(this.connection, VoiceConnectionStatus.Ready, 30_000);
+                      
                       console.log('[DiscordService] Voice Connection Ready');
                       this.status.connected = true;
                       this.status.channelName = (channel as any).name;
@@ -194,33 +201,26 @@ export class DiscordService {
                       });
                       
                       // Subscribe connection to player
-                      this.connection?.subscribe(this.player);
+                      this.connection.subscribe(this.player);
                       
                       this.player.on('error', error => {
                           console.error('[DiscordService] Audio Player Error:', error);
                       });
 
                       resolve();
-                  });
-
-                  this.connection.on(VoiceConnectionStatus.Disconnected, () => {
-                       console.log('[DiscordService] Voice Disconnected');
-                       this.status.connected = false;
-                  });
-                  
-                  this.connection.on(VoiceConnectionStatus.Signalling, () => {
-                      console.log('[DiscordService] Voice Signalling...');
-                  });
+                  } catch (error) {
+                      console.error('[DiscordService] Failed to establish voice connection (timed out after 30s)');
+                      this.connection.destroy();
+                      throw new Error('Connection timed out');
+                  }
 
               } catch (err) {
-                  clearTimeout(connectionTimeout);
                   console.error('[DiscordService] Failed to join channel:', err);
                   reject(err);
               }
           });
 
           this.client!.login(token).catch((err) => {
-              clearTimeout(connectionTimeout);
               console.error('[DiscordService] Login failed:', err);
               reject(err);
           });
