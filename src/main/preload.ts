@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   discordConnect: (token: string, channelId: string) => ipcRenderer.invoke('discord:connect', token, channelId),
   discordDisconnect: () => ipcRenderer.invoke('discord:disconnect'),
   discordSendTest: (text: string) => ipcRenderer.invoke('discord:send-test', text),
+  discordUpdateVoicePreference: (voice: string) => ipcRenderer.invoke('discord:update-voice-preference', voice),
   
   // Telemetry API
   telemetry: {

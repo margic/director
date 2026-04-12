@@ -15,10 +15,10 @@ export async function activate(director: ExtensionAPI) {
     // DiscordService in the main process.  The extension delegates TTS
     // playback via the invoke() bridge so that only a single bot Client
     // exists application-wide.
-    director.registerIntentHandler('communication.announce', async (payload: { message: string }) => {
+    director.registerIntentHandler('communication.announce', async (payload: { message: string; context?: { type?: string; urgency?: string }; voice?: string }) => {
         director.log('info', `Received announce request: ${payload.message}`);
         try {
-            await director.invoke('discordPlayTts', payload.message);
+            await director.invoke('discordPlayTts', payload.message, payload.context, payload.voice);
             director.log('info', 'TTS playback delegated to DiscordService.');
         } catch (err: any) {
             director.log('error', `TTS Failed: ${err.message}`);
