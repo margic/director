@@ -115,8 +115,11 @@ app.on('ready', () => {
   extensionHost = new ExtensionHostService(extensionsPath, intentRegistry, eventBus, viewRegistry, authService, capabilityCatalog, overlayBus);
 
   // Register invoke handlers so extensions can delegate to main-process services
-  extensionHost.registerInvokeHandler('discordPlayTts', async ([text]) => {
-    return discordService.playTts(text);
+  extensionHost.registerInvokeHandler('discordPlayTts', async ([text, context, voice]) => {
+    return discordService.playTts(text, {
+      context: context ? { type: context.type || 'race_update', urgency: context.urgency || 'medium' } : undefined,
+      voice,
+    });
   });
 
   // Initialize Sequence Executor & Scheduler (must be before DirectorOrchestrator)
@@ -622,6 +625,25 @@ app.on('ready', () => {
   });
   ipcMain.handle('discord:disconnect', async () => discordService.disconnect());
   ipcMain.handle('discord:send-test', async (_, text: string) => discordService.playTts(text));
+  ipcMain.handle('discord:update-voice-preference', async (_, voice: string) => {
+    const token = await authService.getAccessToken();
+    if (!token) throw new Error('No access token available');
+    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.userVoice}`;
+    const response = await fetch(url, {
+      method: 'PATCH',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ voice }),
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`[Main] Voice preference update failed: ${response.status}`, errorText);
+      throw new Error(`Voice preference update failed: ${response.status} ${response.statusText}`);
+    }
+    return response.json();
+  });
 
   // ============================================================================
   // Sequence Library & Execution IPC Handlers

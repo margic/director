@@ -47,6 +47,7 @@ export const apiConfig = {
     getSequence: (sequenceId: string) => `/api/director/v1/sequences/${sequenceId}`,
     listTemplates: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/templates`,
     tts: '/api/tts',
+    userVoice: '/api/auth/user/voice',
     checkin: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/checkin`,
     refreshCheckin: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/checkin`,
     wrap: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/checkin`,

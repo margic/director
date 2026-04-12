@@ -190,6 +190,7 @@ export interface IElectronAPI {
   discordConnect: (token?: string, channelId?: string) => Promise<void>;
   discordDisconnect: () => Promise<void>;
   discordSendTest: (text: string) => Promise<void>;
+  discordUpdateVoicePreference: (voice: string) => Promise<any>;
   config: {
     get: (key: string) => Promise<any>;
     set: (key: string, value: any) => Promise<void>;

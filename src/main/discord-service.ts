@@ -68,6 +68,37 @@ export interface DiscordStatus {
   messagesSent: number;
 }
 
+/**
+ * Context metadata sent alongside TTS requests to influence voice/tone.
+ * Matches the `context` object in the Race Control OpenAPI spec for POST /api/tts.
+ */
+export interface TtsContext {
+  type: string;      // e.g. 'race_update', 'commentary', 'safety', 'driver_message'
+  urgency: string;   // e.g. 'low', 'medium', 'high'
+}
+
+/**
+ * Map well-known sequence intent prefixes to TTS context types.
+ * Falls back to 'race_update' for unknown intents.
+ */
+export function mapIntentToContextType(intent?: string): string {
+  if (!intent) return 'race_update';
+  if (intent.startsWith('safety.') || intent.includes('safety') || intent.includes('caution')) return 'safety';
+  if (intent.startsWith('communication.talkToChat') || intent.includes('commentary')) return 'commentary';
+  if (intent.startsWith('communication.talkToDriver') || intent.includes('driver')) return 'driver_message';
+  return 'race_update';
+}
+
+/**
+ * Derive urgency from step metadata or priority flag.
+ * Defaults to 'medium'.
+ */
+export function deriveUrgency(options?: { priority?: boolean; urgency?: string }): string {
+  if (options?.urgency) return options.urgency;
+  if (options?.priority) return 'high';
+  return 'medium';
+}
+
 export class DiscordService {
   private client: Client | null = null;
   private connection: VoiceConnection | null = null;
@@ -213,9 +244,12 @@ export class DiscordService {
 
   /**
    * Play TTS stream to the connected voice channel.
+   *
+   * @param text     - The text to synthesise.
+   * @param options  - Optional context/voice metadata sent to the TTS API.
    */
-  public async playTts(text: string, voiceId?: string) {
-    console.log(`[DiscordService] Playing TTS: "${text}" (Voice: ${voiceId || 'default'})`);
+  public async playTts(text: string, options?: { context?: TtsContext; voice?: string }) {
+    console.log(`[DiscordService] Playing TTS: "${text}" (Voice: ${options?.voice || 'default'})`);
     
     if (!this.status.connected || !this.player) {
         const msg = 'Cannot play audio: Not connected to Voice Channel';
@@ -239,12 +273,15 @@ export class DiscordService {
 
         const url = `${apiConfig.baseUrl}${apiConfig.endpoints.tts}`;
         
-        // Construct minimal payload according to OpenAPI spec
-        // We omit 'context' to avoid potential server-side parsing issues with optional fields
-        // and because the previous 'voiceId' field caused issues.
-        const payload = {
-            text
+        // Build payload per OpenAPI spec — always include context for voice/tone hints
+        const payload: Record<string, unknown> = {
+            text,
+            context: options?.context ?? { type: 'race_update', urgency: 'medium' },
         };
+
+        if (options?.voice) {
+            payload.voice = options.voice;
+        }
 
         console.log(`[DiscordService] Sending TTS request to ${url} with payload:`, JSON.stringify(payload));
 
@@ -306,7 +343,9 @@ export class DiscordService {
         this.status.messagesSent++;
 
         this.telemetryService?.trackEvent('Discord.TTS.Played', {
-             voiceId: voiceId || 'default'
+             voice: options?.voice || 'default',
+             contextType: options?.context?.type || 'race_update',
+             contextUrgency: options?.context?.urgency || 'medium'
         });
         console.log('[DiscordService] Audio resource queued');
     } catch (err) {
