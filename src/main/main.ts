@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import path from 'path';
 import { url } from 'inspector';
 import { AuthService } from './auth-service';
+import { apiConfig } from './auth-config';
 import { DirectorOrchestrator } from './director-orchestrator';
 import { telemetryService, SEVERITY_MAP } from './telemetry-service';
 import { ObsService } from './modules/obs-core/obs-service';
