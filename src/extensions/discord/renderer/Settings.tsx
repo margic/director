@@ -53,6 +53,15 @@ export const DiscordSettings = () => {
     const handleVoiceChange = async (voice: string) => {
         setDiscordConfig(prev => ({ ...prev, voicePreference: voice }));
 
+        // Persist locally immediately so config stays in sync
+        if (window.electronAPI?.config) {
+            try {
+                await window.electronAPI.config.set('discord.voicePreference', voice);
+            } catch (e) {
+                console.warn('Failed to persist voice preference locally:', e);
+            }
+        }
+
         // Persist to Race Control API
         if (window.electronAPI?.discordUpdateVoicePreference) {
             setVoiceSaving(true);
@@ -60,7 +69,6 @@ export const DiscordSettings = () => {
                 await window.electronAPI.discordUpdateVoicePreference(voice);
             } catch (e) {
                 console.warn('Failed to persist voice preference to Race Control:', e);
-                // Still saved locally via config on next handleSaveDiscord
             } finally {
                 setVoiceSaving(false);
             }

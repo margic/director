@@ -117,7 +117,10 @@ app.on('ready', () => {
   // Register invoke handlers so extensions can delegate to main-process services
   extensionHost.registerInvokeHandler('discordPlayTts', async ([text, context, voice]) => {
     return discordService.playTts(text, {
-      context: context ? { type: context.type || 'race_update', urgency: context.urgency || 'medium' } : undefined,
+      context: {
+        type: context?.type || 'race_update',
+        urgency: context?.urgency || 'medium',
+      },
       voice,
     });
   });

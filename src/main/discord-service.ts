@@ -83,9 +83,9 @@ export interface TtsContext {
  */
 export function mapIntentToContextType(intent?: string): string {
   if (!intent) return 'race_update';
-  if (intent.startsWith('safety.') || intent.includes('safety') || intent.includes('caution')) return 'safety';
-  if (intent.startsWith('communication.talkToChat') || intent.includes('commentary')) return 'commentary';
-  if (intent.startsWith('communication.talkToDriver') || intent.includes('driver')) return 'driver_message';
+  if (intent.startsWith('safety.') || intent.startsWith('caution.')) return 'safety';
+  if (intent === 'communication.talkToChat' || intent.startsWith('communication.talkToChat.') || intent.startsWith('commentary.')) return 'commentary';
+  if (intent === 'communication.talkToDriver' || intent.startsWith('communication.talkToDriver.') || intent.startsWith('driver.')) return 'driver_message';
   return 'race_update';
 }
 

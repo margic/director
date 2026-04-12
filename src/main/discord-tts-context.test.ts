@@ -10,13 +10,12 @@ describe('TTS Context Mapping', () => {
 
     it('returns "safety" for safety-related intents', () => {
       expect(mapIntentToContextType('safety.fullCourseYellow')).toBe('safety');
-      expect(mapIntentToContextType('system.safety')).toBe('safety');
       expect(mapIntentToContextType('caution.deployed')).toBe('safety');
     });
 
     it('returns "commentary" for chat/commentary intents', () => {
       expect(mapIntentToContextType('communication.talkToChat')).toBe('commentary');
-      expect(mapIntentToContextType('broadcast.commentary')).toBe('commentary');
+      expect(mapIntentToContextType('commentary.live')).toBe('commentary');
     });
 
     it('returns "driver_message" for driver-targeted intents', () => {
@@ -27,6 +26,11 @@ describe('TTS Context Mapping', () => {
     it('returns "race_update" for generic intents', () => {
       expect(mapIntentToContextType('communication.announce')).toBe('race_update');
       expect(mapIntentToContextType('broadcast.showLiveCam')).toBe('race_update');
+    });
+
+    it('does not match broad substrings (e.g. "multidriver")', () => {
+      expect(mapIntentToContextType('multidriver.sync')).toBe('race_update');
+      expect(mapIntentToContextType('camera.driverCam')).toBe('race_update');
     });
   });
 
