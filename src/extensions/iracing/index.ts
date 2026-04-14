@@ -1,5 +1,6 @@
 import koffi from 'koffi';
 import yaml from 'js-yaml';
+import { resolveCameraGroup } from './camera-utils';
 
 // Define Extension API (must match ExtensionApiImpl in extension-process.ts)
 interface ExtensionAPI {
@@ -668,7 +669,7 @@ function pollSessionData(director: ExtensionAPI) {
 
 function handleShowLiveCam(payload: { carNum: string, camGroup?: string, camNum?: string }) {
     if (!directorAPI) return;
-    const group = payload.camGroup ? parseInt(payload.camGroup) : 0; 
+    const group = resolveCameraGroup(payload.camGroup, cachedCameraGroups);
     const carVal = parseInt(payload.carNum);
     directorAPI.log('info', `Switching Cam: Car ${carVal}, Group ${group}`);
     // Legacy: sendCommand(1, car, group) => cmd=1, var1=car, var2=group
