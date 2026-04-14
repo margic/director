@@ -17,6 +17,8 @@ import {
   PortableSequence,
   CheckinStatus,
   SessionOperationalConfig,
+  RaceContext,
+  BattleInfo,
 } from './director-types';
 import { SequenceScheduler } from './sequence-scheduler';
 import { CloudPoller } from './cloud-poller';
@@ -76,6 +78,8 @@ export class DirectorOrchestrator extends EventEmitter {
   private scheduler: SequenceScheduler;
   private cloudPoller: CloudPoller | null = null;
   private currentRaceSessionId: string | null = null;
+  private lastRaceState: any | null = null;       // Cached iRacing RaceState
+  private lastObsScene: string | null = null;      // Cached OBS current scene
 
   constructor(
     private authService: AuthService,
@@ -253,6 +257,7 @@ export class DirectorOrchestrator extends EventEmitter {
       {
         idleRetryMs,
         getActiveIntents: () => this.getActiveIntents(),
+        getRaceContext: () => this.buildRaceContext(),
         onSequence: (sequence) => this.handleSequence(sequence),
         onSessionEnded: () => this.handleSessionEnded(),
         checkinId: checkinId || undefined,
@@ -368,6 +373,18 @@ export class DirectorOrchestrator extends EventEmitter {
   private listenForConnectionEvents(): void {
     if (!this.eventBus) return;
 
+    // Cache iRacing race state for race context reporting
+    this.eventBus.on('iracing.raceStateChanged', (data: { extensionId: string; payload: any }) => {
+      this.lastRaceState = data.payload;
+    });
+
+    // Cache OBS current scene for race context reporting
+    this.eventBus.on('obs.scenes', (data: { extensionId: string; payload: any }) => {
+      if (data.payload?.currentScene) {
+        this.lastObsScene = data.payload.currentScene;
+      }
+    });
+
     // Handle all connection state change events
     const connectionEvents = [
       'obs.connectionStateChanged',
@@ -437,6 +454,74 @@ export class DirectorOrchestrator extends EventEmitter {
    * sequence generation to only emit steps we can execute.
    * Always includes system.wait and system.log (built-in, always available).
    */
+  // iRacing session flag bit constants
+  private static readonly FLAG_CHECKERED = 0x0001;
+  private static readonly FLAG_WHITE     = 0x0002;
+  private static readonly FLAG_GREEN     = 0x0004;
+  private static readonly FLAG_YELLOW    = 0x0008;
+  private static readonly FLAG_RED       = 0x0010;
+  private static readonly FLAG_CAUTION   = 0x4000;
+
+  /**
+   * Build a live race context snapshot from cached extension events.
+   * Returns null if no iRacing telemetry is available.
+   */
+  private buildRaceContext(): RaceContext | null {
+    if (!this.eventBus) return null;
+
+    // Read latest cached events via the event bus listeners
+    // The event bus caches aren't directly accessible — we maintain our own snapshot
+    // by reading from the last emitted event data via a lightweight listener pattern.
+    // For now, read from the orchestrator's own cached state.
+    const raceState = this.lastRaceState;
+    if (!raceState) return null;
+
+    // Decode session flags bitfield to human-readable string
+    const flags = raceState.sessionFlags ?? 0;
+    let sessionFlagsStr = 'GREEN';
+    if (flags & DirectorOrchestrator.FLAG_RED)       sessionFlagsStr = 'RED';
+    else if (flags & DirectorOrchestrator.FLAG_YELLOW || flags & DirectorOrchestrator.FLAG_CAUTION)
+                                                      sessionFlagsStr = 'YELLOW';
+    else if (flags & DirectorOrchestrator.FLAG_CHECKERED) sessionFlagsStr = 'CHECKERED';
+    else if (flags & DirectorOrchestrator.FLAG_WHITE)     sessionFlagsStr = 'WHITE';
+
+    // Detect battles: consecutive cars with gap < 1.0s
+    const battles: BattleInfo[] = [];
+    const cars = raceState.cars ?? [];
+    for (let i = 1; i < cars.length; i++) {
+      if (cars[i].gapToCarAhead > 0 && cars[i].gapToCarAhead < 1.0) {
+        battles.push({
+          cars: [cars[i - 1].carNumber, cars[i].carNumber],
+          gapSec: Math.round(cars[i].gapToCarAhead * 100) / 100,
+        });
+      }
+    }
+
+    // Find focused car number
+    const focusedCar = cars.find((c: any) => c.carIdx === raceState.focusedCarIdx);
+
+    // Pit road activity
+    const pitting = cars.filter((c: any) => c.onPitRoad).map((c: any) => c.carNumber);
+
+    return {
+      sessionType: raceState.sessionType ?? 'Race',
+      sessionFlags: sessionFlagsStr,
+      cautionType: raceState.cautionType ?? 'none',
+      lapsRemain: raceState.sessionLapsRemain ?? -1,
+      timeRemainSec: raceState.sessionTimeRemain != null ? Math.round(raceState.sessionTimeRemain) : -1,
+      leaderLap: raceState.leaderLap ?? 0,
+      totalLaps: raceState.totalSessionLaps ?? -1,
+      focusedCarNumber: focusedCar?.carNumber ?? '',
+      currentObsScene: this.lastObsScene ?? undefined,
+      battles,
+      pitting,
+      carCount: cars.length,
+      trackName: raceState.trackName ?? '',
+      trackType: raceState.trackType ?? '',
+      seriesName: raceState.seriesName ?? '',
+    };
+  }
+
   private getActiveIntents(): string[] {
     const builtIns = ['system.wait', 'system.log'];
     try {

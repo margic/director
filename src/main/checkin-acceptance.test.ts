@@ -248,16 +248,11 @@ describe('Session Check-In Acceptance Criteria', () => {
       expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/sequences/next'),
         expect.objectContaining({
+          method: 'POST',
           headers: expect.objectContaining({
             'X-Checkin-Id': 'checkin-for-polling',
           }),
         })
-      );
-
-      // Verify checkinId is also in query params (fallback)
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('checkinId=checkin-for-polling'),
-        expect.anything()
       );
     });
   });

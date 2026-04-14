@@ -14,7 +14,5 @@ export class ExtensionEventBus extends EventEmitter {
     
     this.emit(eventName, { extensionId, payload });
     this.emit('*', { extensionId, eventName, payload });
-    
-    console.log(`[EventBus] Extension '${extensionId}' emitted '${eventName}'`);
   }
 }

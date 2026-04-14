@@ -13,7 +13,7 @@
  */
 
 import { AuthService } from './auth-service';
-import { PortableSequence } from './director-types';
+import { PortableSequence, RaceContext } from './director-types';
 import { normalizeApiResponse } from './normalizer';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
@@ -42,6 +42,12 @@ export interface CloudPollerOptions {
    * Should stop the polling loop and clean up resources.
    */
   onSessionEnded: () => void;
+
+  /**
+   * Returns a live race context snapshot for the Tier-2 Executor model.
+   * Included as `raceContext` in the POST body to /sequences/next.
+   */
+  getRaceContext?: () => RaceContext | null;
 
   /**
    * Optional check-in ID for the current session.
@@ -180,37 +186,41 @@ export class CloudPoller {
     }
 
     try {
-      // Build query parameters per updated OpenAPI spec:
-      //   lastSequenceId — ID of the sequence just completed (for chaining/logging)
-      //   intents — comma-separated list of active intent handlers (capability reporting)
-      //   checkinId — fallback in case SWA strips custom headers
-      const params = new URLSearchParams();
+      // Build POST body per RFC #203 — race context is the primary input
+      // to the Tier-2 Executor model's decision.
+      const body: Record<string, unknown> = {};
+
       if (this.lastCompletedSequenceId) {
-        params.set('lastSequenceId', this.lastCompletedSequenceId);
+        body.lastSequenceId = this.lastCompletedSequenceId;
       }
 
       const activeIntents = this.options.getActiveIntents();
       if (activeIntents.length > 0) {
-        params.set('intents', activeIntents.join(','));
+        body.intents = activeIntents;
       }
 
-      if (this.options.checkinId) {
-        params.set('checkinId', this.options.checkinId);
+      if (this.options.getRaceContext) {
+        const ctx = this.options.getRaceContext();
+        if (ctx) {
+          body.raceContext = ctx;
+        }
       }
 
-      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.raceSessionId)}?${params}`;
-      console.log('[CloudPoller] Fetching next sequence from:', url);
+      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.raceSessionId)}`;
+      console.log('[CloudPoller] Requesting next sequence from:', url);
 
       const headers: Record<string, string> = {
         'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
       };
       if (this.options.checkinId) {
         headers['X-Checkin-Id'] = this.options.checkinId;
       }
 
       const response = await fetch(url, {
-        method: 'GET',
+        method: 'POST',
         headers,
+        body: JSON.stringify(body),
       });
 
       const duration = Date.now() - startTime;

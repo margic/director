@@ -344,3 +344,31 @@ export interface GenerationParams {
   executorModel?: string;
 }
 
+// ============================================================================
+// Race Context — live telemetry snapshot sent with /sequences/next
+// Gives the Tier-2 Executor model race awareness for sequence selection.
+// ============================================================================
+
+export interface BattleInfo {
+  cars: string[];   // Car numbers involved
+  gapSec: number;   // Gap between them in seconds
+}
+
+export interface RaceContext {
+  sessionType: string;           // 'Practice', 'Qualify', 'Race'
+  sessionFlags: string;          // Human-readable: 'GREEN', 'YELLOW', 'RED', 'CHECKERED', 'WHITE'
+  cautionType: string;           // 'local', 'fullCourse', 'none' — from WeekendInfo.CourseCautions
+  lapsRemain: number;            // -1 if unknown / timed race
+  timeRemainSec: number;         // -1 if unknown / lap race
+  leaderLap: number;
+  totalLaps: number;             // -1 if timed
+  focusedCarNumber: string;      // Currently focused car number (broadcast camera target)
+  currentObsScene?: string;      // Currently active OBS scene name
+  battles: BattleInfo[];         // Pairs of cars within 1s gap
+  pitting: string[];             // Car numbers currently on pit road
+  carCount: number;              // Total cars on track
+  trackName: string;
+  trackType: string;             // 'road course', 'oval', 'dirt road', etc.
+  seriesName: string;            // e.g. 'Global Mazda MX-5 Cup'
+}
+

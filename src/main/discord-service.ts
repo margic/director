@@ -273,7 +273,8 @@ export class DiscordService {
 
         const url = `${apiConfig.baseUrl}${apiConfig.endpoints.tts}`;
         
-        // Build payload per OpenAPI spec — always include context for voice/tone hints
+        // Build payload per OpenAPI spec — include context for voice/tone hints.
+        // Fixed server-side in https://github.com/margic/racecontrol/issues/201
         const payload: Record<string, unknown> = {
             text,
             context: options?.context ?? { type: 'race_update', urgency: 'medium' },
