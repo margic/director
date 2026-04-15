@@ -1,13 +1,19 @@
 /**
  * cloud-poller.ts
  *
- * Extracted polling loop from DirectorService.
+ * Event-driven sequence fetcher for the Director Loop.
  * Responsible for:
  * - Fetching next sequence from Race Control API
  * - Handling response codes (200, 204, 410)
  * - Respecting Retry-After headers
  * - Reporting active intents to Race Control
  * - Invoking callbacks for sequence arrival and session end
+ *
+ * Fetch-on-completion model (per OpenAPI spec):
+ * - On start: makes a single initial fetch
+ * - On 200 (sequence received): stops fetching, waits for onSequenceCompleted()
+ * - On 204 (no sequence): schedules a single retry (Retry-After or idleRetryMs)
+ * - On onSequenceCompleted(): immediately fetches the next sequence
  *
  * Does NOT execute sequences directly — delegates to SequenceScheduler via onSequence callback.
  */
@@ -63,8 +69,10 @@ export interface CloudPollerOptions {
 
 export class CloudPoller {
   private isRunning = false;
-  private loopInterval: NodeJS.Timeout | null = null;
+  private pendingRetry: NodeJS.Timeout | null = null;
   private lastCompletedSequenceId: string | null = null;
+  private awaitingCompletion = false;
+  private retried401 = false;
   private readonly idleRetryMs: number;
 
   constructor(
@@ -76,33 +84,36 @@ export class CloudPoller {
   }
 
   /**
-   * Start the polling loop.
+   * Start the fetcher. Makes a single initial request.
    */
   start(): void {
     if (this.isRunning) {
       console.warn('[CloudPoller] Already running');
       return;
     }
-    console.log(`[CloudPoller] Starting polling for session: ${this.raceSessionId}`);
+    console.log(`[CloudPoller] Starting for session: ${this.raceSessionId}`);
     this.isRunning = true;
-    this.requestLoop();
+    this.awaitingCompletion = false;
+    this.fetchNext();
   }
 
   /**
-   * Stop the polling loop.
+   * Stop the fetcher and cancel any pending retry.
    */
   stop(): void {
     if (!this.isRunning) return;
-    console.log('[CloudPoller] Stopping polling');
+    console.log('[CloudPoller] Stopping');
     this.isRunning = false;
-    if (this.loopInterval) {
-      clearTimeout(this.loopInterval);
-      this.loopInterval = null;
+    this.awaitingCompletion = false;
+    this.retried401 = false;
+    if (this.pendingRetry) {
+      clearTimeout(this.pendingRetry);
+      this.pendingRetry = null;
     }
   }
 
   /**
-   * Check if the poller is currently running.
+   * Check if the fetcher is currently running.
    */
   isPolling(): boolean {
     return this.isRunning;
@@ -125,19 +136,27 @@ export class CloudPoller {
   }
 
   /**
-   * Notify the poller that a sequence has completed execution.
-   * Updates lastCompletedSequenceId so it's sent with the next request.
-   * Triggers immediate retry (no delay) since execution consumed the time.
+   * Notify the fetcher that a sequence has completed execution.
+   * This is the primary trigger for fetching the next sequence.
+   * Only fetches if we are actually waiting for a completion signal.
    */
   onSequenceCompleted(sequenceId: string): void {
     this.lastCompletedSequenceId = sequenceId;
-    // Trigger immediate retry — execution itself consumed the time (10-60s typically)
-    if (this.isRunning) {
-      if (this.loopInterval) {
-        clearTimeout(this.loopInterval);
-      }
-      this.loopInterval = setTimeout(() => this.requestLoop(), 0);
+    if (!this.isRunning) return;
+
+    if (!this.awaitingCompletion) {
+      console.warn(`[CloudPoller] onSequenceCompleted('${sequenceId}') called but not awaiting completion — ignoring`);
+      return;
     }
+
+    console.log(`[CloudPoller] Sequence '${sequenceId}' completed — fetching next`);
+    this.awaitingCompletion = false;
+    // Cancel any pending retry (e.g. heartbeat) before fetching
+    if (this.pendingRetry) {
+      clearTimeout(this.pendingRetry);
+      this.pendingRetry = null;
+    }
+    this.fetchNext();
   }
 
   // ---------------------------------------------------------------------------
@@ -145,27 +164,45 @@ export class CloudPoller {
   // ---------------------------------------------------------------------------
 
   /**
-   * Main polling loop.
-   * Fetches next sequence and schedules the next iteration based on response.
+   * Single fetch attempt. Handles the response and decides what to do next:
+   * - 200: deliver sequence, enter awaitingCompletion state (no more fetching)
+   * - 204: schedule a single retry after Retry-After or idleRetryMs
+   * - 410: stop (session ended)
+   * - error/other: schedule a retry after idleRetryMs
    */
-  private async requestLoop(): Promise<void> {
+  private async fetchNext(): Promise<void> {
     if (!this.isRunning) return;
 
     const delayMs = await this.fetchNextSequence();
 
-    // Schedule next iteration if still running
-    if (this.isRunning) {
-      let interval = delayMs;
+    // If we received a sequence (awaitingCompletion=true), don't schedule any retry.
+    // The next fetch will be triggered by onSequenceCompleted().
+    if (this.awaitingCompletion || !this.isRunning) return;
 
-      // Heartbeat floor rate contract: poll at min(interval, checkinTtlSeconds / 4)
-      // to prevent check-in TTL from lapsing during long Retry-After intervals.
-      if (this.options.checkinId && this.options.checkinTtlSeconds) {
-        const maxIntervalMs = (this.options.checkinTtlSeconds * 1000) / 4;
-        interval = Math.min(interval, maxIntervalMs);
-      }
+    // Schedule a single retry for 204/error cases
+    this.scheduleRetry(delayMs);
+  }
 
-      this.loopInterval = setTimeout(() => this.requestLoop(), interval);
+  /**
+   * Schedule a single retry fetch after the given delay.
+   * Respects the heartbeat floor rate for check-in TTL.
+   */
+  private scheduleRetry(delayMs: number): void {
+    if (!this.isRunning) return;
+
+    let interval = delayMs;
+
+    // Heartbeat floor rate contract: retry at min(interval, checkinTtlSeconds / 4)
+    // to prevent check-in TTL from lapsing during long Retry-After intervals.
+    if (this.options.checkinId && this.options.checkinTtlSeconds) {
+      const maxIntervalMs = (this.options.checkinTtlSeconds * 1000) / 4;
+      interval = Math.min(interval, maxIntervalMs);
     }
+
+    this.pendingRetry = setTimeout(() => {
+      this.pendingRetry = null;
+      this.fetchNext();
+    }, interval);
   }
 
   /**
@@ -256,6 +293,22 @@ export class CloudPoller {
         return this.idleRetryMs;
       }
 
+      // Handle 401 Unauthorized — force-refresh the token and retry once
+      if (response.status === 401 && !this.retried401) {
+        console.warn('[CloudPoller] 401 Unauthorized — forcing token refresh');
+        this.retried401 = true;
+        telemetryService.trackDependency(
+          'RaceControl API', url, duration, false, 401, 'HTTP',
+          { sessionId: this.raceSessionId, action: 'token-refresh' }
+        );
+        const freshToken = await this.authService.getAccessToken(true);
+        if (freshToken) {
+          return 0; // Retry immediately with the refreshed token
+        }
+        console.error('[CloudPoller] Token refresh failed — cannot recover');
+        return this.idleRetryMs;
+      }
+
       // Handle non-2xx responses
       if (!response.ok) {
         console.error(`[CloudPoller] Failed to fetch next sequence: ${response.status} ${response.statusText}`);
@@ -265,6 +318,9 @@ export class CloudPoller {
         );
         return this.idleRetryMs;
       }
+
+      // Successful request — reset 401 retry flag
+      this.retried401 = false;
 
       // Handle 200 OK — sequence received
       const sequenceData: any = await response.json();
@@ -288,10 +344,9 @@ export class CloudPoller {
       // Invoke callback to enqueue the sequence in SequenceScheduler
       this.options.onSequence(portable);
 
-      // Don't request next sequence immediately — wait for execution completion callback
-      // (onSequenceCompleted will trigger immediate retry)
-      // Return a large delay that will be cleared by onSequenceCompleted
-      return 3600000; // 1 hour (effectively infinite, will be cleared)
+      // Enter awaiting-completion state: no more fetching until onSequenceCompleted()
+      this.awaitingCompletion = true;
+      return 0; // Not used — fetchNext() checks awaitingCompletion and skips scheduling
 
     } catch (error) {
       console.error('[CloudPoller] Error fetching sequence:', error);

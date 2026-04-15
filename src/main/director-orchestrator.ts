@@ -80,6 +80,10 @@ export class DirectorOrchestrator extends EventEmitter {
   private currentRaceSessionId: string | null = null;
   private lastRaceState: any | null = null;       // Cached iRacing RaceState
   private lastObsScene: string | null = null;      // Cached OBS current scene
+  /** Tracks sequence IDs sourced from the director-loop that are pending completion. */
+  private pendingCloudSequenceIds: Set<string> = new Set();
+  /** Single historyChanged listener for cloud sequence completion — wired once in constructor. */
+  private cloudCompletionListener: ((history: any[]) => void) | null = null;
 
   constructor(
     private authService: AuthService,
@@ -208,6 +212,12 @@ export class DirectorOrchestrator extends EventEmitter {
       console.log('[DirectorOrchestrator] Stopping CloudPoller');
       this.cloudPoller.stop();
       this.cloudPoller = null;
+      // Remove the single completion listener
+      if (this.cloudCompletionListener) {
+        this.scheduler.off('historyChanged', this.cloudCompletionListener);
+        this.cloudCompletionListener = null;
+      }
+      this.pendingCloudSequenceIds.clear();
     }
 
     // Update mode and session ID
@@ -265,6 +275,26 @@ export class DirectorOrchestrator extends EventEmitter {
       }
     );
 
+    // Wire a single completion listener on the scheduler.
+    // When a director-loop sequence completes, notify CloudPoller to fetch next.
+    this.pendingCloudSequenceIds.clear();
+    this.cloudCompletionListener = (history: any[]) => {
+      // Check each pending sequence ID against the history
+      for (const seqId of this.pendingCloudSequenceIds) {
+        const entry = history.find((r: any) => r.sequenceId === seqId);
+        if (entry) {
+          console.log(`[DirectorOrchestrator] Sequence ${seqId} completed with status: ${entry.status}`);
+          this.pendingCloudSequenceIds.delete(seqId);
+          if (this.cloudPoller) {
+            this.cloudPoller.onSequenceCompleted(seqId);
+          }
+          // Only notify for the most recent completion per historyChanged event
+          break;
+        }
+      }
+    };
+    this.scheduler.on('historyChanged', this.cloudCompletionListener);
+
     this.cloudPoller.start();
   }
 
@@ -304,25 +334,14 @@ export class DirectorOrchestrator extends EventEmitter {
   private async handleSequence(sequence: PortableSequence): Promise<void> {
     console.log(`[DirectorOrchestrator] Received sequence from cloud: ${sequence.id} (${sequence.steps.length} steps)`);
 
+    // Track this sequence ID so the single completion listener can notify CloudPoller
+    this.pendingCloudSequenceIds.add(sequence.id);
+
     // Enqueue in scheduler with director-loop source
     await this.scheduler.enqueue(sequence, {}, {
       source: 'director-loop',
       priority: sequence.priority,
     });
-
-    // Listen for completion to notify CloudPoller
-    // historyChanged emits the full history array, so find the matching entry
-    const completionListener = (history: any[]) => {
-      const entry = history.find((r: any) => r.sequenceId === sequence.id);
-      if (entry) {
-        console.log(`[DirectorOrchestrator] Sequence ${sequence.id} completed with status: ${entry.status}`);
-        if (this.cloudPoller) {
-          this.cloudPoller.onSequenceCompleted(sequence.id);
-        }
-        this.scheduler.off('historyChanged', completionListener);
-      }
-    };
-    this.scheduler.on('historyChanged', completionListener);
   }
 
   /**

@@ -256,7 +256,7 @@ function App() {
 
       {/* Main Content */}
       <PageHeaderProvider>
-      <main className="flex-1 flex flex-col relative">
+      <main className="flex-1 flex flex-col relative min-h-0">
         {/* Header — dynamic title driven by PageHeaderContext */}
         <AppHeader
           user={user}

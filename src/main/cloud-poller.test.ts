@@ -118,6 +118,26 @@ describe('CloudPoller', () => {
       poller.stop();
     });
 
+    it('should NOT fetch again after receiving a sequence (waits for completion)', async () => {
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'seq-123', steps: [] }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalled();
+      }, { timeout: 1000 });
+
+      // Wait longer than idleRetryMs to prove no second fetch happens
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      poller.stop();
+    });
+
     it('should send intents in POST body', async () => {
       fetchMock.mockResolvedValueOnce({
         status: 200,
@@ -238,8 +258,8 @@ describe('CloudPoller', () => {
     });
   });
 
-  describe('onSequenceCompleted', () => {
-    it('should trigger request for next sequence after completion', async () => {
+  describe('onSequenceCompleted - event-driven fetch', () => {
+    it('should trigger exactly one fetch after completion', async () => {
       fetchMock
         .mockResolvedValueOnce({
           status: 200,
@@ -258,7 +278,10 @@ describe('CloudPoller', () => {
         expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
       }, { timeout: 1000 });
 
-      // Notify completion - should trigger immediate retry
+      // No second fetch should have happened yet
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Notify completion - should trigger exactly one fetch
       poller.onSequenceCompleted('seq-1');
 
       await vi.waitFor(() => {
@@ -270,6 +293,65 @@ describe('CloudPoller', () => {
       expect(body.lastSequenceId).toBe('seq-1');
 
       poller.stop();
+    });
+
+    it('should ignore onSequenceCompleted when not awaiting completion', async () => {
+      // Get a 200 first so we enter awaiting state
+      fetchMock
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ id: 'seq-1', steps: [] }),
+        })
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ id: 'seq-2', steps: [] }),
+        });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
+      }, { timeout: 1000 });
+
+      // Complete seq-1, which triggers fetch → gets seq-2 → enters awaiting again
+      poller.onSequenceCompleted('seq-1');
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledTimes(2);
+      }, { timeout: 1000 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      // Now stop the poller — onSequenceCompleted after stop should be ignored
+      poller.stop();
+      poller.onSequenceCompleted('seq-2');
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not fetch if stopped before completion', async () => {
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'seq-1', steps: [] }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
+      }, { timeout: 1000 });
+
+      poller.stop();
+
+      // Completion after stop should not trigger fetch
+      poller.onSequenceCompleted('seq-1');
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 

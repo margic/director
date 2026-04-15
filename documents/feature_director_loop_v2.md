@@ -213,11 +213,13 @@ The monolithic `DirectorService` is decomposed into focused modules:
 - Publishes session config (driver mappings, OBS host) to interested modules.
 
 #### `CloudPoller` (extracted from `DirectorService.loop()`)
-- Polls `GET .../sequences/next` with adaptive intervals.
+- **Event-driven fetch-on-completion model**: requests the next sequence only when the executor signals that the previous sequence has completed.
+- On start, makes a single initial fetch.
+- On 200 (sequence received): delivers to SequenceScheduler, then **waits** for `onSequenceCompleted()` — no further fetching until signalled.
+- On 204 (no sequence available): schedules a single retry respecting `Retry-After` or `idleRetryMs`.
 - Normalizes API responses (legacy or portable format) via the shared adapter.
 - **Enqueues** sequences into `SequenceScheduler` with `source: 'director-loop'`.
 - Does NOT execute sequences directly.
-- Respects `totalDurationMs` for pacing — passes it as scheduler metadata.
 
 #### `EventMapper` (already exists, enhanced)
 - Maps extension events (e.g., `iracing.flagChanged`) to sequence executions.
@@ -276,19 +278,20 @@ interface DirectorLoopState {
 ```
      Race Control Cloud
             │
-            │  GET .../sequences/next
+            │  POST .../sequences/next
             ▼
      ┌──────────────┐
-     │  CloudPoller  │
-     │  normalize()  │
-     │  enqueue()    │
-     └──────┬───────┘
-            │  PortableSequence { source: 'director-loop' }
-            ▼
-     ┌──────────────────┐
-     │SequenceScheduler │
-     │  resolveVars()   │
-     │  emit progress   │
+     │  CloudPoller  │      ◄──── onSequenceCompleted(seqId)
+     │  normalize()  │                      │
+     │  enqueue()    │                      │
+     └──────┬───────┘                      │
+            │  PortableSequence             │
+            │  { source: 'director-loop' }  │
+            ▼                               │
+     ┌──────────────────┐                  │
+     │SequenceScheduler │                  │
+     │  resolveVars()   │ ─── historyChanged ──► Orchestrator
+     │  emit progress   │    (completion)
      │  track history   │
      └──────┬───────────┘
             │
@@ -305,6 +308,11 @@ interface DirectorLoopState {
   iRacing        OBS          Discord
   Extension    Extension      Extension
 ```
+
+The flow is event-driven: CloudPoller fetches once, delivers the sequence, and
+**waits** until the Orchestrator signals `onSequenceCompleted()` (wired via a
+single `historyChanged` listener on the SequenceScheduler). Only then does it
+fetch the next sequence. There is no timer-based polling during active execution.
 
 ### 3.6 Priority Interruption
 
@@ -451,7 +459,7 @@ metadata: {
 }
 ```
 
-This belongs on the `PortableSequence` because it's a property of the sequence, not the transport. The Director's CloudPoller reads `sequence.metadata.totalDurationMs` to set the pause before the next poll. If absent, we fall back to summing `system.wait` durations plus a default per-step estimate.
+This belongs on the `PortableSequence` because it's a property of the sequence, not the transport. With the event-driven fetch-on-completion model, `totalDurationMs` is no longer used for poll pacing — the CloudPoller simply waits for `onSequenceCompleted()` before fetching the next sequence. The field is retained for UI display (progress estimation, activity overlays) and telemetry.
 
 **Proposed shape in PortableSequence:**
 ```typescript

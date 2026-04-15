@@ -50,52 +50,55 @@ DirectorOrchestrator (mode controller)
 Extract the sequence request loop and API fetch logic from `DirectorService` into a focused, single-responsibility class.
 
 **Responsibilities:**
-- Request sequences from `GET /api/director/v1/sessions/{id}/sequences/next` on a timer.
+- Request sequences from `POST /api/director/v1/sessions/{id}/sequences/next` on demand.
+- Event-driven fetch-on-completion: fetch once on start, then wait for `onSequenceCompleted()` before fetching again.
+- On 204 (no sequence available): schedule a single retry respecting `Retry-After` header or `idleRetryMs`.
 - Normalize API responses to `PortableSequence` (delegates to shared normalizer).
 - Emit received sequences to a callback (the Orchestrator wires this to the Scheduler).
-- Respect `Retry-After` header when present (fall back to default 5s).
-- Handle `204 No Content` (no sequence) and `410 Gone` (session ended).
-- Report active intents via the `intents` query parameter.
+- Handle `410 Gone` (session ended).
+- Report active intents and live race context in the POST body.
 - Track API telemetry (dependency calls, errors).
 
 **Interface:**
 
 ```typescript
 interface CloudPollerOptions {
-  idleRetryMs: number;   // Default: 5000 (retry interval when RC returns 204)
-}
-
-interface CloudPollerCallbacks {
+  idleRetryMs?: number;   // Default: 5000 (retry interval when RC returns 204)
+  getActiveIntents: () => string[];
   onSequence: (sequence: PortableSequence) => void;
   onSessionEnded: () => void;
-  onError: (error: Error) => void;
+  getRaceContext?: () => RaceContext | null;
+  checkinId?: string;
+  checkinTtlSeconds?: number;
 }
 
 class CloudPoller {
   constructor(
     authService: AuthService,
-    callbacks: CloudPollerCallbacks,
-    options?: Partial<CloudPollerOptions>
+    raceSessionId: string,
+    options: CloudPollerOptions
   );
 
-  start(raceSessionId: string, activeIntents?: string[]): void;
+  start(): void;                            // Single initial fetch
   stop(): void;
-  isRunning(): boolean;
-  updateIntents(intents: string[]): void;
+  isPolling(): boolean;
+  onSequenceCompleted(sequenceId: string): void;  // Triggers next fetch
+  updateCheckin(checkinId: string, ttl: number): void;
+  clearCheckin(): void;
 }
 ```
 
-**Code to extract from `DirectorService`:**
-- `fetchAndExecuteNextSequence()` → becomes `CloudPoller.fetchNextSequence()` (returns `PortableSequence | null` instead of executing)
-- `IDLE_RETRY_MS` → constructor option
-- `loop()` timer logic → `CloudPoller.poll()` private method
-- API telemetry tracking → stays in CloudPoller
+**Fetch-on-completion model:**
+- On `start()`: makes a single initial fetch.
+- On `200 OK`: parse response, normalize to `PortableSequence`, call `options.onSequence(seq)`. Enter **awaiting-completion** state — no further fetching until `onSequenceCompleted()` is called.
+- On `onSequenceCompleted(seqId)`: immediately fetch the next sequence (includes `lastSequenceId` in POST body).
+- On `204 No Content`: read `Retry-After` header (seconds → ms). Schedule a single retry after `Retry-After` value or `idleRetryMs`.
+- On `410 Gone`: call `options.onSessionEnded()`. Stop.
+- On network error or 5xx: schedule a single retry with `idleRetryMs`.
+- Heartbeat floor rate: if `checkinTtlSeconds` is set, retry interval is capped at `checkinTtlSeconds / 4` to prevent TTL lapse.
 
-**New behavior:**
-- On `200 OK`: parse response, normalize to `PortableSequence`, call `callbacks.onSequence(seq)`. Schedule next sequence request immediately (execution consumes the time).
-- On `204 No Content`: read `Retry-After` header (seconds → ms). Schedule next sequence request after `Retry-After` value or `idleRetryMs`.
-- On `410 Gone`: call `callbacks.onSessionEnded()`. Stop requesting sequences.
-- On network error or 5xx: call `callbacks.onError(err)`. Schedule retry with exponential backoff (5s → 10s → 20s → 60s max).
+**Completion wiring (in Orchestrator):**
+A single `historyChanged` listener is registered on the SequenceScheduler when the CloudPoller starts. When a director-loop sequence appears in the history, the Orchestrator calls `cloudPoller.onSequenceCompleted(seqId)`. The listener is removed when the CloudPoller stops.
 
 ### 1.2 Create `src/main/normalizer.ts`
 
@@ -144,14 +147,22 @@ directorService = new DirectorService(authService, extensionHost)
 
 **New wiring:**
 ```
-cloudPoller = new CloudPoller(authService, {
-  onSequence: (seq) => sequenceScheduler.enqueue(seq, {}, {
-    source: 'director-loop',
-    priority: seq.priority,
-  }),
-  onSessionEnded: () => { /* orchestrator.handleSessionEnded() — Phase 3 */ },
-  onError: (err) => { console.error('[CloudPoller]', err); },
-}, { idleRetryMs: 5000 });
+cloudPoller = new CloudPoller(authService, sessionId, {
+  onSequence: (seq) => orchestrator.handleSequence(seq),
+  onSessionEnded: () => orchestrator.handleSessionEnded(),
+  getActiveIntents: () => orchestrator.getActiveIntents(),
+  getRaceContext: () => orchestrator.buildRaceContext(),
+  idleRetryMs: 5000,
+});
+
+// Single historyChanged listener — wired when CloudPoller starts:
+scheduler.on('historyChanged', (history) => {
+  const entry = history.find(r => pendingCloudSequenceIds.has(r.sequenceId));
+  if (entry) {
+    pendingCloudSequenceIds.delete(entry.sequenceId);
+    cloudPoller.onSequenceCompleted(entry.sequenceId);
+  }
+});
 ```
 
 **Changes to `main.ts`:**
