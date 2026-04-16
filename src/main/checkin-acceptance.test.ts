@@ -27,7 +27,7 @@ vi.mock('./session-manager');
 vi.mock('./sequence-scheduler');
 vi.mock('./config-service', () => ({
   configService: {
-    get: vi.fn(() => ({ defaultMode: 'stopped', autoStartOnSessionSelect: false })),
+    get: vi.fn(() => ({ defaultMode: 'stopped' })),
     set: vi.fn(),
     getOrCreateDirectorId: vi.fn(() => 'd_inst_test-uuid-12345'),
   },
@@ -335,6 +335,34 @@ describe('Session Check-In Acceptance Criteria', () => {
       mockEventBus.emit('youtube.status', {
         extensionId: 'director-youtube',
         payload: { monitoring: true },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+    });
+
+    it('should refresh check-in when extension capabilities change (enable)', async () => {
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-123';
+      sessionManagerState.state = 'checked-in';
+
+      mockEventBus.emit('extension.capabilitiesChanged', {
+        extensionId: 'director-obs',
+        payload: { extensionId: 'director-obs', enabled: true },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+    });
+
+    it('should refresh check-in when extension capabilities change (disable)', async () => {
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-123';
+      sessionManagerState.state = 'checked-in';
+
+      mockEventBus.emit('extension.capabilitiesChanged', {
+        extensionId: 'director-iracing',
+        payload: { extensionId: 'director-iracing', enabled: false },
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));

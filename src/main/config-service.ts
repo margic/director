@@ -26,7 +26,6 @@ interface AppConfig {
   director: {
     id?: string;
     defaultMode?: 'stopped' | 'manual' | 'auto';
-    autoStartOnSessionSelect?: boolean;
   };
 }
 
@@ -75,8 +74,7 @@ const schema = {
         type: 'string',
         enum: ['stopped', 'manual', 'auto'] as any,
         default: 'stopped'
-      },
-      autoStartOnSessionSelect: { type: 'boolean', default: false }
+      }
     },
     default: {}
   }

@@ -46,7 +46,7 @@ export const DirectorPanel: React.FC<DirectorPanelProps> = ({ onNavigate }) => {
   const logEndRef = useRef<HTMLDivElement>(null);
   const prevStatusRef = useRef<DirectorOrchestratorState | null>(null);
 
-  const isRunning = directorStatus.mode !== 'stopped';
+  const isRunning = directorStatus.mode === 'auto';
 
   useSetPageHeader({
     title: 'Agent',
@@ -196,10 +196,11 @@ export const DirectorPanel: React.FC<DirectorPanelProps> = ({ onNavigate }) => {
         </div>
         <Button
           onClick={toggleDirector}
+          disabled={!isRunning && directorStatus.checkinStatus !== 'standby'}
           className={
             isRunning
               ? 'bg-destructive text-white hover:bg-destructive/90 shadow-[0_0_20px_rgba(239,51,64,0.4)]'
-              : 'bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)]'
+              : 'bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)] disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none'
           }
         >
           {isRunning ? (

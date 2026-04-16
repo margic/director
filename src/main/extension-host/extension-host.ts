@@ -337,6 +337,12 @@ export class ExtensionHostService {
       } else {
           await this.unloadExtension(extensionId);
       }
+
+      // 4. Notify listeners that capabilities have changed (triggers re-check-in)
+      this.eventBus.emitExtensionEvent(extensionId, 'extension.capabilitiesChanged', {
+          extensionId,
+          enabled,
+      });
   }
 
   private async loadExtension(ext: ScannedExtension) {

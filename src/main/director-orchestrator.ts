@@ -50,7 +50,6 @@ export interface DirectorOrchestratorState {
 
 export interface DirectorConfig {
   defaultMode?: DirectorMode;
-  autoStartOnSessionSelect?: boolean;
 }
 
 /**
@@ -59,12 +58,11 @@ export interface DirectorConfig {
  * Modes:
  * - stopped: No session selected, no polling
  * - manual: Session selected, no auto-polling, UI can trigger manual execution
- * - auto: Session selected, CloudPoller running, sequences executed automatically
+ * - auto: Session selected AND checked in, CloudPoller running, sequences executed automatically
  *
  * Transitions:
- * - stopped → manual: When session is selected (if autoStartOnSessionSelect=false)
- * - stopped → auto: When session is selected (if autoStartOnSessionSelect=true)
- * - manual → auto: When setMode('auto') is called
+ * - stopped → manual: When session is selected
+ * - manual → auto: When user clicks Start (requires active check-in)
  * - auto → manual: When setMode('manual') is called
  * - any → stopped: When session is cleared or 410 Gone received
  */
@@ -134,7 +132,6 @@ export class DirectorOrchestrator extends EventEmitter {
     const config = configService.get('director') as any;
     return {
       defaultMode: config?.defaultMode ?? 'stopped',
-      autoStartOnSessionSelect: config?.autoStartOnSessionSelect ?? false,
     };
   }
 
@@ -155,14 +152,12 @@ export class DirectorOrchestrator extends EventEmitter {
 
     if ((sessionState === 'selected' || sessionState === 'checked-in') && selectedSession) {
       // Session selected or checked in
-      const config = this.getConfig();
       this.currentRaceSessionId = selectedSession.raceSessionId;
 
       if (this.mode === 'stopped') {
-        // Transition: stopped → manual or auto (based on config)
-        const targetMode = config.autoStartOnSessionSelect ? 'auto' : 'manual';
-        console.log(`[DirectorOrchestrator] Session selected. Transitioning: stopped → ${targetMode}`);
-        await this.setMode(targetMode);
+        // Always transition to manual — agent must be started explicitly via the UI
+        console.log('[DirectorOrchestrator] Session selected. Transitioning: stopped → manual');
+        await this.setMode('manual');
       } else {
         // Session state changed while already in manual/auto — update CloudPoller if needed
         if (sessionState === 'checked-in' && this.cloudPoller) {
@@ -205,6 +200,16 @@ export class DirectorOrchestrator extends EventEmitter {
       console.warn('[DirectorOrchestrator] Cannot transition to manual/auto without selected session');
       this.lastError = 'No session selected';
       return this.getState();
+    }
+
+    // Auto mode requires an active check-in — agent cannot run without a session check-in
+    if (newMode === 'auto') {
+      const smState = this.sessionManager.getState();
+      if (!smState.checkinId || smState.checkinStatus !== 'standby') {
+        console.warn('[DirectorOrchestrator] Cannot start agent without an active session check-in');
+        this.lastError = 'Session not checked in';
+        return this.getState();
+      }
     }
 
     // Stop CloudPoller if running (when leaving auto mode)
@@ -424,6 +429,19 @@ export class DirectorOrchestrator extends EventEmitter {
           });
         }
       });
+    });
+
+    // Re-check-in when extensions are enabled/disabled (capabilities/intents change)
+    this.eventBus!.on('extension.capabilitiesChanged', async (data: { extensionId: string; payload: any }) => {
+      console.log(`[DirectorOrchestrator] Extension capabilities changed: ${data.extensionId} (enabled: ${data.payload?.enabled})`);
+
+      const smState = this.sessionManager.getState();
+      if (smState.checkinId && smState.checkinStatus === 'standby') {
+        console.log('[DirectorOrchestrator] Refreshing check-in due to extension capability change');
+        await this.sessionManager.refreshCheckin().catch(error => {
+          console.error('[DirectorOrchestrator] Capability refresh failed:', error);
+        });
+      }
     });
   }
 
