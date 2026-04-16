@@ -432,6 +432,9 @@ components:
         raceSessionId:
           type: string
           description: Session this template belongs to (partition key).
+        checkinId:
+          type: string
+          description: Check-in that generated this template. Templates are scoped to a check-in so re-checkins immediately produce a fresh set.
         name:
           type: string
           description: Human-readable template name.
@@ -474,6 +477,7 @@ components:
       required:
         - id
         - raceSessionId
+        - checkinId
         - name
         - applicability
         - priority

@@ -56,6 +56,7 @@ const cloudTemplates: SequenceTemplate[] = [
   {
     id: 'tmpl_battle-cam',
     raceSessionId: SESSION_ID,
+    checkinId: 'checkin-test-001',
     name: 'Battle Cam',
     applicability: 'Two cars battling for position',
     priority: 'normal',
@@ -71,6 +72,7 @@ const cloudTemplates: SequenceTemplate[] = [
   {
     id: 'tmpl_quick-replay',
     raceSessionId: SESSION_ID,
+    checkinId: 'checkin-test-001',
     name: 'Quick Replay',
     applicability: 'Replay of recent incident',
     priority: 'incident',
