@@ -294,4 +294,42 @@ describe('SequenceLibraryService — Cloud Tier (Session Templates)', () => {
       expect(results[0].id).toBe('tmpl_battle-cam');
     });
   });
+
+  describe('checkinId filtering', () => {
+    it('should only keep templates matching the active checkinId', async () => {
+      const mixedTemplates: SequenceTemplate[] = [
+        { ...cloudTemplates[0], checkinId: 'current-checkin' },
+        { ...cloudTemplates[1], checkinId: 'old-stale-checkin' },
+      ];
+      fetchSpy.mockReturnValue(mockFetchResponse(mixedTemplates));
+
+      await service.setSession(SESSION_ID, 'current-checkin');
+      const cloud = await service.listSequences({ category: 'cloud' });
+
+      expect(cloud).toHaveLength(1);
+      expect(cloud[0].id).toBe('tmpl_battle-cam');
+    });
+
+    it('should keep all templates when no checkinId is provided', async () => {
+      const mixedTemplates: SequenceTemplate[] = [
+        { ...cloudTemplates[0], checkinId: 'checkin-a' },
+        { ...cloudTemplates[1], checkinId: 'checkin-b' },
+      ];
+      fetchSpy.mockReturnValue(mockFetchResponse(mixedTemplates));
+
+      await service.setSession(SESSION_ID);
+      const cloud = await service.listSequences({ category: 'cloud' });
+
+      expect(cloud).toHaveLength(2);
+    });
+
+    it('should return zero templates when all are stale', async () => {
+      fetchSpy.mockReturnValue(mockFetchResponse(cloudTemplates));
+
+      await service.setSession(SESSION_ID, 'brand-new-checkin');
+      const cloud = await service.listSequences({ category: 'cloud' });
+
+      expect(cloud).toHaveLength(0);
+    });
+  });
 });

@@ -34,6 +34,7 @@ export class SequenceLibraryService {
   private cloudCacheTimestamp = 0;
   private customCache: PortableSequence[] = [];
   private activeSessionId: string | null = null;
+  private activeCheckinId: string | null = null;
 
   constructor(
     private capabilityCatalog: CapabilityCatalog,
@@ -69,10 +70,12 @@ export class SequenceLibraryService {
   /**
    * Set the active session for cloud template loading.
    * Clears any existing cloud cache and fetches templates for the new session.
+   * When checkinId is provided, only templates matching that check-in are kept.
    * Returns 'ready' if templates loaded, 'pending' if planner still running.
    */
-  async setSession(raceSessionId: string): Promise<'ready' | 'pending'> {
+  async setSession(raceSessionId: string, checkinId?: string): Promise<'ready' | 'pending'> {
     this.activeSessionId = raceSessionId;
+    this.activeCheckinId = checkinId ?? null;
     this.cloudCache = [];
     this.cloudCacheTimestamp = 0;
     return this.loadCloud();
@@ -83,6 +86,7 @@ export class SequenceLibraryService {
    */
   clearSession(): void {
     this.activeSessionId = null;
+    this.activeCheckinId = null;
     this.cloudCache = [];
     this.cloudCacheTimestamp = 0;
     console.log('[SequenceLibrary] Session cleared — cloud templates purged');
@@ -335,7 +339,17 @@ export class SequenceLibraryService {
         return 'pending';
       }
 
-      const templates: SequenceTemplate[] = await response.json();
+      let templates: SequenceTemplate[] = await response.json();
+
+      // Filter to current check-in to discard stale templates from previous check-ins
+      if (this.activeCheckinId) {
+        const before = templates.length;
+        templates = templates.filter((t) => t.checkinId === this.activeCheckinId);
+        if (before !== templates.length) {
+          console.log(`[SequenceLibrary] Filtered ${before - templates.length} stale template(s) from previous check-in(s)`);
+        }
+      }
+
       this.cloudCache = templates.map((t) => this.templateToSequence(t));
       this.cloudCacheTimestamp = Date.now();
       console.log(`[SequenceLibrary] Loaded ${this.cloudCache.length} cloud template(s)`,

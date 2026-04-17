@@ -158,22 +158,15 @@ app.on('ready', () => {
     return [...builtin, ...custom].slice(0, 50);
   });
 
-  // Wire session lifecycle to sequence library — load cloud templates when session is available
-  // Templates are generated server-side after check-in, but we attempt to load them early
-  // in case a previous check-in already triggered the Planner.
+  // Wire session lifecycle to sequence library — load cloud templates after check-in.
+  // Templates are generated server-side by the Planner after check-in completes.
+  // We pass the checkinId so stale templates from previous check-ins are filtered out.
   sessionManager.on('stateChanged', (state: any) => {
-    if (state.state === 'selected' && state.selectedSession) {
-      sequenceLibrary.setSession(state.selectedSession.raceSessionId).then((result) => {
-        console.log(`[Main] Cloud templates for session ${state.selectedSession.raceSessionId}: ${result}`);
-      }).catch((err) => {
-        console.warn('[Main] Failed to load cloud templates:', err);
-      });
-    } else if (state.state === 'checked-in' && state.selectedSession) {
-      // Refresh templates after check-in (Planner runs asynchronously after checkin)
-      sequenceLibrary.setSession(state.selectedSession.raceSessionId).then((result) => {
+    if (state.state === 'checked-in' && state.selectedSession) {
+      sequenceLibrary.setSession(state.selectedSession.raceSessionId, state.checkinId).then((result) => {
         console.log(`[Main] Cloud templates after check-in: ${result}`);
       }).catch((err) => {
-        console.warn('[Main] Failed to refresh cloud templates after check-in:', err);
+        console.warn('[Main] Failed to load cloud templates after check-in:', err);
       });
     } else if (state.state === 'none' || state.state === 'discovered') {
       sequenceLibrary.clearSession();
