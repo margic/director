@@ -52,6 +52,9 @@ describe('DirectorOrchestrator', () => {
         ]),
       })),
       getConnectionHealth: vi.fn(() => ({})),
+      getObsScenes: vi.fn(() => []),
+      getCameraGroups: vi.fn(() => []),
+      getDrivers: vi.fn(() => []),
     };
 
     mockSessionManager = Object.assign(new EventEmitter(), {

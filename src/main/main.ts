@@ -142,6 +142,9 @@ app.on('ready', () => {
     const catalog = extensionHost.getCapabilityCatalog();
     const allIntents = catalog.getAllIntents();
     const connections = extensionHost.getConnectionHealth();
+    const cameraGroups = extensionHost.getCameraGroups();
+    const scenes = extensionHost.getObsScenes();
+    const drivers = extensionHost.getDrivers();
     return {
       intents: allIntents.map(entry => ({
         intent: entry.intent.intent,
@@ -150,6 +153,9 @@ app.on('ready', () => {
         schema: entry.intent.schema as Record<string, unknown> | undefined,
       })),
       connections,
+      ...(cameraGroups.length > 0 && { cameraGroups }),
+      ...(scenes.length > 0 && { scenes }),
+      ...(drivers.length > 0 && { drivers }),
     };
   });
   sessionManager.setLocalSequencesGetter(async () => {

@@ -250,9 +250,23 @@ export interface IntentCapability {
   schema?: Record<string, unknown>;
 }
 
+export interface CameraGroup {
+  groupNum: number;
+  groupName: string;
+}
+
+export interface CapabilityDriver {
+  carNumber: string;
+  userName: string;
+  carName?: string;
+}
+
 export interface DirectorCapabilities {
   intents: IntentCapability[];
   connections: Record<string, ConnectionHealth>;
+  cameraGroups?: CameraGroup[];
+  scenes?: string[];
+  drivers?: CapabilityDriver[];
 }
 
 export interface SessionCheckinRequest {

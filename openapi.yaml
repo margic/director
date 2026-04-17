@@ -280,9 +280,57 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/ConnectionHealth'
+        cameraGroups:
+          type: array
+          description: |
+            iRacing camera groups cached from the SDK. Sending this allows the
+            AI prompts to reference numeric group IDs instead of string names.
+          items:
+            $ref: '#/components/schemas/CameraGroup'
+        scenes:
+          type: array
+          description: Available OBS scenes discovered from the connected OBS instance.
+          items:
+            type: string
+        drivers:
+          type: array
+          description: |
+            Drivers in the current simulator session. Supplements cloud-side
+            SessionOperationalConfig.drivers which only has registered team drivers.
+          items:
+            $ref: '#/components/schemas/CapabilityDriver'
       required:
         - intents
         - connections
+    CameraGroup:
+      type: object
+      description: An iRacing camera group entry mapping a human-readable name to its numeric SDK ID.
+      properties:
+        groupNum:
+          type: integer
+          description: iRacing camera group number used in broadcastMessage SDK calls.
+        groupName:
+          type: string
+          description: Human-readable camera group name (e.g., "TV1", "Chase", "Blimp").
+      required:
+        - groupNum
+        - groupName
+    CapabilityDriver:
+      type: object
+      description: A driver entry from the simulator session.
+      properties:
+        carNumber:
+          type: string
+          description: Racing car number.
+        userName:
+          type: string
+          description: Driver's user name from the simulator.
+        carName:
+          type: string
+          description: Name of the car being driven.
+      required:
+        - carNumber
+        - userName
     IntentCapability:
       type: object
       properties:

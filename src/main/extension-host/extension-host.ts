@@ -95,6 +95,10 @@ export class ExtensionHostService {
   private customInvokeHandlers: Map<string, (args: any[], extensionId?: string) => Promise<any>> = new Map();
   // Connection health per extension (populated from connection state events)
   private connectionHealthMap: Map<string, ConnectionHealth> = new Map();
+  // Runtime values cached from extension events
+  private cachedObsScenes: string[] = [];
+  private cachedCameraGroups: { groupNum: number; groupName: string }[] = [];
+  private cachedDrivers: { carNumber: string; userName: string; carName?: string }[] = [];
 
   constructor(
     extensionsPath: string, 
@@ -251,6 +255,27 @@ export class ExtensionHostService {
   }
 
   /**
+   * Returns cached OBS scene names discovered via WebSocket.
+   */
+  public getObsScenes(): string[] {
+    return [...this.cachedObsScenes];
+  }
+
+  /**
+   * Returns cached iRacing camera groups from the simulator session.
+   */
+  public getCameraGroups(): { groupNum: number; groupName: string }[] {
+    return [...this.cachedCameraGroups];
+  }
+
+  /**
+   * Returns cached iRacing driver list from the simulator session.
+   */
+  public getDrivers(): { carNumber: string; userName: string; carName?: string }[] {
+    return [...this.cachedDrivers];
+  }
+
+  /**
    * Allows main process to set connection health for extensions that don't
    * emit events themselves (e.g., discord delegates to main process).
    */
@@ -279,6 +304,21 @@ export class ExtensionHostService {
     // YouTube: youtube.status { monitoring: boolean }
     this.eventBus.on('youtube.status', (data: { extensionId: string; payload: { monitoring: boolean } }) => {
       this.setConnectionHealth(data.extensionId || 'director-youtube', data.payload.monitoring);
+    });
+
+    // OBS: obs.scenes { scenes: string[], connected: boolean }
+    this.eventBus.on('obs.scenes', (data: { extensionId: string; payload: { scenes: string[] } }) => {
+      this.cachedObsScenes = data.payload.scenes ?? [];
+    });
+
+    // iRacing: iracing.cameraGroupsChanged { groups: CameraGroup[] }
+    this.eventBus.on('iracing.cameraGroupsChanged', (data: { extensionId: string; payload: { groups: { groupNum: number; groupName: string }[] } }) => {
+      this.cachedCameraGroups = data.payload.groups ?? [];
+    });
+
+    // iRacing: iracing.driversChanged { drivers: DriverEntry[] }
+    this.eventBus.on('iracing.driversChanged', (data: { extensionId: string; payload: { drivers: { carNumber: string; userName: string; carName?: string }[] } }) => {
+      this.cachedDrivers = data.payload.drivers ?? [];
     });
   }
 

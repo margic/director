@@ -90,6 +90,14 @@ describe('Session Check-In Acceptance Criteria', () => {
         'director-obs': { connected: true, connectedSince: '2026-04-01T00:00:00Z' },
         'director-iracing': { connected: false },
       })),
+      getObsScenes: vi.fn(() => ['Race Main', 'Replay', 'Starting Grid']),
+      getCameraGroups: vi.fn(() => [
+        { groupNum: 1, groupName: 'TV1' },
+        { groupNum: 2, groupName: 'TV2' },
+      ]),
+      getDrivers: vi.fn(() => [
+        { carNumber: '63', userName: 'John Smith' },
+      ]),
     };
 
     mockSessionManager = Object.assign(new EventEmitter(), {
