@@ -293,13 +293,17 @@ export class CloudPoller {
         return this.idleRetryMs;
       }
 
-      // Handle 401 Unauthorized — force-refresh the token and retry once
+      // Handle 401 Unauthorized — could be expired OAuth token OR invalid check-in.
+      // The API returns 401 for both cases when enforcement mode is active.
+      // Log the response body to distinguish, then try refreshing the token once.
       if (response.status === 401 && !this.retried401) {
-        console.warn('[CloudPoller] 401 Unauthorized — forcing token refresh');
+        const body = await response.text().catch(() => '');
+        console.warn(`[CloudPoller] 401 Unauthorized — ${body || 'no response body'}`);
+        console.warn(`[CloudPoller] checkinId=${this.options.checkinId ?? 'none'}`);
         this.retried401 = true;
         telemetryService.trackDependency(
           'RaceControl API', url, duration, false, 401, 'HTTP',
-          { sessionId: this.raceSessionId, action: 'token-refresh' }
+          { sessionId: this.raceSessionId, action: 'token-refresh', body }
         );
         const freshToken = await this.authService.getAccessToken(true);
         if (freshToken) {
@@ -311,10 +315,11 @@ export class CloudPoller {
 
       // Handle non-2xx responses
       if (!response.ok) {
-        console.error(`[CloudPoller] Failed to fetch next sequence: ${response.status} ${response.statusText}`);
+        const body = await response.text().catch(() => '');
+        console.error(`[CloudPoller] Failed to fetch next sequence: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
         telemetryService.trackDependency(
           'RaceControl API', url, duration, false, response.status, 'HTTP',
-          { sessionId: this.raceSessionId }
+          { sessionId: this.raceSessionId, body }
         );
         return this.idleRetryMs;
       }
