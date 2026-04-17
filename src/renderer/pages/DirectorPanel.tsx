@@ -44,6 +44,7 @@ export const DirectorPanel: React.FC<DirectorPanelProps> = ({ onNavigate }) => {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [sequencesExecuted, setSequencesExecuted] = useState(0);
   const logEndRef = useRef<HTMLDivElement>(null);
+  const logScrollRef = useRef<HTMLDivElement>(null);
   const prevStatusRef = useRef<DirectorOrchestratorState | null>(null);
 
   const isRunning = directorStatus.mode === 'auto';
@@ -139,9 +140,10 @@ export const DirectorPanel: React.FC<DirectorPanelProps> = ({ onNavigate }) => {
     return unsubscribe;
   }, [addLog]);
 
-  // Auto-scroll log
+  // Auto-scroll log (scroll only the log container, not ancestor scrollers)
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = logScrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [logs]);
 
   const toggleDirector = async () => {
@@ -339,7 +341,7 @@ export const DirectorPanel: React.FC<DirectorPanelProps> = ({ onNavigate }) => {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="bg-background border border-border rounded-lg p-4 h-80 overflow-y-auto font-jetbrains text-xs">
+          <div ref={logScrollRef} className="bg-background border border-border rounded-lg p-4 h-80 overflow-y-auto font-jetbrains text-xs">
             {logs.length === 0 ? (
               <div className="flex items-center justify-center h-full text-muted-foreground">
                 {isRunning ? (

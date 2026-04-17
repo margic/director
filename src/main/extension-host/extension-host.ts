@@ -308,17 +308,47 @@ export class ExtensionHostService {
 
     // OBS: obs.scenes { scenes: string[], connected: boolean }
     this.eventBus.on('obs.scenes', (data: { extensionId: string; payload: { scenes: string[] } }) => {
-      this.cachedObsScenes = data.payload.scenes ?? [];
+      const newScenes = data.payload.scenes ?? [];
+      const changed = newScenes.length !== this.cachedObsScenes.length ||
+        newScenes.some((s, i) => s !== this.cachedObsScenes[i]);
+      this.cachedObsScenes = newScenes;
+      if (changed) {
+        this.eventBus.emitExtensionEvent(data.extensionId || 'director-obs', 'extension.capabilitiesChanged', {
+          extensionId: data.extensionId || 'director-obs',
+          enabled: true,
+          reason: 'scenes',
+        });
+      }
     });
 
     // iRacing: iracing.cameraGroupsChanged { groups: CameraGroup[] }
     this.eventBus.on('iracing.cameraGroupsChanged', (data: { extensionId: string; payload: { groups: { groupNum: number; groupName: string }[] } }) => {
-      this.cachedCameraGroups = data.payload.groups ?? [];
+      const newGroups = data.payload.groups ?? [];
+      const changed = newGroups.length !== this.cachedCameraGroups.length ||
+        newGroups.some((g, i) => g.groupNum !== this.cachedCameraGroups[i]?.groupNum || g.groupName !== this.cachedCameraGroups[i]?.groupName);
+      this.cachedCameraGroups = newGroups;
+      if (changed) {
+        this.eventBus.emitExtensionEvent(data.extensionId || 'director-iracing', 'extension.capabilitiesChanged', {
+          extensionId: data.extensionId || 'director-iracing',
+          enabled: true,
+          reason: 'cameraGroups',
+        });
+      }
     });
 
     // iRacing: iracing.driversChanged { drivers: DriverEntry[] }
     this.eventBus.on('iracing.driversChanged', (data: { extensionId: string; payload: { drivers: { carNumber: string; userName: string; carName?: string }[] } }) => {
-      this.cachedDrivers = data.payload.drivers ?? [];
+      const newDrivers = data.payload.drivers ?? [];
+      const changed = newDrivers.length !== this.cachedDrivers.length ||
+        newDrivers.some((d, i) => d.carNumber !== this.cachedDrivers[i]?.carNumber || d.userName !== this.cachedDrivers[i]?.userName);
+      this.cachedDrivers = newDrivers;
+      if (changed) {
+        this.eventBus.emitExtensionEvent(data.extensionId || 'director-iracing', 'extension.capabilitiesChanged', {
+          extensionId: data.extensionId || 'director-iracing',
+          enabled: true,
+          reason: 'drivers',
+        });
+      }
     });
   }
 
