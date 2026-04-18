@@ -365,8 +365,9 @@ export interface GenerationParams {
 // ============================================================================
 
 export interface BattleInfo {
-  cars: string[];   // Car numbers involved
-  gapSec: number;   // Gap between them in seconds
+  cars: string[];        // Car numbers involved
+  gapSec: number;        // Gap between them in seconds
+  developing?: boolean;  // True if gap is closing (not yet within threshold, but trending toward battle)
 }
 
 export interface RaceContext {

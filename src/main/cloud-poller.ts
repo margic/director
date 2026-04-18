@@ -331,19 +331,27 @@ export class CloudPoller {
       const sequenceData: any = await response.json();
       console.log('[CloudPoller] Received sequence:', JSON.stringify(sequenceData, null, 2));
 
+      // Phase 7: Extract execution path metadata for observability (#76)
+      const executionPath = sequenceData.metadata?.executionPath as string | undefined;
+
       telemetryService.trackDependency(
         'RaceControl API', url, duration, true, response.status, 'HTTP',
-        { sessionId: this.raceSessionId }
+        { sessionId: this.raceSessionId, ...(executionPath && { executionPath }) }
       );
 
       // Normalize API response — validates PortableSequence format (steps/intent)
       const portable = normalizeApiResponse(sequenceData);
+
+      if (executionPath) {
+        console.log(`[CloudPoller] Sequence '${portable.id}' executionPath: ${executionPath} (${duration}ms)`);
+      }
 
       telemetryService.trackEvent('Sequence.Received', {
         sequenceId: portable.id,
         sessionId: this.raceSessionId,
         stepCount: portable.steps.length.toString(),
         priority: String(portable.priority || false),
+        ...(executionPath && { executionPath }),
       });
 
       // Invoke callback to enqueue the sequence in SequenceScheduler

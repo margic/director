@@ -78,6 +78,9 @@ export class DirectorOrchestrator extends EventEmitter {
   private currentRaceSessionId: string | null = null;
   private lastRaceState: any | null = null;       // Cached iRacing RaceState
   private lastObsScene: string | null = null;      // Cached OBS current scene
+  /** Gap history for developing-battle detection. Key: "carA:carB" (sorted), Value: last N gap samples. */
+  private gapHistory: Map<string, number[]> = new Map();
+  private static readonly GAP_HISTORY_SIZE = 5;
   /** Tracks sequence IDs sourced from the director-loop that are pending completion. */
   private pendingCloudSequenceIds: Set<string> = new Set();
   /** Single historyChanged listener for cloud sequence completion — wired once in constructor. */
@@ -522,17 +525,13 @@ export class DirectorOrchestrator extends EventEmitter {
     else if (flags & DirectorOrchestrator.FLAG_CHECKERED) sessionFlagsStr = 'CHECKERED';
     else if (flags & DirectorOrchestrator.FLAG_WHITE)     sessionFlagsStr = 'WHITE';
 
-    // Detect battles: consecutive cars with gap < 1.0s
-    const battles: BattleInfo[] = [];
+    // Detect battles using track-type-aware thresholds (#77)
     const cars = raceState.cars ?? [];
-    for (let i = 1; i < cars.length; i++) {
-      if (cars[i].gapToCarAhead > 0 && cars[i].gapToCarAhead < 1.0) {
-        battles.push({
-          cars: [cars[i - 1].carNumber, cars[i].carNumber],
-          gapSec: Math.round(cars[i].gapToCarAhead * 100) / 100,
-        });
-      }
-    }
+    const battles = detectBattles(
+      cars,
+      raceState.trackType ?? '',
+      this.gapHistory,
+    );
 
     // Find focused car number
     const focusedCar = cars.find((c: any) => c.carIdx === raceState.focusedCarIdx);
@@ -572,4 +571,78 @@ export class DirectorOrchestrator extends EventEmitter {
       return builtIns;
     }
   }
+}
+
+// =============================================================================
+// Battle Detection — exported for testability (#77)
+// =============================================================================
+
+const GAP_HISTORY_SIZE = 5;
+
+/**
+ * Detect battles between consecutive cars using track-type-aware thresholds.
+ * Road courses use 1.5s (wider gaps); ovals use 1.0s (tighter gaps).
+ * Also detects "developing battles" where the gap has been closing over
+ * the last 3-5 samples, even if not yet within the active threshold.
+ *
+ * @param cars - Array of cars sorted by position with gapToCarAhead
+ * @param trackType - Track type string from iRacing (e.g. 'road course', 'oval')
+ * @param gapHistory - Mutable map tracking gap samples per pair for developing-battle detection
+ */
+export function detectBattles(
+  cars: Array<{ carNumber: string; gapToCarAhead: number }>,
+  trackType: string,
+  gapHistory: Map<string, number[]>,
+): BattleInfo[] {
+  const isRoadCourse = trackType.toLowerCase().includes('road');
+  const battleThreshold = isRoadCourse ? 1.5 : 1.0;
+  const developingThreshold = battleThreshold * 2;
+
+  const battles: BattleInfo[] = [];
+  const seenPairs = new Set<string>();
+
+  for (let i = 1; i < cars.length; i++) {
+    const gap = cars[i].gapToCarAhead;
+    if (gap <= 0) continue;
+
+    const pairKey = `${cars[i - 1].carNumber}:${cars[i].carNumber}`;
+    seenPairs.add(pairKey);
+
+    // Record gap sample for developing-battle tracking
+    let history = gapHistory.get(pairKey);
+    if (!history) {
+      history = [];
+      gapHistory.set(pairKey, history);
+    }
+    history.push(gap);
+    if (history.length > GAP_HISTORY_SIZE) {
+      history.shift();
+    }
+
+    if (gap < battleThreshold) {
+      battles.push({
+        cars: [cars[i - 1].carNumber, cars[i].carNumber],
+        gapSec: Math.round(gap * 100) / 100,
+      });
+    } else if (gap < developingThreshold && history.length >= 3) {
+      // Developing battle — gap consistently closing over recent samples
+      const isClosing = history.every((g, idx) => idx === 0 || g <= history[idx - 1]);
+      if (isClosing && history[history.length - 1] < history[0]) {
+        battles.push({
+          cars: [cars[i - 1].carNumber, cars[i].carNumber],
+          gapSec: Math.round(gap * 100) / 100,
+          developing: true,
+        });
+      }
+    }
+  }
+
+  // Prune stale gap history entries for pairs no longer consecutive
+  for (const key of gapHistory.keys()) {
+    if (!seenPairs.has(key)) {
+      gapHistory.delete(key);
+    }
+  }
+
+  return battles;
 }

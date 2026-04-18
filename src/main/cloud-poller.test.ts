@@ -217,6 +217,60 @@ describe('CloudPoller', () => {
 
       poller.stop();
     });
+
+    it('should log executionPath from sequence metadata', async () => {
+      const consoleSpy = vi.spyOn(console, 'log');
+
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          id: 'seq-fast',
+          steps: [{ id: 'step-1', intent: 'system.wait', payload: {} }],
+          metadata: { executionPath: 'preselect-deterministic' },
+        }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalled();
+      }, { timeout: 1000 });
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining("executionPath: preselect-deterministic")
+      );
+
+      consoleSpy.mockRestore();
+      poller.stop();
+    });
+
+    it('should include executionPath in telemetry event', async () => {
+      const { telemetryService } = await import('./telemetry-service');
+
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          id: 'seq-llm',
+          steps: [],
+          metadata: { executionPath: 'preselect-llm' },
+        }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalled();
+      }, { timeout: 1000 });
+
+      expect(telemetryService.trackEvent).toHaveBeenCalledWith(
+        'Sequence.Received',
+        expect.objectContaining({ executionPath: 'preselect-llm' })
+      );
+
+      poller.stop();
+    });
   });
 
   describe('204 No Content - No sequence available', () => {
