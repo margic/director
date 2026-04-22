@@ -277,7 +277,7 @@ export class CloudPoller {
         sessionId: this.raceSessionId,
         stepCount: portable.steps.length.toString(),
         priority: String(portable.priority || false),
-        executionPath: executionPath ?? 'unknown',
+        executionPath: typeof executionPath === 'string' ? executionPath : 'unknown',
       });
 
       // Invoke callback to enqueue the sequence in SequenceScheduler
