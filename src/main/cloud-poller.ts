@@ -345,6 +345,9 @@ export class CloudPoller {
       if (executionPath) {
         console.log(`[CloudPoller] Sequence '${portable.id}' executionPath: ${executionPath} (${duration}ms)`);
       }
+      // Extract Phase 7 pipeline path for observability
+      const executionPath = portable.metadata?.executionPath;
+      console.log(`[CloudPoller] Sequence ${portable.id} received via pipeline: ${executionPath ?? 'unknown'}`);
 
       telemetryService.trackEvent('Sequence.Received', {
         sequenceId: portable.id,
@@ -352,6 +355,7 @@ export class CloudPoller {
         stepCount: portable.steps.length.toString(),
         priority: String(portable.priority || false),
         ...(executionPath && { executionPath }),
+        executionPath: typeof executionPath === 'string' ? executionPath : 'unknown',
       });
 
       // Invoke callback to enqueue the sequence in SequenceScheduler
