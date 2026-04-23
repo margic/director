@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,12 +14,24 @@ interface PublisherConfig {
   batchIntervalMs: number;
 }
 
+type PublisherStatusKind = 'active' | 'idle' | 'connecting' | 'error' | 'disabled';
+
 interface PublisherStatus {
-  status: 'active' | 'idle' | 'error' | 'disabled';
+  status: PublisherStatusKind;
   message?: string;
   eventsQueuedTotal?: number;
   lastFlushAt?: number;
+  lastError?: string;
 }
+
+interface RecentEvent {
+  id: string;
+  type: string;
+  carIdx?: number;
+  timestamp: number;
+}
+
+const MAX_RECENT_EVENTS = 5;
 
 const DEFAULT_CONFIG: PublisherConfig = {
   enabled: false,
@@ -35,6 +47,8 @@ export const PublisherSettings = () => {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [publisherStatus, setPublisherStatus] = useState<PublisherStatus | null>(null);
+  const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
+  const eventIdSeq = useRef(0);
 
   useEffect(() => {
     const load = async () => {
@@ -77,6 +91,17 @@ export const PublisherSettings = () => {
       unsub = window.electronAPI.extensions.onExtensionEvent((data) => {
         if (data.eventName === 'iracing.publisherStateChanged') {
           setPublisherStatus(data.payload as PublisherStatus);
+        } else if (data.eventName === 'iracing.publisherEventEmitted') {
+          const payload = data.payload as { type: string; carIdx?: number; timestamp: number };
+          setRecentEvents((prev) => {
+            const next: RecentEvent = {
+              id: `${payload.timestamp}-${eventIdSeq.current++}`,
+              type: payload.type,
+              carIdx: payload.carIdx,
+              timestamp: payload.timestamp,
+            };
+            return [next, ...prev].slice(0, MAX_RECENT_EVENTS);
+          });
         }
       });
     }
@@ -104,11 +129,39 @@ export const PublisherSettings = () => {
     }
   }, [config]);
 
-  const statusColor = {
-    active: 'text-green-400',
+  const statusColor: Record<PublisherStatusKind, string> = {
+    active: 'text-[color:var(--color-green-flag)]',
+    connecting: 'text-[color:var(--color-yellow-flag)]',
     idle: 'text-muted-foreground',
-    error: 'text-destructive',
+    error: 'text-[color:var(--color-red-flag)]',
     disabled: 'text-muted-foreground',
+  };
+
+  const statusLabel: Record<PublisherStatusKind, string> = {
+    active: 'Streaming',
+    connecting: 'Connecting',
+    idle: 'Idle',
+    error: 'Error',
+    disabled: 'Disabled',
+  };
+
+  const handleToggleEnabled = useCallback(
+    async (checked: boolean) => {
+      setConfig((c) => ({ ...c, enabled: checked }));
+      // Write-through: persist immediately so the orchestrator picks it up on reload
+      try {
+        await window.electronAPI?.config?.set('publisher.enabled', checked);
+      } catch (e) {
+        console.error('Failed to persist publisher.enabled', e);
+      }
+    },
+    [],
+  );
+
+  const formatTime = (ms?: number): string => {
+    if (!ms) return '—';
+    const d = new Date(ms);
+    return d.toLocaleTimeString(undefined, { hour12: false });
   };
 
   return (
@@ -118,7 +171,7 @@ export const PublisherSettings = () => {
         <div className="flex items-center gap-3 px-4 py-2 bg-card border border-border rounded-lg">
           <Radio className={`w-4 h-4 ${statusColor[publisherStatus.status]}`} />
           <span className={`text-xs font-rajdhani uppercase tracking-widest font-bold ${statusColor[publisherStatus.status]}`}>
-            {publisherStatus.status}
+            {statusLabel[publisherStatus.status]}
           </span>
           {publisherStatus.message && (
             <span className="text-xs text-muted-foreground ml-1">{publisherStatus.message}</span>
@@ -129,6 +182,80 @@ export const PublisherSettings = () => {
             </span>
           )}
         </div>
+      )}
+
+      {/* Stats + recent events feed */}
+      {publisherStatus && (
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest">
+              Telemetry Publisher
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+                  Events Published
+                </div>
+                <div className="text-2xl font-jetbrains font-bold text-foreground tabular-nums">
+                  {publisherStatus.eventsQueuedTotal ?? 0}
+                </div>
+              </div>
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+                  Last Flush
+                </div>
+                <div className="text-xl font-jetbrains text-foreground tabular-nums">
+                  {formatTime(publisherStatus.lastFlushAt)}
+                </div>
+              </div>
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+                  Last Error
+                </div>
+                <div
+                  className={`text-xs font-jetbrains truncate ${
+                    publisherStatus.lastError
+                      ? 'text-[color:var(--color-red-flag)]'
+                      : 'text-muted-foreground'
+                  }`}
+                  title={publisherStatus.lastError ?? ''}
+                >
+                  {publisherStatus.lastError ?? '—'}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground mb-2">
+                Recent Events
+              </div>
+              <div className="rounded-md border border-border bg-background/40 max-h-40 overflow-y-auto">
+                {recentEvents.length === 0 ? (
+                  <div className="px-3 py-4 text-xs text-muted-foreground font-jetbrains text-center">
+                    Waiting for telemetry events…
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-border">
+                    {recentEvents.map((ev) => (
+                      <li
+                        key={ev.id}
+                        className="flex items-center justify-between px-3 py-1.5 font-jetbrains text-xs"
+                      >
+                        <span className="text-foreground">{ev.type}</span>
+                        <span className="text-muted-foreground tabular-nums">
+                          {ev.carIdx !== undefined ? `car ${ev.carIdx}` : ''}
+                          <span className="ml-3">{formatTime(ev.timestamp)}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <Card className="bg-card border-border">
@@ -149,7 +276,7 @@ export const PublisherSettings = () => {
             </div>
             <Switch
               checked={config.enabled}
-              onCheckedChange={(checked) => setConfig((c) => ({ ...c, enabled: checked }))}
+              onCheckedChange={handleToggleEnabled}
             />
           </div>
 
