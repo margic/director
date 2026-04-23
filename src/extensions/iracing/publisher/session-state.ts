@@ -97,6 +97,8 @@ export interface CarState {
   stoppedFrames: number;
   /** Whether the car is currently considered stopped on track */
   isStoppedOnTrack: boolean;
+  /** iRacing sessionTime at which zero-movement was first observed (null when moving). */
+  stoppedStartSessionTime: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +116,9 @@ export interface BattleState {
   brokenFrames: number;
   /** Previous gap reading — used to compute closing rate */
   previousGapSec: number;
+  /** Whether a BATTLE_CLOSING event has already been announced for the current
+   * closing trend. Reset when the battle engages or the gap leaves the 1.0–2.0s band. */
+  closingAnnounced: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +151,10 @@ export interface SessionState {
   firedIncidentWarnings: Set<number>;
   /** Whether IDENTITY_RESOLVED has been emitted this session */
   identityResolved: boolean;
+  /** Active traffic announcements keyed by battleKey(chaser, leader).
+   *  Tracks whether LAPPED_TRAFFIC_AHEAD or BEING_LAPPED has already fired
+   *  for a given (chaser, leader) pair while they remain close. */
+  trafficAnnouncements: Map<string, 'LAPPED_AHEAD' | 'BEING_LAPPED'>;
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +179,7 @@ function makeDefaultCarState(): CarState {
     offTrackFrames: 0,
     stoppedFrames: 0,
     isStoppedOnTrack: false,
+    stoppedStartSessionTime: null,
   };
 }
 
@@ -189,6 +199,7 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     sessionStartTeamIncidentCount: 0,
     firedIncidentWarnings: new Set(),
     identityResolved: false,
+    trafficAnnouncements: new Map(),
   };
 }
 

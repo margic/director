@@ -367,3 +367,310 @@ describe('event envelope', () => {
     expect(ev.publisherCode).toBe('rig-01');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tier 2 (#97): OVERTAKE_FOR_LEAD
+// ---------------------------------------------------------------------------
+
+describe('OVERTAKE_FOR_LEAD', () => {
+  it('fires when the pass is for the session lead (newPosition === 1)', () => {
+    const base  = makeFrame({ cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }] });
+    const state = prime(base);
+    const next  = cloneFrame(base);
+    // Car 1 takes the lead from car 0
+    next.carIdxPosition[0] = 2;
+    next.carIdxPosition[1] = 1;
+    const events = detect(base, next, state);
+    const lead = events.find(e => e.type === 'OVERTAKE_FOR_LEAD');
+    expect(lead).toBeDefined();
+    expect((lead!.payload as any).newPosition).toBe(1);
+    expect((lead!.payload as any).overtakingCarIdx).toBe(1);
+  });
+
+  it('does NOT fire for a non-lead pass', () => {
+    const base  = makeFrame({ cars: [
+      { carIdx: 0, position: 1 },
+      { carIdx: 1, position: 2 },
+      { carIdx: 2, position: 3 },
+    ] });
+    const state = prime(base);
+    const next  = cloneFrame(base);
+    next.carIdxPosition[1] = 3;
+    next.carIdxPosition[2] = 2; // car 2 passes car 1 — new pos 2, not 1
+    const events = detect(base, next, state);
+    expect(events.find(e => e.type === 'OVERTAKE_FOR_LEAD')).toBeUndefined();
+    expect(events.find(e => e.type === 'OVERTAKE')).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 2 (#97): OVERTAKE_FOR_CLASS
+// ---------------------------------------------------------------------------
+
+describe('OVERTAKE_FOR_CLASS', () => {
+  it('fires when chaser takes the class lead (classPosition 2 -> 1)', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, classPosition: 1 },
+      { carIdx: 1, position: 2, classPosition: 2 },
+    ] });
+    const state = prime(base);
+    const next = cloneFrame(base);
+    next.carIdxPosition[0] = 2;
+    next.carIdxPosition[1] = 1;
+    next.carIdxClassPosition[0] = 2;
+    next.carIdxClassPosition[1] = 1;
+    const events = detect(base, next, state);
+    const classEv = events.find(e => e.type === 'OVERTAKE_FOR_CLASS');
+    expect(classEv).toBeDefined();
+    expect((classEv!.payload as any).overtakingCarIdx).toBe(1);
+  });
+
+  it('does NOT fire when classPosition did not become 1', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, classPosition: 1 },
+      { carIdx: 1, position: 2, classPosition: 3 },
+      { carIdx: 2, position: 3, classPosition: 2 },
+    ] });
+    const state = prime(base);
+    const next = cloneFrame(base);
+    next.carIdxPosition[1] = 3;
+    next.carIdxPosition[2] = 2;
+    next.carIdxClassPosition[1] = 3;
+    next.carIdxClassPosition[2] = 2; // moved from class pos 2 -> 2 (no class lead change)
+    const events = detect(base, next, state);
+    expect(events.find(e => e.type === 'OVERTAKE_FOR_CLASS')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 2 (#97): BATTLE_CLOSING
+// ---------------------------------------------------------------------------
+
+describe('BATTLE_CLOSING', () => {
+  it('fires when gap is in (1.0, 2.0] and closing ≥ 0.2s/lap', () => {
+    // Start with a battle in the closing band at 1.8s.
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [
+        { carIdx: 0, position: 1, lastLapTime: 90 },
+        { carIdx: 1, position: 2, lastLapTime: 90, f2Time: 1.8 },
+      ],
+    });
+    const state = prime(base);
+
+    // Register the battle in activeBattles by first passing through engage-then-widen.
+    // Simpler: call once to record previousGap, then close sharply.
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 101;
+    f1.carIdxF2Time[1] = 1.8;
+    detect(base, f1, state);
+    // Seed a CLOSING entry manually so the detector has something to compare against
+    state.activeBattles.set('0-1', {
+      chaserCarIdx: 1,
+      leaderCarIdx: 0,
+      status: 'CLOSING',
+      gapSec: 1.8,
+      previousGapSec: 1.8,
+      closingRateSecPerLap: 0,
+      engagedAt: 100,
+      brokenFrames: 0,
+      closingAnnounced: false,
+    });
+
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = 102;              // 1s of session time elapsed
+    f2.carIdxF2Time[1] = 1.5;          // gap shrank by 0.3s over 1s → 0.3 * 90 = 27s/lap
+    const events = detect(f1, f2, state);
+    const closing = events.find(e => e.type === 'BATTLE_CLOSING');
+    expect(closing).toBeDefined();
+    expect((closing!.payload as any).status).toBe('CLOSING');
+    expect((closing!.payload as any).gapSec).toBeCloseTo(1.5, 5);
+  });
+
+  it('only fires once per closing trend', () => {
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [
+        { carIdx: 0, position: 1, lastLapTime: 90 },
+        { carIdx: 1, position: 2, lastLapTime: 90, f2Time: 1.8 },
+      ],
+    });
+    const state = prime(base);
+    state.activeBattles.set('0-1', {
+      chaserCarIdx: 1, leaderCarIdx: 0, status: 'CLOSING',
+      gapSec: 1.8, previousGapSec: 1.8, closingRateSecPerLap: 0,
+      engagedAt: 100, brokenFrames: 0, closingAnnounced: false,
+    });
+
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 101;
+    f1.carIdxF2Time[1] = 1.5;
+    const e1 = detect(base, f1, state);
+    expect(e1.filter(e => e.type === 'BATTLE_CLOSING')).toHaveLength(1);
+
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = 102;
+    f2.carIdxF2Time[1] = 1.2;
+    const e2 = detect(f1, f2, state);
+    expect(e2.filter(e => e.type === 'BATTLE_CLOSING')).toHaveLength(0);
+  });
+
+  it('does NOT fire if closing rate is below threshold', () => {
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [
+        { carIdx: 0, position: 1, lastLapTime: 90 },
+        { carIdx: 1, position: 2, lastLapTime: 90, f2Time: 1.8 },
+      ],
+    });
+    const state = prime(base);
+    state.activeBattles.set('0-1', {
+      chaserCarIdx: 1, leaderCarIdx: 0, status: 'CLOSING',
+      gapSec: 1.8, previousGapSec: 1.8, closingRateSecPerLap: 0,
+      engagedAt: 100, brokenFrames: 0, closingAnnounced: false,
+    });
+
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 200;                 // 100s elapsed
+    f1.carIdxF2Time[1] = 1.799;           // drop of 0.001s over 100s → ~0.0009/lap
+    const events = detect(base, f1, state);
+    expect(events.find(e => e.type === 'BATTLE_CLOSING')).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 2 (#97): LAPPED_TRAFFIC_AHEAD / BEING_LAPPED
+// ---------------------------------------------------------------------------
+
+describe('LAPPED_TRAFFIC_AHEAD', () => {
+  it('fires when chaser is within proximity and leaderIdx has FEWER laps', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, lapsCompleted: 10, f2Time: 0 },    // lapped car ahead
+      { carIdx: 1, position: 2, lapsCompleted: 11, f2Time: 1.5 },  // leader catching
+    ] });
+    const state = prime(base);
+    const f1 = cloneFrame(base); // keep values; detector runs with prev != null
+    const events = detect(base, f1, state);
+    expect(events.find(e => e.type === 'LAPPED_TRAFFIC_AHEAD')).toBeDefined();
+  });
+
+  it('does NOT fire twice for the same pair while still close', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, lapsCompleted: 10, f2Time: 0 },
+      { carIdx: 1, position: 2, lapsCompleted: 11, f2Time: 1.5 },
+    ] });
+    const state = prime(base);
+    detect(base, cloneFrame(base), state);
+    const events = detect(base, cloneFrame(base), state);
+    expect(events.filter(e => e.type === 'LAPPED_TRAFFIC_AHEAD')).toHaveLength(0);
+  });
+
+  it('re-fires after the pair separates and re-closes', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, lapsCompleted: 10, f2Time: 0 },
+      { carIdx: 1, position: 2, lapsCompleted: 11, f2Time: 1.5 },
+    ] });
+    const state = prime(base);
+    detect(base, cloneFrame(base), state);
+
+    // Gap widens past threshold → announcement cleared
+    const wide = cloneFrame(base);
+    wide.carIdxF2Time[1] = 5;
+    detect(base, wide, state);
+    expect(state.trafficAnnouncements.has('0-1')).toBe(false);
+
+    // Close again
+    const close = cloneFrame(wide);
+    close.carIdxF2Time[1] = 1.2;
+    const events = detect(wide, close, state);
+    expect(events.find(e => e.type === 'LAPPED_TRAFFIC_AHEAD')).toBeDefined();
+  });
+});
+
+describe('BEING_LAPPED', () => {
+  it('fires when leaderIdx has MORE laps than chaser', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, lapsCompleted: 11, f2Time: 0 },   // leader — more laps
+      { carIdx: 1, position: 2, lapsCompleted: 10, f2Time: 1.5 }, // about to be lapped
+    ] });
+    const state = prime(base);
+    const events = detect(base, cloneFrame(base), state);
+    expect(events.find(e => e.type === 'BEING_LAPPED')).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tier 2 (#97): STOPPED_ON_TRACK
+// ---------------------------------------------------------------------------
+
+describe('STOPPED_ON_TRACK', () => {
+  it('fires after ≥ 2s with no lapDistPct movement while off pit road', () => {
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [{ carIdx: 0, position: 1, lapDistPct: 0.4, onPitRoad: false }],
+    });
+    const state = prime(base);
+
+    // Frame at +1s — still not moved. Should NOT fire yet.
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 101;
+    const e1 = detect(base, f1, state);
+    expect(e1.find(e => e.type === 'STOPPED_ON_TRACK')).toBeUndefined();
+
+    // Frame at +2.5s — over threshold. Should fire once.
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = 102.5;
+    const e2 = detect(f1, f2, state);
+    const stopped = e2.find(e => e.type === 'STOPPED_ON_TRACK');
+    expect(stopped).toBeDefined();
+    expect((stopped!.payload as any).lapDistPct).toBeCloseTo(0.4, 5);
+    expect((stopped!.payload as any).stoppedDurationSec).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does NOT fire when the car is on pit road', () => {
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [{ carIdx: 0, position: 1, lapDistPct: 0.4, onPitRoad: true }],
+    });
+    const state = prime(base);
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 105;
+    const events = detect(base, f1, state);
+    expect(events.find(e => e.type === 'STOPPED_ON_TRACK')).toBeUndefined();
+  });
+
+  it('only fires once per stopped episode', () => {
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [{ carIdx: 0, position: 1, lapDistPct: 0.4 }],
+    });
+    const state = prime(base);
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 103;
+    const e1 = detect(base, f1, state);
+    expect(e1.filter(e => e.type === 'STOPPED_ON_TRACK')).toHaveLength(1);
+
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = 106;
+    const e2 = detect(f1, f2, state);
+    expect(e2.filter(e => e.type === 'STOPPED_ON_TRACK')).toHaveLength(0);
+  });
+
+  it('resets when the car starts moving again', () => {
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [{ carIdx: 0, position: 1, lapDistPct: 0.4 }],
+    });
+    const state = prime(base);
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 103;
+    detect(base, f1, state);
+
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = 104;
+    f2.carIdxLapDistPct[0] = 0.45; // moving again
+    detect(f1, f2, state);
+    expect(state.carStates.get(0)?.isStoppedOnTrack).toBe(false);
+    expect(state.carStates.get(0)?.stoppedStartSessionTime).toBeNull();
+  });
+});
