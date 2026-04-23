@@ -35,6 +35,7 @@ import { detectOvertakeAndBattle } from './overtake-battle-detector';
 import { detectLapPerformance } from './lap-performance-detector';
 import { detectSessionTypeChange } from './session-type-detector';
 import { detectPitStopDetail } from './pit-stop-detail-detector';
+import { detectIncidentsAndMilestones } from './incident-stint-detector';
 import {
   createSessionState,
   type SessionState,
@@ -93,6 +94,7 @@ export class PublisherOrchestrator {
   private carClassByCarIdx: Map<number, number> = new Map();
   private carClassShortNames: Map<number, string> = new Map();
   private currentSessionType = '';
+  private estimatedStintLaps = 0;
 
   constructor(private readonly cfg: PublisherOrchestratorConfig) {
     this.nowFn = cfg.nowFn ?? Date.now;
@@ -174,6 +176,11 @@ export class PublisherOrchestrator {
         sessionType: this.currentSessionType,
       }));
     }
+    events.push(...detectIncidentsAndMilestones(this.prevFrame, frame, this.state, {
+      ...ctx,
+      playerCarIdx:      this.playerCarIdx,
+      estimatedStintLaps: this.estimatedStintLaps,
+    }));
 
     this.dispatchEvents(events);
 
@@ -196,11 +203,13 @@ export class PublisherOrchestrator {
     carClassByCarIdx?: Map<number, number>;
     carClassShortNames?: Map<number, string>;
     sessionType?: string;
+    estimatedStintLaps?: number;
   }): void {
-    if (meta.playerCarIdx !== undefined) this.playerCarIdx = meta.playerCarIdx;
-    if (meta.carClassByCarIdx)           this.carClassByCarIdx = meta.carClassByCarIdx;
-    if (meta.carClassShortNames)         this.carClassShortNames = meta.carClassShortNames;
-    if (meta.sessionType !== undefined)  this.currentSessionType = meta.sessionType;
+    if (meta.playerCarIdx !== undefined)     this.playerCarIdx = meta.playerCarIdx;
+    if (meta.carClassByCarIdx)               this.carClassByCarIdx = meta.carClassByCarIdx;
+    if (meta.carClassShortNames)             this.carClassShortNames = meta.carClassShortNames;
+    if (meta.sessionType !== undefined)      this.currentSessionType = meta.sessionType;
+    if (meta.estimatedStintLaps !== undefined) this.estimatedStintLaps = meta.estimatedStintLaps;
   }
 
   /**

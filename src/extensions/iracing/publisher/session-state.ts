@@ -105,6 +105,10 @@ export interface CarState {
   onOutLap: boolean;
   /** lapsCompleted when the car exited the pits — used to detect OUT_LAP. */
   pitExitLapsCompleted: number | null;
+  /** lapsCompleted at the start of the current stint (session start or pit exit). */
+  stintStartLap: number;
+  /** Stint milestone percents (25 / 50 / 75) already fired this stint. */
+  firedStintMilestones: Set<number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +204,8 @@ function makeDefaultCarState(): CarState {
     pitStallArrivalFuelLevel: null,
     onOutLap: false,
     pitExitLapsCompleted: null,
+    stintStartLap: 0,
+    firedStintMilestones: new Set(),
   };
 }
 
