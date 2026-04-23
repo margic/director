@@ -164,6 +164,35 @@
             "trackName": { "type": "string" }
           }
         }
+      },
+      {
+        "event": "iracing.publisherStateChanged",
+        "title": "Publisher State Changed",
+        "description": "Emitted when the iRacing publisher mode changes state (active, idle, error).",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["active", "idle", "error", "disabled"] },
+            "message": { "type": "string" },
+            "raceSessionId": { "type": "string" },
+            "publisherCode": { "type": "string" },
+            "eventsQueuedTotal": { "type": "number" },
+            "lastFlushAt": { "type": "number" }
+          }
+        }
+      },
+      {
+        "event": "iracing.publisherEventEmitted",
+        "title": "Publisher Event Emitted",
+        "description": "Emitted once per PublisherEvent dispatched to the cloud. Drives the recent-events feed in the iRacing extension panel.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "type": { "type": "string" },
+            "carIdx": { "type": "number" },
+            "timestamp": { "type": "number" }
+          }
+        }
       }
     ],
     "overlays": [
@@ -186,6 +215,36 @@
         "type": "boolean",
         "description": "Enable iRacing Integration",
         "default": true
+      },
+      "publisher.enabled": {
+        "type": "boolean",
+        "description": "Enable Publisher mode — POSTs iRacing telemetry events to Race Control.",
+        "default": false
+      },
+      "publisher.publisherCode": {
+        "type": "string",
+        "description": "Unique identifier for this rig (e.g. 'rig-01'). Used to tag all outbound events.",
+        "default": ""
+      },
+      "publisher.raceSessionId": {
+        "type": "string",
+        "description": "Race Control session ID to publish events to. Obtain this from Race Control after check-in.",
+        "default": ""
+      },
+      "publisher.identityDisplayName": {
+        "type": "string",
+        "description": "Optional display name override for this rig's driver. Leave blank to use the iRacing username.",
+        "default": ""
+      },
+      "publisher.endpointUrl": {
+        "type": "string",
+        "description": "Race Control telemetry ingest URL.",
+        "default": "https://simracecenter.com/api/telemetry/events"
+      },
+      "publisher.batchIntervalMs": {
+        "type": "number",
+        "description": "How often (ms) to flush the event batch. High-priority events bypass this and flush immediately.",
+        "default": 500
       }
     }
   }

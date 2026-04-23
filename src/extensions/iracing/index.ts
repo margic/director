@@ -1,10 +1,19 @@
 import koffi from 'koffi';
 import yaml from 'js-yaml';
 import { resolveCameraGroup } from './camera-utils';
+import { assembleTelemetryFrame, getTelemetryIntervalMs } from './telemetry-frame';
+import type { RawTelemetryReads } from './telemetry-frame';
+import type { TelemetryFrame } from './publisher/session-state';
+import { PublisherOrchestrator } from './publisher/orchestrator';
+
+// Extension manifest version — bump in package.json when changing capabilities.
+// Kept as a literal because tsconfig.main.json doesn't enable resolveJsonModule.
+const EXTENSION_VERSION = '1.0.0';
 
 // Define Extension API (must match ExtensionApiImpl in extension-process.ts)
 interface ExtensionAPI {
   settings: Record<string, any>;
+  getAuthToken(): Promise<string | null>;
   registerIntentHandler(intent: string, handler: (payload: any) => Promise<void>): void;
   emitEvent(event: string, payload: any): void;
   log(level: 'info' | 'warn' | 'error', message: string): void;
@@ -131,12 +140,29 @@ let checkInterval: NodeJS.Timeout | null = null;
 let isConnected = false;
 let lastFlagState: string | null = null;
 
+// Publisher pipeline callback — set via registerTelemetryFrameCallback()
+type TelemetryFrameCallback = (frame: TelemetryFrame) => void;
+let telemetryFrameCallback: TelemetryFrameCallback | null = null;
+
+/**
+ * Register a callback to receive a TelemetryFrame snapshot on each telemetry
+ * poll tick. Called by the publisher pipeline (wired in a later issue).
+ * Pass null to unregister.
+ */
+export function registerTelemetryFrameCallback(cb: TelemetryFrameCallback | null): void {
+    telemetryFrameCallback = cb;
+}
+
 // Telemetry state
 let varHeaders: Map<string, VarHeader> = new Map();
 let lastVarHeaderCount = -1;
 let telemetryInterval: NodeJS.Timeout | null = null;
 let cachedTrackName = '';
 let cachedSessionLaps = 0;
+
+// Publisher orchestrator (issue #106) — instantiated at activate(), drives the
+// detector + transport pipeline. Null when the extension is inactive.
+let publisherOrchestrator: PublisherOrchestrator | null = null;
 
 export async function activate(director: ExtensionAPI) {
     directorAPI = director;
@@ -149,7 +175,7 @@ export async function activate(director: ExtensionAPI) {
     }
 
     isWindows = process.platform === 'win32';
-    
+
     // Initialize Native Functions
     initNativeFunctions(director);
 
@@ -172,6 +198,18 @@ export async function activate(director: ExtensionAPI) {
     
     director.registerIntentHandler('broadcast.setReplayState', async (payload: { state: number }) => {
         broadcastMessage(IRSDK_REPLAY_SETSTATE, payload.state, 0, 0);
+    });
+
+    // Publisher orchestrator (issue #106) — starts internally only if
+    // publisher.enabled === true. Registering the telemetry frame callback is
+    // safe regardless of publisher state; the orchestrator no-ops when not running.
+    publisherOrchestrator = new PublisherOrchestrator({
+        director,
+        version: EXTENSION_VERSION,
+    });
+    publisherOrchestrator.activate();
+    registerTelemetryFrameCallback((frame) => {
+        publisherOrchestrator?.onTelemetryFrame(frame);
     });
 
     // Start Polling (if on Windows)
@@ -555,6 +593,55 @@ function buildRaceState(_director: ExtensionAPI): RaceState | null {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Telemetry frame assembly (full publisher field set)                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Reads all telemetry variables needed for the publisher pipeline and
+ * assembles them into a typed TelemetryFrame. Returns null if shared
+ * memory is not yet available.
+ */
+function buildTelemetryFrame(): TelemetryFrame | null {
+    if (!pBase || varHeaders.size === 0) return null;
+    const buf = getLatestBuffer();
+    if (!buf) return null;
+
+    const reads: RawTelemetryReads = {
+        sessionTick:     readVarInt('SessionTick',   buf.offset),
+        sessionTime:     readVarFloat('SessionTime', buf.offset),
+        sessionState:    readVarInt('SessionState',  buf.offset),
+        sessionFlags:    readVarInt('SessionFlags',  buf.offset),
+        sessionUniqueId: readVarInt('SessionUniqueID', buf.offset),
+
+        carIdxPosition:      readVarInt('CarIdxPosition',       buf.offset),
+        carIdxClassPosition: readVarInt('CarIdxClassPosition',  buf.offset),
+        carIdxOnPitRoad:     readVarBool('CarIdxOnPitRoad',     buf.offset),
+        carIdxTrackSurface:  readVarInt('CarIdxTrackSurface',   buf.offset),
+        carIdxLastLapTime:   readVarFloat('CarIdxLastLapTime',  buf.offset),
+        carIdxBestLapTime:   readVarFloat('CarIdxBestLapTime',  buf.offset),
+        carIdxLapCompleted:  readVarInt('CarIdxLapCompleted',   buf.offset),
+        carIdxLapDistPct:    readVarFloat('CarIdxLapDistPct',   buf.offset),
+        carIdxF2Time:        readVarFloat('CarIdxF2Time',       buf.offset),
+        carIdxSessionFlags:  readVarInt('CarIdxSessionFlags',   buf.offset),
+
+        fuelLevel:           readVarFloat('FuelLevel',                      buf.offset),
+        fuelLevelPct:        readVarFloat('FuelLevelPct',                   buf.offset),
+        playerIncidentCount: readVarInt('PlayerCarMyIncidentCount',          buf.offset),
+        teamIncidentCount:   readVarInt('PlayerCarTeamIncidentCount',        buf.offset),
+        incidentLimit:       readVarInt('IncidentLimit',                     buf.offset),
+
+        skies:       readVarInt('Skies',           buf.offset),
+        trackTemp:   readVarFloat('TrackTemp',     buf.offset),
+        windDir:     readVarFloat('WindDir',       buf.offset),
+        windVel:     readVarFloat('WindVel',       buf.offset),
+        airHumidity: readVarFloat('AirHumidity',   buf.offset),
+        fogLevel:    readVarFloat('FogLevel',      buf.offset),
+    };
+
+    return assembleTelemetryFrame(reads);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Telemetry polling (fast loop for race state)                       */
 /* ------------------------------------------------------------------ */
 
@@ -564,11 +651,14 @@ function startTelemetryPolling(director: ExtensionAPI) {
     // Parse variable headers on first connect
     parseVarHeaders(director);
 
+    const publisherEnabled = director.settings['publisher.enabled'] === true;
+    const intervalMs = getTelemetryIntervalMs(publisherEnabled);
+
     telemetryInterval = setInterval(() => {
         pollTelemetry(director);
-    }, 250); // 4 Hz — good balance for race tower updates
+    }, intervalMs);
 
-    director.log('info', 'Telemetry polling started (250ms interval)');
+    director.log('info', `Telemetry polling started (${intervalMs}ms interval, ${publisherEnabled ? '5Hz publisher' : '4Hz standard'})`);
 }
 
 function stopTelemetryPolling(director: ExtensionAPI) {
@@ -594,6 +684,14 @@ function pollTelemetry(director: ExtensionAPI) {
     if (state) {
         director.emitEvent('iracing.raceStateChanged', state);
     }
+
+    // Feed the publisher pipeline if a callback is registered
+    if (telemetryFrameCallback) {
+        const frame = buildTelemetryFrame();
+        if (frame) {
+            telemetryFrameCallback(frame);
+        }
+    }
 }
 
 function startPolling(director: ExtensionAPI) {
@@ -613,6 +711,7 @@ function checkConnection(director: ExtensionAPI) {
             isConnected = running;
             director.log('info', `Sim Connection Status: ${isConnected ? 'Connected' : 'Disconnected'}`);
             director.emitEvent('iracing.connectionStateChanged', { connected: isConnected });
+            publisherOrchestrator?.onConnectionChange(isConnected);
 
             if (isConnected) {
                 // Attempt to open shared memory when iRacing connects
@@ -712,6 +811,11 @@ export function deactivate() {
         clearInterval(telemetryInterval);
         telemetryInterval = null;
     }
+    if (publisherOrchestrator) {
+        publisherOrchestrator.deactivate();
+        publisherOrchestrator = null;
+    }
+    registerTelemetryFrameCallback(null);
     if (directorAPI) {
         closeSharedMemory(directorAPI);
     }
