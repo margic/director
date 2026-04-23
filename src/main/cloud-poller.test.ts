@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CloudPoller, CloudPollerOptions } from './cloud-poller';
+import { telemetryService } from './telemetry-service';
 
 // Mock modules
 vi.mock('./normalizer', () => ({
@@ -157,6 +158,66 @@ describe('CloudPoller', () => {
       expect(options.headers['X-Checkin-Id']).toBe('checkin-abc');
 
       poller.stop();
+    });
+
+    it('should log and track executionPath from metadata when present', async () => {
+      const consoleSpy = vi.spyOn(console, 'log');
+
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({
+          id: 'seq-456',
+          steps: [],
+          metadata: { executionPath: 'preselect-deterministic' },
+        }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalled();
+      }, { timeout: 1000 });
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('preselect-deterministic')
+      );
+
+      expect(telemetryService.trackEvent).toHaveBeenCalledWith(
+        'Sequence.Received',
+        expect.objectContaining({ executionPath: 'preselect-deterministic' })
+      );
+
+      poller.stop();
+      consoleSpy.mockRestore();
+    });
+
+    it('should log "unknown" executionPath when metadata is absent', async () => {
+      const consoleSpy = vi.spyOn(console, 'log');
+
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'seq-789', steps: [] }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalled();
+      }, { timeout: 1000 });
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('unknown')
+      );
+
+      expect(telemetryService.trackEvent).toHaveBeenCalledWith(
+        'Sequence.Received',
+        expect.objectContaining({ executionPath: 'unknown' })
+      );
+
+      poller.stop();
+      consoleSpy.mockRestore();
     });
   });
 

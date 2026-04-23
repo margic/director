@@ -268,11 +268,16 @@ export class CloudPoller {
       // Normalize API response — validates PortableSequence format (steps/intent)
       const portable = normalizeApiResponse(sequenceData);
 
+      // Extract Phase 7 pipeline path for observability
+      const executionPath = portable.metadata?.executionPath;
+      console.log(`[CloudPoller] Sequence ${portable.id} received via pipeline: ${executionPath ?? 'unknown'}`);
+
       telemetryService.trackEvent('Sequence.Received', {
         sequenceId: portable.id,
         sessionId: this.raceSessionId,
         stepCount: portable.steps.length.toString(),
         priority: String(portable.priority || false),
+        executionPath: typeof executionPath === 'string' ? executionPath : 'unknown',
       });
 
       // Invoke callback to enqueue the sequence in SequenceScheduler
