@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Radio } from 'lucide-react';
+import { Radio, ArrowLeftRight } from 'lucide-react';
 
 interface PublisherConfig {
   enabled: boolean;
@@ -31,6 +31,11 @@ interface RecentEvent {
   timestamp: number;
 }
 
+interface OperatorState {
+  playerOnPitRoad: boolean;
+  driverSwapPending: boolean;
+}
+
 const MAX_RECENT_EVENTS = 5;
 
 const DEFAULT_CONFIG: PublisherConfig = {
@@ -48,6 +53,11 @@ export const PublisherSettings = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [publisherStatus, setPublisherStatus] = useState<PublisherStatus | null>(null);
   const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
+  const [operatorState, setOperatorState] = useState<OperatorState>({ playerOnPitRoad: false, driverSwapPending: false });
+  const [incomingDriverName, setIncomingDriverName] = useState('');
+  const [incomingDriverId, setIncomingDriverId] = useState('');
+  const [outgoingDriverId, setOutgoingDriverId] = useState('');
+  const [swapInitiating, setSwapInitiating] = useState(false);
   const eventIdSeq = useRef(0);
 
   useEffect(() => {
@@ -91,6 +101,8 @@ export const PublisherSettings = () => {
       unsub = window.electronAPI.extensions.onExtensionEvent((data) => {
         if (data.eventName === 'iracing.publisherStateChanged') {
           setPublisherStatus(data.payload as PublisherStatus);
+        } else if (data.eventName === 'iracing.publisherOperatorState') {
+          setOperatorState(data.payload as OperatorState);
         } else if (data.eventName === 'iracing.publisherEventEmitted') {
           const payload = data.payload as { type: string; carIdx?: number; timestamp: number };
           setRecentEvents((prev) => {
@@ -157,6 +169,22 @@ export const PublisherSettings = () => {
     },
     [],
   );
+
+  const handleInitiateSwap = useCallback(async () => {
+    if (!window.electronAPI?.extensions) return;
+    setSwapInitiating(true);
+    try {
+      await window.electronAPI.extensions.executeIntent('iracing.publisher.initiateDriverSwap', {
+        outgoingDriverId,
+        incomingDriverId,
+        incomingDriverName,
+      });
+    } catch (e) {
+      console.error('Failed to initiate driver swap', e);
+    } finally {
+      setSwapInitiating(false);
+    }
+  }, [outgoingDriverId, incomingDriverId, incomingDriverName]);
 
   const formatTime = (ms?: number): string => {
     if (!ms) return '—';
@@ -254,6 +282,86 @@ export const PublisherSettings = () => {
                 )}
               </div>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Driver Swap Controls — visible when publisher is active */}
+      {publisherStatus && publisherStatus.status !== 'disabled' && (
+        <Card className="bg-card border-border">
+          <CardHeader>
+            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              Driver Swap Controls
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {operatorState.driverSwapPending && (
+              <div className="flex items-center gap-2 rounded-md border border-[color:var(--color-yellow-flag)] bg-[color:var(--color-yellow-flag)]/10 px-3 py-2">
+                <span className="text-xs font-rajdhani uppercase tracking-widest font-bold text-[color:var(--color-yellow-flag)]">
+                  Swap Pending — Waiting for pit exit
+                </span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+                  Outgoing Driver ID
+                </label>
+                <Input
+                  placeholder="current driver id"
+                  className="bg-background border-border font-mono text-xs"
+                  value={outgoingDriverId}
+                  onChange={(e) => setOutgoingDriverId(e.target.value)}
+                  disabled={operatorState.driverSwapPending}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+                  Incoming Driver ID
+                </label>
+                <Input
+                  placeholder="incoming driver id"
+                  className="bg-background border-border font-mono text-xs"
+                  value={incomingDriverId}
+                  onChange={(e) => setIncomingDriverId(e.target.value)}
+                  disabled={operatorState.driverSwapPending}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+                  Incoming Driver Name
+                </label>
+                <Input
+                  placeholder="display name"
+                  className="bg-background border-border font-mono text-xs"
+                  value={incomingDriverName}
+                  onChange={(e) => setIncomingDriverName(e.target.value)}
+                  disabled={operatorState.driverSwapPending}
+                />
+              </div>
+            </div>
+
+            <Button
+              onClick={handleInitiateSwap}
+              disabled={
+                swapInitiating ||
+                operatorState.driverSwapPending ||
+                !operatorState.playerOnPitRoad ||
+                !incomingDriverId.trim() ||
+                !incomingDriverName.trim()
+              }
+              className="w-full bg-secondary hover:bg-secondary/90 text-white font-rajdhani uppercase tracking-wider font-bold"
+            >
+              {operatorState.driverSwapPending
+                ? 'Swap Pending…'
+                : swapInitiating
+                ? 'Initiating…'
+                : operatorState.playerOnPitRoad
+                ? 'Initiate Driver Swap'
+                : 'Initiate Driver Swap (Car must be in pits)'}
+            </Button>
           </CardContent>
         </Card>
       )}

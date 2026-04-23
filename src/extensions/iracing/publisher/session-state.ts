@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto';
-import type { PublisherEvent, PublisherEventType, EventPayloadMap } from './event-types';
+import type { PublisherEvent, PublisherEventType, EventPayloadMap, PublisherCarRef } from './event-types';
 
 // ---------------------------------------------------------------------------
 // TelemetryFrame — snapshot of iRacing shared memory for the publisher pipeline
@@ -176,6 +176,24 @@ export interface SessionState {
   playerFuelPerLap: number;
   /** Player FuelLevel at the start of the current lap (litres). */
   playerFuelAtLapStart: number;
+
+  // ---- Driver swap state machine ----
+  /** True once the operator has clicked "Initiate Driver Swap"; cleared by DRIVER_SWAP_COMPLETED. */
+  driverSwapPending: boolean;
+  /** Outgoing driver id (as supplied by the operator at initiation). */
+  pendingSwapOutgoingDriverId: string;
+  /** Incoming driver id (as supplied by the operator at initiation). */
+  pendingSwapIncomingDriverId: string;
+  /** Incoming driver display name (as supplied by the operator at initiation). */
+  pendingSwapIncomingDriverName: string;
+  /** iRacing sessionTime when the swap was initiated — used to compute swapDurationSec. */
+  pendingSwapInitiatedSessionTime: number;
+  /** Monotonically incrementing stint counter; starts at 1, incremented on each DRIVER_SWAP_COMPLETED. */
+  playerStintNumber: number;
+
+  // ---- Roster tracking ----
+  /** Last known roster snapshot — diffed on each updateRoster() call to emit ROSTER_UPDATED. */
+  knownRoster: Map<number, PublisherCarRef>;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,6 +249,13 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     firedFuelLowThresholds: new Set(),
     playerFuelPerLap: 0,
     playerFuelAtLapStart: 0,
+    driverSwapPending: false,
+    pendingSwapOutgoingDriverId: '',
+    pendingSwapIncomingDriverId: '',
+    pendingSwapIncomingDriverName: '',
+    pendingSwapInitiatedSessionTime: 0,
+    playerStintNumber: 1,
+    knownRoster: new Map(),
   };
 }
 

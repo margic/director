@@ -212,6 +212,18 @@ export async function activate(director: ExtensionAPI) {
         publisherOrchestrator?.onTelemetryFrame(frame);
     });
 
+    // Driver swap — operator-triggered from the publisher panel UI.
+    director.registerIntentHandler(
+        'iracing.publisher.initiateDriverSwap',
+        async (payload: { outgoingDriverId: string; incomingDriverId: string; incomingDriverName: string }) => {
+            publisherOrchestrator?.initiateDriverSwap(
+                payload.outgoingDriverId ?? '',
+                payload.incomingDriverId ?? '',
+                payload.incomingDriverName ?? '',
+            );
+        },
+    );
+
     // Start Polling (if on Windows)
     startPolling(director);
 }

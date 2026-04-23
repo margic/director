@@ -36,12 +36,14 @@ import { detectLapPerformance } from './lap-performance-detector';
 import { detectSessionTypeChange } from './session-type-detector';
 import { detectPitStopDetail } from './pit-stop-detail-detector';
 import { detectIncidentsAndMilestones } from './incident-stint-detector';
+import { detectDriverSwapAndRoster } from './driver-swap-roster-detector';
 import {
   createSessionState,
+  buildEvent,
   type SessionState,
   type TelemetryFrame,
 } from './session-state';
-import type { PublisherEvent } from './event-types';
+import type { PublisherEvent, PublisherCarRef } from './event-types';
 
 // ---------------------------------------------------------------------------
 // Director interface (minimum surface needed by the orchestrator)
@@ -95,6 +97,12 @@ export class PublisherOrchestrator {
   private carClassShortNames: Map<number, string> = new Map();
   private currentSessionType = '';
   private estimatedStintLaps = 0;
+  /** Latest frame processed — used when building events from operator actions. */
+  private lastFrame: TelemetryFrame | null = null;
+  /** Per-frame roster for ROSTER_UPDATED — updated by updateRoster(). */
+  private currentRoster: Map<number, PublisherCarRef> = new Map();
+  /** Last-emitted pit road state — used to gate publisherOperatorState emissions. */
+  private lastPlayerOnPitRoad = false;
 
   constructor(private readonly cfg: PublisherOrchestratorConfig) {
     this.nowFn = cfg.nowFn ?? Date.now;
@@ -181,8 +189,22 @@ export class PublisherOrchestrator {
       playerCarIdx:      this.playerCarIdx,
       estimatedStintLaps: this.estimatedStintLaps,
     }));
+    events.push(...detectDriverSwapAndRoster(this.prevFrame, frame, this.state, {
+      ...ctx,
+      playerCarIdx:   this.playerCarIdx,
+      currentRoster:  this.currentRoster.size > 0 ? this.currentRoster : undefined,
+    }));
 
     this.dispatchEvents(events);
+
+    // Emit operator state whenever player pit-road status changes.
+    const playerIdx = this.playerCarIdx ?? 0;
+    const nowOnPit  = frame.carIdxOnPitRoad[playerIdx] !== 0;
+    const swapPending = this.state.driverSwapPending;
+    if (nowOnPit !== this.lastPlayerOnPitRoad) {
+      this.lastPlayerOnPitRoad = nowOnPit;
+      this.emitOperatorState(nowOnPit, swapPending);
+    }
 
     if (events.some((e) => e.type === 'SESSION_LOADED')) {
       this.state = createSessionState(this.raceSessionId, frame.sessionUniqueId);
@@ -190,6 +212,7 @@ export class PublisherOrchestrator {
     } else {
       this.prevFrame = frame;
     }
+    this.lastFrame = frame;
   }
 
   /**
@@ -210,6 +233,42 @@ export class PublisherOrchestrator {
     if (meta.carClassShortNames)             this.carClassShortNames = meta.carClassShortNames;
     if (meta.sessionType !== undefined)      this.currentSessionType = meta.sessionType;
     if (meta.estimatedStintLaps !== undefined) this.estimatedStintLaps = meta.estimatedStintLaps;
+  }
+
+  /**
+   * Called by the iRacing extension whenever it re-parses the SessionInfo YAML
+   * and has an updated driver roster. Compares against the previous snapshot
+   * and emits ROSTER_UPDATED if anything changed.
+   */
+  updateRoster(drivers: PublisherCarRef[]): void {
+    this.currentRoster = new Map(drivers.map((d) => [d.carIdx, d]));
+  }
+
+  /**
+   * Called from the `iracing.publisher.initiateDriverSwap` intent handler when
+   * the operator clicks the UI button while the player car is in the pits.
+   * Immediately emits DRIVER_SWAP_INITIATED and sets the pending-swap flag so
+   * the next pit exit emits DRIVER_SWAP_COMPLETED.
+   */
+  initiateDriverSwap(outgoingDriverId: string, incomingDriverId: string, incomingDriverName: string): void {
+    if (!this.running || !this.state || !this.lastFrame) return;
+
+    this.state.driverSwapPending                = true;
+    this.state.pendingSwapOutgoingDriverId       = outgoingDriverId;
+    this.state.pendingSwapIncomingDriverId       = incomingDriverId;
+    this.state.pendingSwapIncomingDriverName     = incomingDriverName;
+    this.state.pendingSwapInitiatedSessionTime   = this.lastFrame.sessionTime;
+
+    const playerCarIdx = this.playerCarIdx ?? 0;
+    const event = buildEvent(
+      'DRIVER_SWAP_INITIATED',
+      { carIdx: playerCarIdx, carNumber: '', driverName: outgoingDriverId },
+      { outgoingDriverId, incomingDriverId, incomingDriverName },
+      { raceSessionId: this.raceSessionId, publisherCode: this.publisherCode, frame: this.lastFrame },
+    );
+    this.dispatchEvents([event]);
+
+    this.emitOperatorState(this.lastPlayerOnPitRoad, true);
   }
 
   /**
@@ -323,6 +382,13 @@ export class PublisherOrchestrator {
       ...status,
       raceSessionId: this.raceSessionId,
       publisherCode: this.publisherCode,
+    });
+  }
+
+  private emitOperatorState(playerOnPitRoad: boolean, driverSwapPending: boolean): void {
+    this.cfg.director.emitEvent('iracing.publisherOperatorState', {
+      playerOnPitRoad,
+      driverSwapPending,
     });
   }
 
