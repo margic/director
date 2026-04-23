@@ -37,6 +37,9 @@ import { detectSessionTypeChange } from './session-type-detector';
 import { detectPitStopDetail } from './pit-stop-detail-detector';
 import { detectIncidentsAndMilestones } from './incident-stint-detector';
 import { detectDriverSwapAndRoster } from './driver-swap-roster-detector';
+import { detectEnvironment } from './environment-detector';
+import { detectPolishFlags } from './polish-flag-detector';
+import { detectPlayerPhysics } from './player-physics-detector';
 import {
   createSessionState,
   buildEvent,
@@ -101,6 +104,8 @@ export class PublisherOrchestrator {
   private lastFrame: TelemetryFrame | null = null;
   /** Per-frame roster for ROSTER_UPDATED — updated by updateRoster(). */
   private currentRoster: Map<number, PublisherCarRef> = new Map();
+  /** Car numbers keyed by carIdx — populated via setSessionMetadata(). */
+  private carNumberByCarIdx: Map<number, string> = new Map();
   /** Last-emitted pit road state — used to gate publisherOperatorState emissions. */
   private lastPlayerOnPitRoad = false;
 
@@ -194,6 +199,16 @@ export class PublisherOrchestrator {
       playerCarIdx:   this.playerCarIdx,
       currentRoster:  this.currentRoster.size > 0 ? this.currentRoster : undefined,
     }));
+    events.push(...detectEnvironment(this.prevFrame, frame, this.state, ctx));
+    events.push(...detectPolishFlags(this.prevFrame, frame, this.state, {
+      ...ctx,
+      carNumberByCarIdx: this.carNumberByCarIdx.size > 0 ? this.carNumberByCarIdx : undefined,
+    }));
+    events.push(...detectPlayerPhysics(this.prevFrame, frame, this.state, {
+      ...ctx,
+      playerCarIdx:      this.playerCarIdx,
+      carNumberByCarIdx: this.carNumberByCarIdx.size > 0 ? this.carNumberByCarIdx : undefined,
+    }));
 
     this.dispatchEvents(events);
 
@@ -227,12 +242,14 @@ export class PublisherOrchestrator {
     carClassShortNames?: Map<number, string>;
     sessionType?: string;
     estimatedStintLaps?: number;
+    carNumberByCarIdx?: Map<number, string>;
   }): void {
     if (meta.playerCarIdx !== undefined)     this.playerCarIdx = meta.playerCarIdx;
     if (meta.carClassByCarIdx)               this.carClassByCarIdx = meta.carClassByCarIdx;
     if (meta.carClassShortNames)             this.carClassShortNames = meta.carClassShortNames;
     if (meta.sessionType !== undefined)      this.currentSessionType = meta.sessionType;
     if (meta.estimatedStintLaps !== undefined) this.estimatedStintLaps = meta.estimatedStintLaps;
+    if (meta.carNumberByCarIdx)              this.carNumberByCarIdx = meta.carNumberByCarIdx;
   }
 
   /**

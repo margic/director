@@ -129,7 +129,12 @@ export type PublisherEventType =
   | 'IDENTITY_OVERRIDE_CHANGED'
   | 'DRIVER_SWAP_INITIATED'
   | 'DRIVER_SWAP_COMPLETED'
-  | 'ROSTER_UPDATED';
+  | 'ROSTER_UPDATED'
+  // §8 Environment
+  | 'WEATHER_CHANGE'
+  | 'TRACK_TEMP_DRIFT'
+  | 'WIND_SHIFT'
+  | 'TIME_OF_DAY_PHASE';
 
 // CLOUD-EMITTED — publisher never produces these. Listed here for documentation only.
 // 'FOCUS_VS_FOCUS_BATTLE' | 'FOCUS_GROUP_ON_TRACK' | 'FOCUS_GROUP_SPLIT'
@@ -239,6 +244,12 @@ export interface EventPayloadMap {
   DRIVER_SWAP_INITIATED: DriverSwapInitiatedPayload;
   DRIVER_SWAP_COMPLETED: DriverSwapCompletedPayload;
   ROSTER_UPDATED: RosterUpdatedPayload;
+
+  // §8 Environment
+  WEATHER_CHANGE: WeatherChangePayload;
+  TRACK_TEMP_DRIFT: TrackTempDriftPayload;
+  WIND_SHIFT: WindShiftPayload;
+  TIME_OF_DAY_PHASE: TimeOfDayPhasePayload;
 }
 
 // ---------------------------------------------------------------------------
@@ -490,3 +501,41 @@ export const HIGH_PRIORITY_EVENTS = new Set<PublisherEventType>([
   'FLAG_YELLOW_FULL_COURSE',
   'INCIDENT_LIMIT_WARNING',
 ]);
+
+// ---------------------------------------------------------------------------
+// §8 Environment payload interfaces
+// ---------------------------------------------------------------------------
+
+export interface WeatherChangePayload {
+  /** iRacing Skies enum (0=clear, 1=PC, 2=MC, 3=OC) */
+  previousSkies: number;
+  newSkies: number;
+  relativeHumidity: number;
+  fogLevel: number;
+}
+
+export interface TrackTempDriftPayload {
+  /** Current track temperature in Celsius */
+  trackTempCelsius: number;
+  /** Change from session start in Celsius (positive = warmer) */
+  deltaFromStartCelsius: number;
+  /** Track temperature at session start */
+  sessionStartTempCelsius: number;
+}
+
+export interface WindShiftPayload {
+  /** Current wind direction in radians */
+  windDirRad: number;
+  /** Current wind speed in m/s */
+  windVelMps: number;
+  /** Angular change from previous reading in degrees */
+  deltaDeg: number;
+}
+
+export type TimeOfDayPhase = 'dawn' | 'day' | 'dusk' | 'night';
+
+export interface TimeOfDayPhasePayload {
+  phase: TimeOfDayPhase;
+  /** Solar altitude in radians (positive = above horizon) */
+  solarAltitudeRad: number;
+}

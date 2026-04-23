@@ -105,6 +105,10 @@ export interface FrameOptions {
   windVel?: number;
   relativeHumidity?: number;
   fogLevel?: number;
+  speed?: number;
+  steeringWheelAngle?: number;
+  steeringWheelPctTorque?: number;
+  solarAltitude?: number;
   // Per-car slot overrides
   cars?: CarSlotOverride[];
 }
@@ -120,6 +124,7 @@ export function makeFrame(opts: FrameOptions = {}): TelemetryFrame {
   const carIdxLapDistPct    = new Float32Array(CAR_COUNT);
   const carIdxF2Time        = new Float32Array(CAR_COUNT);
   const carIdxSessionFlags  = new Int32Array(CAR_COUNT);
+  const carIdxSpeed         = new Float32Array(CAR_COUNT).fill(40); // ~144 km/h default
 
   for (const car of opts.cars ?? []) {
     const i = car.carIdx;
@@ -152,17 +157,22 @@ export function makeFrame(opts: FrameOptions = {}): TelemetryFrame {
     carIdxLapDistPct,
     carIdxF2Time,
     carIdxSessionFlags,
-    fuelLevel:           opts.fuelLevel           ?? 50,
-    fuelLevelPct:        opts.fuelLevelPct        ?? 0.8,
-    playerIncidentCount: opts.playerIncidentCount ?? 0,
-    teamIncidentCount:   opts.teamIncidentCount   ?? 0,
-    incidentLimit:       opts.incidentLimit       ?? 17,
-    skies:               opts.skies               ?? 0,
-    trackTemp:           opts.trackTemp           ?? 32,
-    windDir:             opts.windDir             ?? 0,
-    windVel:             opts.windVel             ?? 1,
-    relativeHumidity:    opts.relativeHumidity    ?? 0.5,
-    fogLevel:            opts.fogLevel            ?? 0,
+    carIdxSpeed,
+    fuelLevel:                opts.fuelLevel                ?? 50,
+    fuelLevelPct:             opts.fuelLevelPct             ?? 0.8,
+    playerIncidentCount:      opts.playerIncidentCount      ?? 0,
+    teamIncidentCount:        opts.teamIncidentCount        ?? 0,
+    incidentLimit:            opts.incidentLimit            ?? 17,
+    skies:                    opts.skies                    ?? 0,
+    trackTemp:                opts.trackTemp                ?? 32,
+    windDir:                  opts.windDir                  ?? 0,
+    windVel:                  opts.windVel                  ?? 1,
+    relativeHumidity:         opts.relativeHumidity         ?? 0.5,
+    fogLevel:                 opts.fogLevel                 ?? 0,
+    speed:                    opts.speed                    ?? 40,
+    steeringWheelAngle:       opts.steeringWheelAngle       ?? 0,
+    steeringWheelPctTorque:   opts.steeringWheelPctTorque   ?? 0,
+    solarAltitude:            opts.solarAltitude            ?? 0.3, // midday
   };
 }
 
@@ -183,6 +193,7 @@ export function cloneFrame(f: TelemetryFrame): TelemetryFrame {
     carIdxLapDistPct:    f.carIdxLapDistPct.slice(),
     carIdxF2Time:        f.carIdxF2Time.slice(),
     carIdxSessionFlags:  f.carIdxSessionFlags.slice(),
+    carIdxSpeed:         f.carIdxSpeed.slice(),
   };
 }
 

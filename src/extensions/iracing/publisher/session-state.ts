@@ -65,6 +65,18 @@ export interface TelemetryFrame {
   relativeHumidity: number;
   /** iRacing: FogLevel (0.0–1.0) */
   fogLevel: number;
+
+  // Player-car physics (single-car telemetry, not per-car arrays)
+  /** iRacing: Speed (m/s) — player car ground speed */
+  speed: number;
+  /** iRacing: SteeringWheelAngle (radians, positive = left turn) */
+  steeringWheelAngle: number;
+  /** iRacing: SteeringWheelPctTorque (0.0–1.0) — may be 0 for some cars */
+  steeringWheelPctTorque: number;
+  /** iRacing: SolarAltitude (radians from horizon, positive = above) */
+  solarAltitude: number;
+  /** iRacing: CarIdxSpeed (m/s) per car */
+  carIdxSpeed: Float32Array;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,8 +204,28 @@ export interface SessionState {
   playerStintNumber: number;
 
   // ---- Roster tracking ----
-  /** Last known roster snapshot — diffed on each updateRoster() call to emit ROSTER_UPDATED. */
+  /** Per-frame roster for ROSTER_UPDATED — diffed on each updateRoster() call to emit ROSTER_UPDATED. */
   knownRoster: Map<number, PublisherCarRef>;
+
+  // ---- Environment tracking ----
+  /** Whether TRACK_TEMP_DRIFT has already fired this session. */
+  firedTrackTempDrift: boolean;
+  /** Time-of-day phase last emitted (empty = not yet seeded). */
+  lastTimeOfDayPhase: string;
+  /** Skies value at the time of the last WEATHER_CHANGE emission (or initial seed). */
+  lastWeatherSkies: number;
+  /** RelativeHumidity at the time of the last WEATHER_CHANGE emission. */
+  lastWeatherRelativeHumidity: number;
+  /** FogLevel at the time of the last WEATHER_CHANGE emission. */
+  lastWeatherFogLevel: number;
+
+  // ---- Physics detector cooldowns (session tick values) ----
+  /** Emit SLOW_CAR_AHEAD at most once per this many ticks (~30 s at 60Hz). */
+  slowCarAheadCooldownUntilTick: number;
+  /** Emit SPIN_DETECTED at most once per this many ticks. */
+  spinDetectedCooldownUntilTick: number;
+  /** Emit BIG_HIT at most once per this many ticks. */
+  bigHitCooldownUntilTick: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +288,14 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     pendingSwapInitiatedSessionTime: 0,
     playerStintNumber: 1,
     knownRoster: new Map(),
+    firedTrackTempDrift: false,
+    lastTimeOfDayPhase: '',
+    lastWeatherSkies: -1,
+    lastWeatherRelativeHumidity: -1,
+    lastWeatherFogLevel: -1,
+    slowCarAheadCooldownUntilTick: 0,
+    spinDetectedCooldownUntilTick: 0,
+    bigHitCooldownUntilTick: 0,
   };
 }
 
