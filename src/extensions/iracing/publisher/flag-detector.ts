@@ -21,16 +21,16 @@
 import type { TelemetryFrame, SessionState } from './session-state';
 import type { PublisherEvent } from './event-types';
 import { buildEvent } from './session-state';
+import {
+  FLAG_CHECKERED,
+  FLAG_WHITE,
+  FLAG_GREEN,
+  FLAG_YELLOW,
+  FLAG_CAUTION,
+} from './session-lifecycle-detector';
 
-// ---------------------------------------------------------------------------
-// iRacing SessionFlags bitmasks (subset used here)
-// ---------------------------------------------------------------------------
-
-export const FLAG_CHECKERED  = 0x0001;
-export const FLAG_WHITE      = 0x0002;
-export const FLAG_GREEN      = 0x0004;
-export const FLAG_YELLOW     = 0x0008;
-export const FLAG_CAUTION    = 0x4000;
+// Re-export so consumers importing from flag-detector directly still work.
+export { FLAG_CHECKERED, FLAG_WHITE, FLAG_GREEN, FLAG_YELLOW, FLAG_CAUTION };
 
 export interface FlagDetectorContext {
   publisherCode: string;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { PublisherTransport, fetchPublisherConfig } from '../transport';
-import type { PublisherEventBatchResponse } from '../transport';
+import type { PublisherEventBatchResponse, TransportStatus } from '../transport';
 import type { PublisherEvent } from '../event-types';
 
 // ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ function make202Response(overrides: Partial<PublisherEventBatchResponse> = {}): 
 
 function makeTransport(
   fetchFn: typeof fetch,
-  opts: { batchIntervalMs?: number; onStatusChange?: ReturnType<typeof vi.fn> } = {},
+  opts: { batchIntervalMs?: number; onStatusChange?: (status: TransportStatus) => void } = {},
 ) {
   return new PublisherTransport({
     endpointUrl: 'https://example.com/api/telemetry/events',
