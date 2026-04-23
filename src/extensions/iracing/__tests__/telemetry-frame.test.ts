@@ -18,6 +18,8 @@ function nullReads(): RawTelemetryReads {
     playerIncidentCount: null, teamIncidentCount: null, incidentLimit: null,
     skies: null, trackTemp: null, windDir: null, windVel: null,
     airHumidity: null, fogLevel: null,
+    speed: null, steeringWheelAngle: null, steeringWheelPctTorque: null,
+    solarAltitude: null, carIdxSpeed: null,
   };
 }
 

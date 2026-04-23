@@ -648,6 +648,12 @@ function buildTelemetryFrame(): TelemetryFrame | null {
         windVel:     readVarFloat('WindVel',       buf.offset),
         airHumidity: readVarFloat('AirHumidity',   buf.offset),
         fogLevel:    readVarFloat('FogLevel',      buf.offset),
+
+        speed:                  readVarFloat('Speed',                  buf.offset),
+        steeringWheelAngle:     readVarFloat('SteeringWheelAngle',     buf.offset),
+        steeringWheelPctTorque: readVarFloat('SteeringWheelPctTorque', buf.offset),
+        solarAltitude:          readVarFloat('SolarAltitude',          buf.offset),
+        carIdxSpeed:            readVarFloat('CarIdxSpeed',            buf.offset),
     };
 
     return assembleTelemetryFrame(reads);

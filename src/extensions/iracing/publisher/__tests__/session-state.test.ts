@@ -39,6 +39,11 @@ function makeFrame(overrides: Partial<TelemetryFrame> = {}): TelemetryFrame {
     windVel: 2.1,
     relativeHumidity: 0.55,
     fogLevel: 0,
+    speed: 40,
+    steeringWheelAngle: 0,
+    steeringWheelPctTorque: 0,
+    solarAltitude: 0.3,
+    carIdxSpeed: new Float32Array(64).fill(40),
     ...overrides,
   };
 }

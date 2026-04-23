@@ -41,6 +41,13 @@ export interface RawTelemetryReads {
   /** iRacing variable: AirHumidity */
   airHumidity:     number[] | null;
   fogLevel:        number[] | null;
+
+  // Player-car physics
+  speed:                  number[] | null;
+  steeringWheelAngle:     number[] | null;
+  steeringWheelPctTorque: number[] | null;
+  solarAltitude:          number[] | null;
+  carIdxSpeed:            number[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +87,12 @@ export function assembleTelemetryFrame(r: RawTelemetryReads): TelemetryFrame {
     windVel:           r.windVel?.[0]       ?? 0,
     relativeHumidity:  r.airHumidity?.[0]   ?? 0,
     fogLevel:          r.fogLevel?.[0]      ?? 0,
+
+    speed:                  r.speed?.[0]                  ?? 0,
+    steeringWheelAngle:     r.steeringWheelAngle?.[0]     ?? 0,
+    steeringWheelPctTorque: r.steeringWheelPctTorque?.[0] ?? 0,
+    solarAltitude:          r.solarAltitude?.[0]          ?? 0,
+    carIdxSpeed:            Float32Array.from(r.carIdxSpeed ?? []),
   };
 }
 
