@@ -32,6 +32,8 @@ import { detectFlags } from './flag-detector';
 import { detectLapCompleted } from './lap-completed-detector';
 import { detectPitAndIncidents } from './pit-incident-detector';
 import { detectOvertakeAndBattle } from './overtake-battle-detector';
+import { detectLapPerformance } from './lap-performance-detector';
+import { detectSessionTypeChange } from './session-type-detector';
 import {
   createSessionState,
   type SessionState,
@@ -83,6 +85,13 @@ export class PublisherOrchestrator {
   // Cached settings snapshot — read once at start()
   private publisherCode = '';
   private raceSessionId = '';
+
+  // YAML-sourced metadata — set externally via setSessionMetadata() once the
+  // iRacing extension parses session info. Empty / undefined until then.
+  private playerCarIdx: number | undefined = undefined;
+  private carClassByCarIdx: Map<number, number> = new Map();
+  private carClassShortNames: Map<number, string> = new Map();
+  private currentSessionType = '';
 
   constructor(private readonly cfg: PublisherOrchestratorConfig) {
     this.nowFn = cfg.nowFn ?? Date.now;
@@ -144,6 +153,22 @@ export class PublisherOrchestrator {
     events.push(...detectLapCompleted(this.prevFrame, frame, this.state, ctx));
     events.push(...detectPitAndIncidents(this.prevFrame, frame, this.state, ctx));
     events.push(...detectOvertakeAndBattle(this.prevFrame, frame, this.state, ctx));
+    // Lap performance — PERSONAL_BEST_LAP requires playerCarIdx (sourced from
+    // YAML; not yet wired). SESSION_BEST_LAP and STINT_BEST_LAP fire without it.
+    events.push(...detectLapPerformance(this.prevFrame, frame, this.state, {
+      ...ctx,
+      playerCarIdx:       this.playerCarIdx,
+      carClassByCarIdx:   this.carClassByCarIdx,
+      carClassShortNames: this.carClassShortNames,
+    }));
+    // Session type change — only meaningful once orchestrator is told the
+    // current SessionType from YAML. No-op until that wiring lands.
+    if (this.currentSessionType !== '') {
+      events.push(...detectSessionTypeChange(frame, this.state, {
+        ...ctx,
+        sessionType: this.currentSessionType,
+      }));
+    }
 
     this.dispatchEvents(events);
 
@@ -153,6 +178,24 @@ export class PublisherOrchestrator {
     } else {
       this.prevFrame = frame;
     }
+  }
+
+  /**
+   * Update YAML-sourced session metadata used by lap-performance and
+   * session-type detectors. Called by the iRacing extension whenever it
+   * re-parses session info YAML. Pass `undefined` for fields that are
+   * unavailable.
+   */
+  setSessionMetadata(meta: {
+    playerCarIdx?: number;
+    carClassByCarIdx?: Map<number, number>;
+    carClassShortNames?: Map<number, string>;
+    sessionType?: string;
+  }): void {
+    if (meta.playerCarIdx !== undefined) this.playerCarIdx = meta.playerCarIdx;
+    if (meta.carClassByCarIdx)           this.carClassByCarIdx = meta.carClassByCarIdx;
+    if (meta.carClassShortNames)         this.carClassShortNames = meta.carClassShortNames;
+    if (meta.sessionType !== undefined)  this.currentSessionType = meta.sessionType;
   }
 
   /**

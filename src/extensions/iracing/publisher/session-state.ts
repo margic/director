@@ -155,6 +155,11 @@ export interface SessionState {
    *  Tracks whether LAPPED_TRAFFIC_AHEAD or BEING_LAPPED has already fired
    *  for a given (chaser, leader) pair while they remain close. */
   trafficAnnouncements: Map<string, 'LAPPED_AHEAD' | 'BEING_LAPPED'>;
+  /** Rolling buffer of recent player lap times (seconds) used by
+   *  LAP_TIME_DEGRADATION (#100). Capped to LAP_DEGRADATION_BUFFER_SIZE. */
+  playerLapTimeBuffer: number[];
+  /** Latch — true once LAP_TIME_DEGRADATION has fired in the current stint. */
+  playerDegradationFired: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +205,8 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     firedIncidentWarnings: new Set(),
     identityResolved: false,
     trafficAnnouncements: new Map(),
+    playerLapTimeBuffer: [],
+    playerDegradationFired: false,
   };
 }
 
