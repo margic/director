@@ -5,7 +5,7 @@
  * extension lifecycle.
  *
  * Responsibilities:
- *   - Read publisher.* settings at start time (no runtime reactivity yet)
+ *   - Read publisher.* settings at start time
  *   - Instantiate PublisherTransport when publisher.enabled === true
  *   - Run all five Tier-1 detectors per telemetry frame (in dependency order)
  *   - Fire PUBLISHER_HELLO / PUBLISHER_HEARTBEAT / PUBLISHER_GOODBYE
@@ -286,6 +286,19 @@ export class PublisherOrchestrator {
     this.dispatchEvents([event]);
 
     this.emitOperatorState(this.lastPlayerOnPitRoad, true);
+  }
+
+  /**
+   * Hot-toggle the publisher without restarting the extension.
+   * Called from the `iracing.publisher.setEnabled` intent handler when the
+   * user flips the switch in the settings UI.
+   */
+  setEnabled(enabled: boolean): void {
+    if (enabled && !this.running) {
+      this.start();
+    } else if (!enabled && this.running) {
+      this.stop();
+    }
   }
 
   /**

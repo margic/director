@@ -212,6 +212,23 @@ export async function activate(director: ExtensionAPI) {
         publisherOrchestrator?.onTelemetryFrame(frame);
     });
 
+    // Publisher hot-toggle — fired by the settings UI switch without restarting the app.
+    director.registerIntentHandler(
+        'iracing.publisher.setEnabled',
+        async (payload: { enabled: boolean }) => {
+            publisherOrchestrator?.setEnabled(payload.enabled);
+            // Restart the telemetry polling loop so the interval matches the
+            // new state (200ms / 5Hz with publisher, 250ms / 4Hz without).
+            if (pBase) {
+                if (telemetryInterval) {
+                    clearInterval(telemetryInterval);
+                    telemetryInterval = null;
+                }
+                startTelemetryPolling(director);
+            }
+        },
+    );
+
     // Driver swap — operator-triggered from the publisher panel UI.
     director.registerIntentHandler(
         'iracing.publisher.initiateDriverSwap',

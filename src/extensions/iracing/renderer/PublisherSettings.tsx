@@ -160,11 +160,13 @@ export const PublisherSettings = () => {
   const handleToggleEnabled = useCallback(
     async (checked: boolean) => {
       setConfig((c) => ({ ...c, enabled: checked }));
-      // Write-through: persist immediately so the orchestrator picks it up on reload
       try {
+        // Persist first so the orchestrator reads the correct value on start()
         await window.electronAPI?.config?.set('publisher.enabled', checked);
+        // Hot-toggle the orchestrator — no restart required
+        await window.electronAPI?.extensions?.executeIntent('iracing.publisher.setEnabled', { enabled: checked });
       } catch (e) {
-        console.error('Failed to persist publisher.enabled', e);
+        console.error('Failed to toggle publisher', e);
       }
     },
     [],

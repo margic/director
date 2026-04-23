@@ -69,6 +69,18 @@
           },
           "required": ["state"]
         }
+      },
+      {
+        "intent": "iracing.publisher.setEnabled",
+        "title": "Set Publisher Enabled",
+        "description": "Hot-toggles the telemetry publisher on or off without restarting the app.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["enabled"]
+        }
       }
     ],
     "events": [
