@@ -6,3 +6,5 @@ release
 .env
 build
 external
+
+ai-context
