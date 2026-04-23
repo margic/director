@@ -34,6 +34,7 @@ import { detectPitAndIncidents } from './pit-incident-detector';
 import { detectOvertakeAndBattle } from './overtake-battle-detector';
 import { detectLapPerformance } from './lap-performance-detector';
 import { detectSessionTypeChange } from './session-type-detector';
+import { detectPitStopDetail } from './pit-stop-detail-detector';
 import {
   createSessionState,
   type SessionState,
@@ -152,6 +153,10 @@ export class PublisherOrchestrator {
     events.push(...detectFlags(this.prevFrame, frame, this.state, ctx));
     events.push(...detectLapCompleted(this.prevFrame, frame, this.state, ctx));
     events.push(...detectPitAndIncidents(this.prevFrame, frame, this.state, ctx));
+    events.push(...detectPitStopDetail(this.prevFrame, frame, this.state, {
+      ...ctx,
+      playerCarIdx: this.playerCarIdx,
+    }));
     events.push(...detectOvertakeAndBattle(this.prevFrame, frame, this.state, ctx));
     // Lap performance — PERSONAL_BEST_LAP requires playerCarIdx (sourced from
     // YAML; not yet wired). SESSION_BEST_LAP and STINT_BEST_LAP fire without it.

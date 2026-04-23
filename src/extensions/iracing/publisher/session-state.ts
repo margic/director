@@ -99,6 +99,12 @@ export interface CarState {
   isStoppedOnTrack: boolean;
   /** iRacing sessionTime at which zero-movement was first observed (null when moving). */
   stoppedStartSessionTime: number | null;
+  /** FuelLevel (litres) when the car entered the pit stall (PIT_STOP_BEGIN). */
+  pitStallArrivalFuelLevel: number | null;
+  /** True while the car is on its first flying lap after a pit stop exit. */
+  onOutLap: boolean;
+  /** lapsCompleted when the car exited the pits — used to detect OUT_LAP. */
+  pitExitLapsCompleted: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -160,6 +166,12 @@ export interface SessionState {
   playerLapTimeBuffer: number[];
   /** Latch — true once LAP_TIME_DEGRADATION has fired in the current stint. */
   playerDegradationFired: boolean;
+  /** FUEL_LOW thresholds already fired this session (values: 0.10, 0.05). */
+  firedFuelLowThresholds: Set<number>;
+  /** Estimated fuel consumption per lap in litres (0 until first completion). */
+  playerFuelPerLap: number;
+  /** Player FuelLevel at the start of the current lap (litres). */
+  playerFuelAtLapStart: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +197,9 @@ function makeDefaultCarState(): CarState {
     stoppedFrames: 0,
     isStoppedOnTrack: false,
     stoppedStartSessionTime: null,
+    pitStallArrivalFuelLevel: null,
+    onOutLap: false,
+    pitExitLapsCompleted: null,
   };
 }
 
@@ -207,6 +222,9 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     trafficAnnouncements: new Map(),
     playerLapTimeBuffer: [],
     playerDegradationFired: false,
+    firedFuelLowThresholds: new Set(),
+    playerFuelPerLap: 0,
+    playerFuelAtLapStart: 0,
   };
 }
 
