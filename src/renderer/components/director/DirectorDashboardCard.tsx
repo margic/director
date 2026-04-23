@@ -23,7 +23,7 @@ export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ on
     checkinStatus: 'unchecked',
   });
 
-  const isRunning = directorStatus.mode !== 'stopped';
+  const isRunning = directorStatus.mode === 'auto';
 
   useEffect(() => {
     const pollStatus = async () => {
@@ -87,10 +87,13 @@ export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ on
 
       <button
         onClick={toggleDirector}
+        disabled={!isRunning && directorStatus.checkinStatus !== 'standby'}
         className={`z-10 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all ${
           isRunning
             ? 'bg-destructive text-white hover:bg-destructive/90 shadow-[0_0_20px_rgba(239,51,64,0.4)]'
-            : 'bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)]'
+            : !isRunning && directorStatus.checkinStatus !== 'standby'
+              ? 'bg-muted text-muted-foreground cursor-not-allowed opacity-50'
+              : 'bg-primary text-black hover:bg-primary/90 shadow-[0_0_20px_rgba(255,95,31,0.4)]'
         }`}
       >
         {isRunning ? (
@@ -101,7 +104,7 @@ export const DirectorDashboardCard: React.FC<DirectorDashboardCardProps> = ({ on
         ) : (
           <>
             <Play className="w-4 h-4 fill-current" />
-            <span>START</span>
+            <span>{directorStatus.checkinStatus !== 'standby' ? 'CHECK IN FIRST' : 'START'}</span>
           </>
         )}
       </button>

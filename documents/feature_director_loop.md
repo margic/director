@@ -1,5 +1,11 @@
 # Director Loop Feature Specification
 
+> **Superseded:** The adaptive polling strategy described below has been replaced with an
+> **event-driven fetch-on-completion model** in v2. See `feature_director_loop_v2.md` and the
+> OpenAPI spec for the current design. The Director now requests the next sequence only after
+> the executor signals that the previous sequence has completed — no timer-based polling during
+> active operation.
+
 ## Overview
 This feature implements the core 'Director Loop' which fetches sequences from the server and executes them locally.
 

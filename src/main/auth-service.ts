@@ -67,7 +67,7 @@ export class AuthService {
     }
   }
 
-  async getAccessToken(): Promise<string | null> {
+  async getAccessToken(forceRefresh = false): Promise<string | null> {
     const tokenCache = this.clientApplication.getTokenCache();
     const accounts = await tokenCache.getAllAccounts();
 
@@ -77,6 +77,7 @@ export class AuthService {
         const response = await this.clientApplication.acquireTokenSilent({
           account: account,
           scopes: [rcApiScope],
+          forceRefresh,
         });
         return response.accessToken;
       } catch (error) {

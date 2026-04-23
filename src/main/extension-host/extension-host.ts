@@ -95,6 +95,10 @@ export class ExtensionHostService {
   private customInvokeHandlers: Map<string, (args: any[], extensionId?: string) => Promise<any>> = new Map();
   // Connection health per extension (populated from connection state events)
   private connectionHealthMap: Map<string, ConnectionHealth> = new Map();
+  // Runtime values cached from extension events
+  private cachedObsScenes: string[] = [];
+  private cachedCameraGroups: { groupNum: number; groupName: string }[] = [];
+  private cachedDrivers: { carNumber: string; userName: string; carName?: string }[] = [];
 
   constructor(
     extensionsPath: string, 
@@ -251,6 +255,27 @@ export class ExtensionHostService {
   }
 
   /**
+   * Returns cached OBS scene names discovered via WebSocket.
+   */
+  public getObsScenes(): string[] {
+    return [...this.cachedObsScenes];
+  }
+
+  /**
+   * Returns cached iRacing camera groups from the simulator session.
+   */
+  public getCameraGroups(): { groupNum: number; groupName: string }[] {
+    return [...this.cachedCameraGroups];
+  }
+
+  /**
+   * Returns cached iRacing driver list from the simulator session.
+   */
+  public getDrivers(): { carNumber: string; userName: string; carName?: string }[] {
+    return [...this.cachedDrivers];
+  }
+
+  /**
    * Allows main process to set connection health for extensions that don't
    * emit events themselves (e.g., discord delegates to main process).
    */
@@ -279,6 +304,51 @@ export class ExtensionHostService {
     // YouTube: youtube.status { monitoring: boolean }
     this.eventBus.on('youtube.status', (data: { extensionId: string; payload: { monitoring: boolean } }) => {
       this.setConnectionHealth(data.extensionId || 'director-youtube', data.payload.monitoring);
+    });
+
+    // OBS: obs.scenes { scenes: string[], connected: boolean }
+    this.eventBus.on('obs.scenes', (data: { extensionId: string; payload: { scenes: string[] } }) => {
+      const newScenes = data.payload.scenes ?? [];
+      const changed = newScenes.length !== this.cachedObsScenes.length ||
+        newScenes.some((s, i) => s !== this.cachedObsScenes[i]);
+      this.cachedObsScenes = newScenes;
+      if (changed) {
+        this.eventBus.emitExtensionEvent(data.extensionId || 'director-obs', 'extension.capabilitiesChanged', {
+          extensionId: data.extensionId || 'director-obs',
+          enabled: true,
+          reason: 'scenes',
+        });
+      }
+    });
+
+    // iRacing: iracing.cameraGroupsChanged { groups: CameraGroup[] }
+    this.eventBus.on('iracing.cameraGroupsChanged', (data: { extensionId: string; payload: { groups: { groupNum: number; groupName: string }[] } }) => {
+      const newGroups = data.payload.groups ?? [];
+      const changed = newGroups.length !== this.cachedCameraGroups.length ||
+        newGroups.some((g, i) => g.groupNum !== this.cachedCameraGroups[i]?.groupNum || g.groupName !== this.cachedCameraGroups[i]?.groupName);
+      this.cachedCameraGroups = newGroups;
+      if (changed) {
+        this.eventBus.emitExtensionEvent(data.extensionId || 'director-iracing', 'extension.capabilitiesChanged', {
+          extensionId: data.extensionId || 'director-iracing',
+          enabled: true,
+          reason: 'cameraGroups',
+        });
+      }
+    });
+
+    // iRacing: iracing.driversChanged { drivers: DriverEntry[] }
+    this.eventBus.on('iracing.driversChanged', (data: { extensionId: string; payload: { drivers: { carNumber: string; userName: string; carName?: string }[] } }) => {
+      const newDrivers = data.payload.drivers ?? [];
+      const changed = newDrivers.length !== this.cachedDrivers.length ||
+        newDrivers.some((d, i) => d.carNumber !== this.cachedDrivers[i]?.carNumber || d.userName !== this.cachedDrivers[i]?.userName);
+      this.cachedDrivers = newDrivers;
+      if (changed) {
+        this.eventBus.emitExtensionEvent(data.extensionId || 'director-iracing', 'extension.capabilitiesChanged', {
+          extensionId: data.extensionId || 'director-iracing',
+          enabled: true,
+          reason: 'drivers',
+        });
+      }
     });
   }
 
@@ -337,6 +407,12 @@ export class ExtensionHostService {
       } else {
           await this.unloadExtension(extensionId);
       }
+
+      // 4. Notify listeners that capabilities have changed (triggers re-check-in)
+      this.eventBus.emitExtensionEvent(extensionId, 'extension.capabilitiesChanged', {
+          extensionId,
+          enabled,
+      });
   }
 
   private async loadExtension(ext: ScannedExtension) {

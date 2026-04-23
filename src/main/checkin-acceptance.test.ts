@@ -27,7 +27,7 @@ vi.mock('./session-manager');
 vi.mock('./sequence-scheduler');
 vi.mock('./config-service', () => ({
   configService: {
-    get: vi.fn(() => ({ defaultMode: 'stopped', autoStartOnSessionSelect: false })),
+    get: vi.fn(() => ({ defaultMode: 'stopped' })),
     set: vi.fn(),
     getOrCreateDirectorId: vi.fn(() => 'd_inst_test-uuid-12345'),
   },
@@ -90,6 +90,14 @@ describe('Session Check-In Acceptance Criteria', () => {
         'director-obs': { connected: true, connectedSince: '2026-04-01T00:00:00Z' },
         'director-iracing': { connected: false },
       })),
+      getObsScenes: vi.fn(() => ['Race Main', 'Replay', 'Starting Grid']),
+      getCameraGroups: vi.fn(() => [
+        { groupNum: 1, groupName: 'TV1' },
+        { groupNum: 2, groupName: 'TV2' },
+      ]),
+      getDrivers: vi.fn(() => [
+        { carNumber: '63', userName: 'John Smith' },
+      ]),
     };
 
     mockSessionManager = Object.assign(new EventEmitter(), {
@@ -248,16 +256,11 @@ describe('Session Check-In Acceptance Criteria', () => {
       expect(global.fetch).toHaveBeenCalledWith(
         expect.stringContaining('/sequences/next'),
         expect.objectContaining({
+          method: 'POST',
           headers: expect.objectContaining({
             'X-Checkin-Id': 'checkin-for-polling',
           }),
         })
-      );
-
-      // Verify checkinId is also in query params (fallback)
-      expect(global.fetch).toHaveBeenCalledWith(
-        expect.stringContaining('checkinId=checkin-for-polling'),
-        expect.anything()
       );
     });
   });
@@ -340,6 +343,34 @@ describe('Session Check-In Acceptance Criteria', () => {
       mockEventBus.emit('youtube.status', {
         extensionId: 'director-youtube',
         payload: { monitoring: true },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+    });
+
+    it('should refresh check-in when extension capabilities change (enable)', async () => {
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-123';
+      sessionManagerState.state = 'checked-in';
+
+      mockEventBus.emit('extension.capabilitiesChanged', {
+        extensionId: 'director-obs',
+        payload: { extensionId: 'director-obs', enabled: true },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+    });
+
+    it('should refresh check-in when extension capabilities change (disable)', async () => {
+      sessionManagerState.checkinStatus = 'standby';
+      sessionManagerState.checkinId = 'checkin-123';
+      sessionManagerState.state = 'checked-in';
+
+      mockEventBus.emit('extension.capabilitiesChanged', {
+        extensionId: 'director-iracing',
+        payload: { extensionId: 'director-iracing', enabled: false },
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));

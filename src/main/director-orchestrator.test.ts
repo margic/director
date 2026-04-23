@@ -18,7 +18,7 @@ vi.mock('./session-manager');
 vi.mock('./sequence-scheduler');
 vi.mock('./config-service', () => ({
   configService: {
-    get: vi.fn(() => ({ defaultMode: 'stopped', autoStartOnSessionSelect: false })),
+    get: vi.fn(() => ({ defaultMode: 'stopped' })),
     set: vi.fn(),
     getOrCreateDirectorId: vi.fn(() => 'd_inst_test-uuid'),
   },
@@ -52,6 +52,9 @@ describe('DirectorOrchestrator', () => {
         ]),
       })),
       getConnectionHealth: vi.fn(() => ({})),
+      getObsScenes: vi.fn(() => []),
+      getCameraGroups: vi.fn(() => []),
+      getDrivers: vi.fn(() => []),
     };
 
     mockSessionManager = Object.assign(new EventEmitter(), {
@@ -126,12 +129,23 @@ describe('DirectorOrchestrator', () => {
       expect(state.sessionId).toBe('session-1');
     });
 
-    it('should transition from manual to auto via setMode', async () => {
-      // Setup: Mock a selected session
+    it('should transition from manual to auto via setMode when checked in', async () => {
+      // Setup: Mock a selected session and active check-in
       mockSessionManager.getSelectedSession.mockReturnValue({
         raceSessionId: 'session-1',
         name: 'Test Session',
       });
+      mockSessionManager.getState.mockReturnValue({
+        state: 'checked-in',
+        sessions: [],
+        selectedSession: { raceSessionId: 'session-1', name: 'Test Session' },
+        checkinStatus: 'standby',
+        checkinId: 'checkin-123',
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
+      });
+      mockSessionManager.getCheckinId.mockReturnValue('checkin-123');
 
       // First, get to manual mode
       await orchestrator.setMode('manual');
@@ -142,12 +156,35 @@ describe('DirectorOrchestrator', () => {
       expect(orchestrator.getState().mode).toBe('auto');
     });
 
-    it('should transition from auto to manual via setMode', async () => {
-      // Setup: Mock a selected session
+    it('should not transition to auto without active check-in', async () => {
+      // Setup: Mock a selected session but NO check-in
       mockSessionManager.getSelectedSession.mockReturnValue({
         raceSessionId: 'session-1',
         name: 'Test Session',
       });
+
+      const state = await orchestrator.setMode('auto');
+      expect(state.mode).toBe('stopped');
+      expect(state.lastError).toBe('Session not checked in');
+    });
+
+    it('should transition from auto to manual via setMode', async () => {
+      // Setup: Mock a selected session and active check-in
+      mockSessionManager.getSelectedSession.mockReturnValue({
+        raceSessionId: 'session-1',
+        name: 'Test Session',
+      });
+      mockSessionManager.getState.mockReturnValue({
+        state: 'checked-in',
+        sessions: [],
+        selectedSession: { raceSessionId: 'session-1', name: 'Test Session' },
+        checkinStatus: 'standby',
+        checkinId: 'checkin-123',
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
+      });
+      mockSessionManager.getCheckinId.mockReturnValue('checkin-123');
 
       // Get to auto mode
       await orchestrator.setMode('auto');
@@ -411,6 +448,66 @@ describe('DirectorOrchestrator', () => {
       await new Promise(resolve => setTimeout(resolve, 10));
 
       expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+    });
+
+    it('should refresh check-in when extension capabilities change', async () => {
+      // Set SessionManager to appear checked-in
+      mockSessionManager.getState.mockReturnValue({
+        state: 'checked-in',
+        sessions: [],
+        selectedSession: { raceSessionId: 'session-1', name: 'Test Session' },
+        checkinStatus: 'standby',
+        checkinId: 'checkin-123',
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
+      });
+
+      // Simulate extension enabled
+      mockEventBus.emit('extension.capabilitiesChanged', {
+        extensionId: 'director-obs',
+        payload: { extensionId: 'director-obs', enabled: true },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+    });
+
+    it('should refresh check-in when extension is disabled', async () => {
+      mockSessionManager.getState.mockReturnValue({
+        state: 'checked-in',
+        sessions: [],
+        selectedSession: { raceSessionId: 'session-1', name: 'Test Session' },
+        checkinStatus: 'standby',
+        checkinId: 'checkin-123',
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
+      });
+
+      // Simulate extension disabled
+      mockEventBus.emit('extension.capabilitiesChanged', {
+        extensionId: 'director-iracing',
+        payload: { extensionId: 'director-iracing', enabled: false },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+    });
+
+    it('should not refresh on capability change if not checked in', async () => {
+      // Default unchecked state
+
+      mockEventBus.emit('extension.capabilitiesChanged', {
+        extensionId: 'director-obs',
+        payload: { extensionId: 'director-obs', enabled: true },
+      });
+
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      expect(mockSessionManager.refreshCheckin).not.toHaveBeenCalled();
     });
   });
 });

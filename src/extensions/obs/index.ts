@@ -41,6 +41,7 @@ export async function activate(director: ExtensionAPI) {
         try {
             await obs.call('SetCurrentProgramScene', { sceneName: payload.sceneName });
             director.log('info', `Switched OBS scene to '${payload.sceneName}'`);
+            director.emitEvent('obs.scenes', { scenes: availableScenes, connected: true, currentScene: payload.sceneName });
         } catch (err: any) {
             director.log('error', `Failed to switch scene: ${err.message}`);
             throw err;
@@ -107,8 +108,9 @@ async function fetchScenes(director: ExtensionAPI) {
     try {
         const response = await obs.call('GetSceneList');
         availableScenes = (response.scenes as any[]).map((s: any) => s.sceneName) as string[];
-        director.log('info', `Fetched ${availableScenes.length} scenes`);
-        director.emitEvent('obs.scenes', { scenes: availableScenes, connected: true });
+        const currentScene = (response as any).currentProgramSceneName || '';
+        director.log('info', `Fetched ${availableScenes.length} scenes, current: ${currentScene}`);
+        director.emitEvent('obs.scenes', { scenes: availableScenes, connected: true, currentScene });
     } catch (err: any) {
         director.log('error', `Failed to fetch scenes: ${err.message}`);
     }

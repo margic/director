@@ -34,6 +34,10 @@ interface SessionInfoResult {
   drivers: DriverEntry[];
   trackName: string;
   sessionLaps: number;
+  sessionType: string;      // 'Practice' | 'Qualify' | 'Race'
+  cautionType: string;      // 'local' | 'fullCourse' | 'none'
+  trackType: string;        // 'road course' | 'oval' | 'dirt road' etc.
+  seriesName: string;       // e.g. 'Global Mazda MX-5 Cup'
 }
 
 // --- Telemetry Types ---
@@ -89,6 +93,10 @@ interface RaceState {
   leaderLap: number;
   totalSessionLaps: number;
   trackName: string;
+  sessionType: string;
+  cautionType: string;
+  trackType: string;
+  seriesName: string;
 }
 
 // Constants
@@ -137,6 +145,10 @@ let lastVarHeaderCount = -1;
 let telemetryInterval: NodeJS.Timeout | null = null;
 let cachedTrackName = '';
 let cachedSessionLaps = 0;
+let cachedSessionType = '';
+let cachedCautionType = '';
+let cachedTrackType = '';
+let cachedSeriesName = '';
 
 export async function activate(director: ExtensionAPI) {
     directorAPI = director;
@@ -261,6 +273,10 @@ function closeSharedMemory(director: ExtensionAPI) {
     cachedDrivers = [];
     cachedTrackName = '';
     cachedSessionLaps = 0;
+    cachedSessionType = '';
+    cachedCautionType = '';
+    cachedTrackType = '';
+    cachedSeriesName = '';
     director.log('info', 'iRacing shared memory unmapped');
 }
 
@@ -353,19 +369,29 @@ function readSessionInfo(director: ExtensionAPI): SessionInfoResult | null {
 
         // --- Track & Session ---
         const trackName = parsed?.WeekendInfo?.TrackDisplayName ?? '';
+        const trackType = parsed?.WeekendInfo?.TrackType ?? '';
+        const seriesName = parsed?.WeekendInfo?.SeriesDisplayName ?? '';
+        const cautionTypeRaw = parsed?.WeekendInfo?.CourseCautions ?? '';
+        const cautionType = typeof cautionTypeRaw === 'string' && cautionTypeRaw.toLowerCase().includes('full')
+            ? 'fullCourse'
+            : cautionTypeRaw ? 'local' : 'none';
+
+        // Determine active session type and race laps
         let sessionLaps = 0;
+        let sessionType = '';
         if (parsed?.SessionInfo?.Sessions) {
+            // Find the active session (last one with ResultsPositions not yet populated, or last overall)
             for (const s of parsed.SessionInfo.Sessions) {
+                sessionType = s.SessionType ?? sessionType;
                 if (s.SessionType === 'Race' && typeof s.SessionLaps === 'number') {
                     sessionLaps = s.SessionLaps;
-                    break;
                 }
             }
         }
 
         lastSessionInfoUpdate = header.sessionInfoUpdate;
         director.log('info', `Parsed session info (update #${header.sessionInfoUpdate}): ${cameraGroups.length} cameras, ${drivers.length} drivers, track="${trackName}"`);
-        return { cameraGroups, drivers, trackName, sessionLaps };
+        return { cameraGroups, drivers, trackName, sessionLaps, sessionType, cautionType, trackType, seriesName };
     } catch (error: any) {
         director.log('error', `Failed to parse session info YAML: ${error.message}`);
         return null;
@@ -551,6 +577,10 @@ function buildRaceState(_director: ExtensionAPI): RaceState | null {
         leaderLap: cars.length > 0 ? cars[0].lapsCompleted : 0,
         totalSessionLaps: cachedSessionLaps,
         trackName: cachedTrackName,
+        sessionType: cachedSessionType,
+        cautionType: cachedCautionType,
+        trackType: cachedTrackType,
+        seriesName: cachedSeriesName,
     };
 }
 
@@ -566,9 +596,9 @@ function startTelemetryPolling(director: ExtensionAPI) {
 
     telemetryInterval = setInterval(() => {
         pollTelemetry(director);
-    }, 250); // 4 Hz — good balance for race tower updates
+    }, 1000); // 1 Hz — sufficient for race tower updates
 
-    director.log('info', 'Telemetry polling started (250ms interval)');
+    director.log('info', 'Telemetry polling started (1000ms interval)');
 }
 
 function stopTelemetryPolling(director: ExtensionAPI) {
@@ -661,6 +691,10 @@ function pollSessionData(director: ExtensionAPI) {
             cachedDrivers = result.drivers;
             cachedTrackName = result.trackName;
             cachedSessionLaps = result.sessionLaps;
+            cachedSessionType = result.sessionType;
+            cachedCautionType = result.cautionType;
+            cachedTrackType = result.trackType;
+            cachedSeriesName = result.seriesName;
             director.emitEvent('iracing.cameraGroupsChanged', { groups: result.cameraGroups });
             director.emitEvent('iracing.driversChanged', { drivers: result.drivers });
         }

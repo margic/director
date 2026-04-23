@@ -168,8 +168,8 @@ function App() {
   return (
     <div className="flex h-screen w-full bg-background text-foreground font-rajdhani overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-20 border-r border-border bg-card flex flex-col items-center py-6 gap-8">
-        <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(255,95,31,0.5)] overflow-hidden">
+      <aside className="w-20 border-r border-border bg-card flex flex-col items-center py-6 gap-8 overflow-y-auto shrink-0">
+        <div className="w-10 h-10 bg-primary rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(255,95,31,0.5)] overflow-hidden shrink-0">
           <img src={RaceCenterIcon} alt="Race Center" className="w-full h-full object-cover" />
         </div>
         
@@ -256,7 +256,7 @@ function App() {
 
       {/* Main Content */}
       <PageHeaderProvider>
-      <main className="flex-1 flex flex-col relative">
+      <main className="flex-1 flex flex-col relative min-h-0">
         {/* Header — dynamic title driven by PageHeaderContext */}
         <AppHeader
           user={user}

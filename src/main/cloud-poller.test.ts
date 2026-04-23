@@ -119,7 +119,27 @@ describe('CloudPoller', () => {
       poller.stop();
     });
 
-    it('should send intents query parameter', async () => {
+    it('should NOT fetch again after receiving a sequence (waits for completion)', async () => {
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'seq-123', steps: [] }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalled();
+      }, { timeout: 1000 });
+
+      // Wait longer than idleRetryMs to prove no second fetch happens
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      poller.stop();
+    });
+
+    it('should send intents in POST body', async () => {
       fetchMock.mockResolvedValueOnce({
         status: 200,
         ok: true,
@@ -132,13 +152,15 @@ describe('CloudPoller', () => {
         expect(fetchMock).toHaveBeenCalled();
       }, { timeout: 1000 });
 
-      const callUrl = fetchMock.mock.calls[0][0];
-      expect(callUrl).toContain('intents=system.wait%2Csystem.log');
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.method).toBe('POST');
+      const body = JSON.parse(options.body);
+      expect(body.intents).toEqual(['system.wait', 'system.log']);
 
       poller.stop();
     });
 
-    it('should send checkinId in query parameter and header when provided', async () => {
+    it('should send checkinId in header when provided', async () => {
       mockOptions.checkinId = 'checkin-abc';
 
       fetchMock.mockResolvedValueOnce({
@@ -153,9 +175,46 @@ describe('CloudPoller', () => {
         expect(fetchMock).toHaveBeenCalled();
       }, { timeout: 1000 });
 
-      const [url, options] = fetchMock.mock.calls[0];
-      expect(url).toContain('checkinId=checkin-abc');
+      const [, options] = fetchMock.mock.calls[0];
       expect(options.headers['X-Checkin-Id']).toBe('checkin-abc');
+
+      poller.stop();
+    });
+
+    it('should include raceContext in POST body when available', async () => {
+      const mockContext = {
+        sessionType: 'Race',
+        sessionFlags: 'GREEN',
+        cautionType: 'local',
+        lapsRemain: 10,
+        timeRemainSec: -1,
+        leaderLap: 5,
+        totalLaps: 15,
+        focusedCarNumber: '42',
+        battles: [{ cars: ['42', '7'], gapSec: 0.4 }],
+        pitting: [],
+        carCount: 12,
+        trackName: 'Lime Rock Park',
+        trackType: 'road course',
+        seriesName: 'Global Mazda MX-5 Cup',
+      };
+      mockOptions.getRaceContext = vi.fn().mockReturnValue(mockContext);
+
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'seq-123', steps: [] }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(fetchMock).toHaveBeenCalled();
+      }, { timeout: 1000 });
+
+      const [, options] = fetchMock.mock.calls[0];
+      const body = JSON.parse(options.body);
+      expect(body.raceContext).toEqual(mockContext);
 
       poller.stop();
     });
@@ -260,8 +319,8 @@ describe('CloudPoller', () => {
     });
   });
 
-  describe('onSequenceCompleted', () => {
-    it('should trigger request for next sequence after completion', async () => {
+  describe('onSequenceCompleted - event-driven fetch', () => {
+    it('should trigger exactly one fetch after completion', async () => {
       fetchMock
         .mockResolvedValueOnce({
           status: 200,
@@ -280,17 +339,80 @@ describe('CloudPoller', () => {
         expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
       }, { timeout: 1000 });
 
-      // Notify completion - should trigger immediate retry
+      // No second fetch should have happened yet
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Notify completion - should trigger exactly one fetch
       poller.onSequenceCompleted('seq-1');
 
       await vi.waitFor(() => {
         expect(fetchMock).toHaveBeenCalledTimes(2);
       }, { timeout: 1000 });
 
-      const secondCallUrl = fetchMock.mock.calls[1][0];
-      expect(secondCallUrl).toContain('lastSequenceId=seq-1');
+      const [, secondCallOptions] = fetchMock.mock.calls[1];
+      const body = JSON.parse(secondCallOptions.body);
+      expect(body.lastSequenceId).toBe('seq-1');
 
       poller.stop();
+    });
+
+    it('should ignore onSequenceCompleted when not awaiting completion', async () => {
+      // Get a 200 first so we enter awaiting state
+      fetchMock
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ id: 'seq-1', steps: [] }),
+        })
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ id: 'seq-2', steps: [] }),
+        });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
+      }, { timeout: 1000 });
+
+      // Complete seq-1, which triggers fetch → gets seq-2 → enters awaiting again
+      poller.onSequenceCompleted('seq-1');
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledTimes(2);
+      }, { timeout: 1000 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      // Now stop the poller — onSequenceCompleted after stop should be ignored
+      poller.stop();
+      poller.onSequenceCompleted('seq-2');
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not fetch if stopped before completion', async () => {
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'seq-1', steps: [] }),
+      });
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
+      }, { timeout: 1000 });
+
+      poller.stop();
+
+      // Completion after stop should not trigger fetch
+      poller.onSequenceCompleted('seq-1');
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -365,8 +487,8 @@ describe('CloudPoller', () => {
         expect(fetchMock).toHaveBeenCalled();
       }, { timeout: 1000 });
 
-      const [url] = fetchMock.mock.calls[0];
-      expect(url).toContain('checkinId=new-checkin-id');
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.headers['X-Checkin-Id']).toBe('new-checkin-id');
 
       poller.stop();
     });
@@ -387,8 +509,8 @@ describe('CloudPoller', () => {
         expect(fetchMock).toHaveBeenCalled();
       }, { timeout: 1000 });
 
-      const [url] = fetchMock.mock.calls[0];
-      expect(url).not.toContain('checkinId');
+      const [, options] = fetchMock.mock.calls[0];
+      expect(options.headers['X-Checkin-Id']).toBeUndefined();
 
       poller.stop();
     });
