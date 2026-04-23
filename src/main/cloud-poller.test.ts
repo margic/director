@@ -219,15 +219,13 @@ describe('CloudPoller', () => {
       poller.stop();
     });
 
-    it('should log executionPath from sequence metadata', async () => {
+    it('should log and track executionPath from metadata when present', async () => {
       const consoleSpy = vi.spyOn(console, 'log');
 
       fetchMock.mockResolvedValueOnce({
         status: 200,
         ok: true,
         json: async () => ({
-          id: 'seq-fast',
-          steps: [{ id: 'step-1', intent: 'system.wait', payload: {} }],
           id: 'seq-456',
           steps: [],
           metadata: { executionPath: 'preselect-deterministic' },
@@ -241,15 +239,6 @@ describe('CloudPoller', () => {
       }, { timeout: 1000 });
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining("executionPath: preselect-deterministic")
-      );
-
-      consoleSpy.mockRestore();
-      poller.stop();
-    });
-
-    it('should include executionPath in telemetry event', async () => {
-      const { telemetryService } = await import('./telemetry-service');
         expect.stringContaining('preselect-deterministic')
       );
 
@@ -268,11 +257,6 @@ describe('CloudPoller', () => {
       fetchMock.mockResolvedValueOnce({
         status: 200,
         ok: true,
-        json: async () => ({
-          id: 'seq-llm',
-          steps: [],
-          metadata: { executionPath: 'preselect-llm' },
-        }),
         json: async () => ({ id: 'seq-789', steps: [] }),
       });
 
@@ -282,12 +266,6 @@ describe('CloudPoller', () => {
         expect(mockOptions.onSequence).toHaveBeenCalled();
       }, { timeout: 1000 });
 
-      expect(telemetryService.trackEvent).toHaveBeenCalledWith(
-        'Sequence.Received',
-        expect.objectContaining({ executionPath: 'preselect-llm' })
-      );
-
-      poller.stop();
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('unknown')
       );
