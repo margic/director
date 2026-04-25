@@ -79,7 +79,8 @@ const schema = {
       autoStartOnSessionSelect: { type: 'boolean', default: false }
     },
     default: {}
-  }
+  },
+  app: {}
 } as const;
 
 class ConfigService {

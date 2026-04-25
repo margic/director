@@ -329,6 +329,65 @@ export interface SequenceTemplate {
   ttl?: number;
 }
 
+/**
+ * Live race context sent with every POST .../sequences/next request.
+ * Mirrors the RC API's RaceContext schema (OpenAPI spec).
+ */
+export interface RaceContext {
+  /** Current session type, e.g. "Race", "Practice", "Qualify". Required. */
+  sessionType: string;
+  /** Current flag state as a string, e.g. "green", "caution", "red", "disconnected". Required. */
+  sessionFlags: string;
+  /** Remaining laps; -1 if unlimited. Required. */
+  lapsRemain: number;
+  /** Number of cars currently on track. Required. */
+  carCount: number;
+  /** ISO-8601 timestamp when this context snapshot was taken. */
+  contextTimestamp: string;
+  /** Caution scope when in caution state. */
+  cautionType?: 'local' | 'fullCourse' | 'none';
+  /** Seconds remaining in the session; omit if lap-count session. */
+  timeRemainSec?: number;
+  /** Lap number of the race leader. */
+  leaderLap?: number;
+  /** Total laps for this session; omit if unlimited. */
+  totalLaps?: number;
+  /** Car number of the currently focused/spectated car. */
+  focusedCarNumber?: string;
+  /** Name of the current OBS scene. */
+  currentObsScene?: string;
+  /** Active battles: pairs of car numbers within a gap threshold. */
+  battles?: Array<{ cars: string[]; gapSec: number }>;
+  /** Car numbers currently in pit road. */
+  pitting?: string[];
+  /** Track display name. */
+  trackName?: string;
+  /** Type of track layout, e.g. "oval", "road". */
+  trackType?: string;
+  /** Series name. */
+  seriesName?: string;
+  /** Per-driver context for AI decision making. */
+  drivers?: Array<{
+    carNumber: string;
+    gapToAhead: number;
+    lapsCompleted: number;
+    bestLap: number;
+    classPosition: number;
+  }>;
+}
+
+/**
+ * Request body for POST .../sequences/next.
+ */
+export interface NextSequenceRequest {
+  /** Live race context snapshot. Required. */
+  raceContext: RaceContext;
+  /** ID of the last completed sequence, for chaining/logging. */
+  lastSequenceId?: string;
+  /** Comma-separated or array of active intent handlers. */
+  intents?: string | string[];
+}
+
 /** Tunable generation parameters for the AI Director pipeline. */
 export interface GenerationParams {
   minSequenceDurationMs?: number;

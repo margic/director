@@ -1,30 +1,45 @@
 # Feature: iRacing Publisher — Telemetry & Event Publishing
 
-> **Status: Proposed**
+> **Status: In Progress**
 > Based on RFC: *Publisher Integration into the Director App & Hybrid Telemetry* (Race Control team, 2025-07-14)
+> Updated: 2026-04-23 — Added three-role deployment model, TAKE OVER / HAND OFF driver swap flow, and publisher check-in design.
 
 ---
 
 ## 1. Overview
 
-The **iRacing Publisher** is a new capability added to the existing `director-iracing` extension. When enabled, the extension reads the iRacing telemetry variable buffer at 5Hz, detects race events locally, and POSTs structured `RaceEvent` payloads to Race Control via REST.
+The **iRacing Publisher** is a capability built into the existing `director-iracing` extension. When active, the extension reads the iRacing telemetry variable buffer at 5Hz, detects race events locally, and POSTs structured `RaceEvent` payloads to Race Control via REST.
 
 This replaces the legacy Python `publisher_service.py` prototype. By folding the capability directly into the iRacing extension, the Director app becomes the single deployable unit for all rig functions.
 
+### Minimum Production Setup: Three Machines
+
+A Sim RaceCenter broadcast requires a minimum of three machines:
+
+| Machine | Role | Purpose |
+| :--- | :--- | :--- |
+| Sim Rig A | `driver-rig` | iRacing + publisher; current driver |
+| Sim Rig B | `driver-rig` | iRacing + publisher; incoming driver (standby until swap) |
+| Streaming PC | `media-director` | OBS, Discord, Director Loop; never runs iRacing |
+
+Driver swaps in endurance racing require two physically separate rigs — a driver cannot hand over to an incoming driver on the same PC. The two-rig minimum is therefore a hard operational constraint, not a preference.
+
 ### Deployment Model
 
-There are two distinct rig roles:
+The app role is configured once per machine via `app.rigRole` in settings:
 
-| Role | Extensions Active | Director Loop | Network Path |
-| :--- | :--- | :--- | :--- |
-| **Driver Rig** | iRacing (publisher mode) only | Disabled — no sequence execution | Outbound to Race Control via internet |
-| **Media/Director Rig** | iRacing, OBS, Discord, etc. | Active — polls Race Control for sequences | Outbound to Race Control via internet |
+| Role | Director Loop | Publisher | OBS / Discord | Check-in role |
+| :--- | :--- | :--- | :--- | :--- |
+| `media-director` | ✅ Active | ❌ | ✅ | `director` |
+| `driver-rig` | ❌ | 🔄 TAKE OVER / HAND OFF toggle | ❌ | `publisher` (on TAKE OVER) |
+
+> An `all-in-one` mode (all capabilities active) is available for development and testing but is not presented in the first-run UI. It is not a supported broadcast configuration.
 
 **Key constraints:**
-- Driver rigs are **fire-and-forget**: they POST events to Race Control and receive nothing back. There is no back-channel, no sequence delivery, no commands from Race Control to a publisher rig.
-- Rigs are **not assumed to be on the same network**. Each rig connects independently to Race Control over the internet. There is no peer-to-peer or LAN dependency.
-- The Director Agent (on the media rig) retrieves race events **from Race Control** via the existing Director Loop — not directly from publisher rigs.
-- iRacing session context (drivers, track, camera groups) is already available locally on each rig via the existing iRacing shared memory YAML reader. The publisher does not re-transmit session state.
+- Rigs are **not assumed to be on the same network**. Each machine connects independently to Race Control over the internet. There is no peer-to-peer or LAN dependency.
+- The Director Agent (on the streaming PC) retrieves race events **from Race Control** — not directly from publisher rigs.
+- A `driver-rig` in **standby** is connected to iRacing, watching, but not publishing. The publisher only runs when the operator explicitly presses TAKE OVER.
+- Only one `driver-rig` should be ACTIVE (publishing) at a time for a given session. Race Control enforces this via check-in exclusivity.
 
 ---
 
@@ -50,16 +65,77 @@ This is the right architectural boundary: the iRacing extension owns all iRacing
 
 ## 3. Architectural Design
 
-### 3.1 Extension Modes
+### 3.1 Rig Roles and the Driver Swap Flow
 
-The `director-iracing` extension gains a `publisherMode` setting in its configuration:
+The `app.rigRole` setting (one of `driver-rig` | `media-director`) determines the startup behaviour of the app. The session to join is selected from the dashboard — it is a global app-level setting, not per-extension.
 
-| Mode | Behaviour |
+#### Driver Swap Sequence
+
+```
+Lap 80 — Swap time:
+  1. Operator on Rig A presses HAND OFF
+       → publisher stops (iracing.publisher.setEnabled false)
+       → wrap check-out call to Race Control (role: publisher)
+       → state: STANDBY
+  2. New driver sits in Rig B
+  3. Operator on Rig B (or streaming PC operator) presses TAKE OVER
+       → POST /api/director/v1/sessions/{id}/checkin (role: publisher, driver info)
+       → publisher starts (iracing.publisher.setEnabled true)
+       → state: ACTIVE
+  4. RC sees clean publisher handoff — events now tagged with Rig B publisher code
+  5. RC can automatically trigger a "Driver Intro" sequence on the Media Director
+  6. Media Director rig (streaming PC) is never touched — Director Loop keeps running
+```
+
+No peer-to-peer. No LAN coordination. Race Control is the sole intermediary.
+
+#### Driver Rig Boot Behaviour
+
+On boot, a `driver-rig` starts in **STANDBY**: iRacing connected, session loaded from saved settings, publisher stopped. The operator must explicitly press TAKE OVER to activate publishing. This prevents accidental dual-publishing if a rig restarts mid-race.
+
+#### Publisher Check-in Payload
+
+When TAKE OVER is pressed, the driver rig checks into the session:
+
+```typescript
+POST /api/director/v1/sessions/{raceSessionId}/checkin
+{
+  "role": "publisher",
+  "publisherCode": "RIG-B",          // from publisher settings
+  "capabilities": ["iracing.telemetry"],
+  "driver": {
+    "driverId": "usr_abc123",        // from MSAL auth token (logged-in user IS the driver)
+    "displayName": "Alex Reimer",    // from MSAL id_token claims
+    "carNumber": "44"                // from iRacing session YAML (DriverInfo, player car)
+  }
+}
+```
+
+The `driverId` and `displayName` are taken directly from the MSAL authentication token — no additional user input. The `carNumber` is read from the iRacing session YAML at the moment TAKE OVER is pressed.
+
+#### Publisher Check-out (HAND OFF)
+
+```typescript
+POST /api/director/v1/sessions/{raceSessionId}/wrap   // or DELETE /checkin
+{
+  "role": "publisher",
+  "publisherCode": "RIG-B"
+}
+```
+
+RC uses this signal to fire a "driver swap complete" lifecycle event — enabling automatic Driver Outro / Driver Intro sequences on the Media Director.
+
+### 3.2 Extension Modes (iRacing Extension)
+
+The `director-iracing` extension behaviour depends on both `app.rigRole` and the TAKE OVER / HAND OFF state:
+
+| State | Behaviour |
 | :--- | :--- |
-| `disabled` (default) | Current behaviour — camera control + overlays only |
-| `enabled` | Adds telemetry polling at 5Hz, local event detection, and REST delivery to Race Control |
+| `driver-rig` STANDBY (default on boot) | iRacing connected, camera reads active, publisher stopped |
+| `driver-rig` ACTIVE (after TAKE OVER) | Publisher running at 5Hz, events flowing to Race Control |
+| `media-director` | Publisher never runs; camera control + Director Loop active |
 
-### 3.2 Component Breakdown
+### 3.3 Component Breakdown
 
 ```
 src/extensions/iracing/
@@ -71,9 +147,9 @@ src/extensions/iracing/
 └── publisher-config.ts       (NEW — settings schema for publisher mode)
 ```
 
-### 3.3 Data Flow
+### 3.4 Data Flow
 
-#### Driver Rig (publisher mode — outbound only)
+#### Driver Rig ACTIVE (publisher running — outbound only)
 
 ```
 iRacing Shared Memory
@@ -107,7 +183,7 @@ Director Agent  →  SequenceExecutor  →  OBS / Discord / iRacing camera comma
 
 The two rigs never communicate with each other. Race Control is the sole intermediary.
 
-### 3.4 Telemetry Fields Read
+### 3.5 Telemetry Fields Read
 
 The 8 fields the AI pipeline actually uses (from the RFC analysis):
 
@@ -293,7 +369,75 @@ New entries added to the existing manifest:
 
 ## 10. UI
 
-### 10.1 Extension Panel — Publisher Section
+### 10.1 Driver Rig Home Screen
+
+When `app.rigRole === 'driver-rig'`, the app renders a dedicated home screen instead of the full Director dashboard. This screen is focused — it shows only what the driver/operator needs and nothing else.
+
+**STANDBY state (default on boot):**
+```
+┌──────────────────────────────────────┐
+│  SRC DIRECTOR   RIG B            ⚙  │
+├──────────────────────────────────────┤
+│  iRACING    ● CONNECTED              │
+│  Session    Daytona 24h • Lap 47     │
+│  Driver     Alex Reimer • Car #44    │
+│                                      │
+│  ┌────────────────────────────────┐  │
+│  │   ▶  TAKE OVER                 │  │
+│  │      Activate publisher        │  │
+│  └────────────────────────────────┘  │
+│                                      │
+│  Last active: 23 min ago             │
+└──────────────────────────────────────┘
+```
+
+**ACTIVE state (after TAKE OVER):**
+```
+┌──────────────────────────────────────┐
+│  SRC DIRECTOR   RIG B            ⚙  │
+├──────────────────────────────────────┤
+│  iRACING    ● CONNECTED              │
+│  Session    Daytona 24h • Lap 47     │
+│  Driver     Alex Reimer • Car #44    │
+│                                      │
+│  ┌────────────────────────────────┐  │
+│  │  🟢 PUBLISHING                 │  │
+│  │  Lap 47 • Events sent: 1,247   │  │
+│  └────────────────────────────────┘  │
+│                                      │
+│  [ HAND OFF / GO STANDBY ]           │
+└──────────────────────────────────────┘
+```
+
+- TAKE OVER button: `bg-primary` (Apex Orange), large, full-width.
+- HAND OFF button: `bg-destructive` (Flag Red), prominent but below the status card.
+- Publisher status card: uses `--green-flag` border glow when ACTIVE.
+- iRacing connection status and session/driver info auto-populated from iRacing YAML.
+- Settings gear (⚙) opens publisher settings (publisherCode, raceSessionId).
+
+### 10.2 First-Run Role Selection
+
+On first launch (no `app.rigRole` set), the app presents a role selection screen before anything else:
+
+```
+┌────────────────────────────────────────┐
+│  SIM RACECENTER DIRECTOR               │
+│  What is this machine?                 │
+│                                        │
+│  ┌──────────────┐  ┌────────────────┐  │
+│  │  🏎  DRIVER   │  │  📺 MEDIA      │  │
+│  │     RIG      │  │    DIRECTOR    │  │
+│  │              │  │                │  │
+│  │ I drive in   │  │ I run OBS and  │  │
+│  │ iRacing and  │  │ broadcast the  │  │
+│  │ publish data │  │ race           │  │
+│  └──────────────┘  └────────────────┘  │
+└────────────────────────────────────────┘
+```
+
+Selection persists to `app.rigRole` in config. Can be changed later in app settings.
+
+### 10.3 Extension Panel — Publisher Section
 
 The iRacing extension detail page gains a collapsible **"TELEMETRY PUBLISHER"** section below the existing camera and overlay controls:
 
@@ -316,9 +460,9 @@ The iRacing extension detail page gains a collapsible **"TELEMETRY PUBLISHER"** 
 - Recent events list shows last 5 events — `font-jetbrains`, `text-xs`, auto-scrolling.
 - All labels uppercase `font-rajdhani`.
 
-### 10.2 Dashboard Widget
+### 10.4 Dashboard Widget (Media Director)
 
-The existing iRacing dashboard widget gains a small publisher badge:
+The existing iRacing dashboard widget on the Media Director gains a small publisher badge showing whether any rig is actively publishing:
 
 ```
 ┌─────────────────────────┐
@@ -332,11 +476,13 @@ The existing iRacing dashboard widget gains a small publisher badge:
 
 ---
 
-## 11. No Sequence Integration on Driver Rigs
+## 11. Driver Rig — No Sequence Integration
 
-Publisher rigs do **not** run the Director Loop. They do not poll Race Control for sequences, do not execute intents, and do not receive commands of any kind from the cloud. The publisher extension is outbound-only.
+`driver-rig` machines do **not** run the Director Loop. They do not poll Race Control for sequences, do not execute intents targeting OBS or Discord, and do not receive commands of any kind from the cloud. The only outbound path is `POST /api/telemetry/events`.
 
-If a future requirement arises to remotely enable/disable publishing, this must be done by changing the extension setting locally on the rig. No back-channel will be added.
+The only exception is the check-in / wrap calls (`POST /api/director/v1/sessions/{id}/checkin` and the corresponding wrap call) which are triggered by operator TAKE OVER / HAND OFF actions — not by the Director Loop.
+
+This is by design. The streaming PC (Media Director) is the command executor. Driver rigs are data sources only.
 
 ---
 
@@ -354,13 +500,17 @@ This feature delivers only the **Director-side implementation** of Step 3 from t
 
 ## 13. Open Questions
 
-1. **Poll Rate vs. Existing Loop:** The iRacing extension's current session reader polls at 2s intervals (checking `sessionInfoUpdate` counter). The publisher needs 5Hz (200ms). Should the poll loop be unified at 200ms with session YAML re-read only when the update counter changes, or run two separate timers? A unified loop is cleaner.
+1. ~~**Poll Rate vs. Existing Loop**~~ **Resolved.** Two separate timers: connection poll at 2s, telemetry poll at 200ms (5Hz). The session YAML re-read is gated on the `sessionInfoUpdate` counter so 2s calls do not re-parse unchanged data.
 
-2. **Multi-Rig Identity:** In special events with multiple rigs, each Director instance will have its own session config with its rig's booked driver. The cloud merges streams by `raceSessionId`. Does each rig's `raceSessionId` need to be the same shared session, or can rigs join the same session independently via check-in?
+2. ~~**Multi-Rig Identity**~~ **Resolved.** All rigs join the same `raceSessionId`. Each checks in with `role: publisher` + `publisherCode` identifying the physical rig. Race Control merges event streams by `raceSessionId`; the `publisherCode` disambiguates which rig emitted each event.
 
-3. **API Endpoint Spec:** The `POST /api/telemetry/events` endpoint is referenced in the RFC but not yet in the OpenAPI spec at `https://simracecenter.com/api/openapi.yaml`. Implementation will be blocked until this is published. Track at [margic/racecontrol issues](https://github.com/margic/racecontrol/issues).
+3. **Publisher check-in endpoint:** The existing `POST /api/director/v1/sessions/{id}/checkin` was designed for the Media Director role. The publisher check-in with `role: publisher` and `driver` payload is a proposed extension. Race Control must confirm whether this is handled by the same endpoint or a new one. See [margic/racecontrol issue tracker](https://github.com/margic/racecontrol/issues).
 
-4. ~~**Publisher Mode Only Config:**~~ **Resolved.** Driver rigs simply leave all extensions except iRacing disabled. No special launcher mode, no new config format — the existing extension enable/disable system is sufficient.
+4. **Driver swap lifecycle events:** When a `role: publisher` wrap is received (HAND OFF), Race Control should ideally emit a lifecycle signal that the Media Director's Director Loop can consume as a trigger for automatic Driver Swap sequences. The mechanism (a special sequence type, a new event, or a conventional `raceEvent`) is an RC design decision.
+
+5. **API Endpoint Spec:** The `POST /api/telemetry/events` endpoint is referenced in the RFC but not yet in the OpenAPI spec at `https://simracecenter.com/api/openapi.yaml`. Implementation will be blocked until this is published.
+
+6. ~~**Publisher Mode Only Config**~~ **Resolved.** `app.rigRole = driver-rig` replaces any per-extension publisher-mode config. The role is set at app level; the iRacing extension reads `app.rigRole` to know whether to show the TAKE OVER / HAND OFF UI or the full Director panel.
 
 ---
 

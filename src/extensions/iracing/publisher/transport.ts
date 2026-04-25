@@ -201,6 +201,10 @@ export class PublisherTransport {
         this.lastFlushAt = Date.now();
         this.retryBackoffMs = 0;
         this.retryAfter = 0;
+        console.log(
+          `[publisher-transport] Batch flushed — accepted:${result.accepted} duplicates:${result.duplicates} invalid:${result.invalid}`,
+          batch.map(e => ({ id: e.id, type: e.type, car: e.car?.carNumber ?? null })),
+        );
         if (result.invalid > 0) {
           for (const r of result.results) {
             if (r.status === 'invalid') {

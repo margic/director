@@ -5,69 +5,46 @@ interface IracingDashboardCardProps {
     onClick: () => void;
 }
 
-interface PublisherBadgeState {
-    enabled: boolean;
-    active: boolean;
-    eventsPublishedTotal: number;
-}
-
 export const IracingDashboardCard = ({ onClick }: IracingDashboardCardProps) => {
     const [connected, setConnected] = useState(false);
-    const [publisher, setPublisher] = useState<PublisherBadgeState>({
-        enabled: false,
-        active: false,
-        eventsPublishedTotal: 0,
-    });
+    const [publisher, setPublisher] = useState({ enabled: false, active: false, eventsPublishedTotal: 0 });
 
     useEffect(() => {
-        // Query the cached connection state on mount
         const init = async () => {
             if (window.electronAPI?.extensions) {
                 try {
                     const lastEvent = await window.electronAPI.extensions.getLastEvent('iracing.connectionStateChanged');
-                    if (lastEvent?.payload?.connected !== undefined) {
-                        setConnected(lastEvent.payload.connected);
-                    }
-                } catch (e) {
-                    console.error('Failed to get iracing connection state', e);
-                }
+                    if (lastEvent?.payload?.connected !== undefined) setConnected(lastEvent.payload.connected);
+                } catch { /* ignore */ }
                 try {
                     const lastPub = await window.electronAPI.extensions.getLastEvent('iracing.publisherStateChanged');
                     if (lastPub?.payload) {
-                        setPublisher((prev) => ({
+                        setPublisher(prev => ({
                             ...prev,
                             active: lastPub.payload.status === 'active',
                             eventsPublishedTotal: lastPub.payload.eventsQueuedTotal ?? 0,
                         }));
                     }
-                } catch (e) {
-                    console.error('Failed to get publisher state', e);
-                }
+                } catch { /* ignore */ }
             }
-            // Read the persisted enabled flag once
             if (window.electronAPI?.config) {
                 try {
-                    const enabled = await window.electronAPI.config.get('publisher.enabled');
-                    setPublisher((prev) => ({ ...prev, enabled: !!enabled }));
-                } catch (e) {
-                    console.error('Failed to get publisher.enabled', e);
-                }
+                    const enabled = await window.electronAPI.config.get('publisher.enabled' as any);
+                    setPublisher(prev => ({ ...prev, enabled: !!enabled }));
+                } catch { /* ignore */ }
             }
         };
         init();
 
-        // Subscribe to live connection state and publisher state changes
         let unsub: (() => void) | undefined;
         if (window.electronAPI?.extensions) {
-            unsub = window.electronAPI.extensions.onExtensionEvent((data) => {
-                if (data.eventName === 'iracing.connectionStateChanged') {
-                    setConnected(!!data.payload?.connected);
-                } else if (data.eventName === 'iracing.publisherStateChanged') {
-                    setPublisher((prev) => ({
+            unsub = window.electronAPI.extensions.onExtensionEvent((data: any) => {
+                if (data.eventName === 'iracing.connectionStateChanged') setConnected(!!data.payload?.connected);
+                if (data.eventName === 'iracing.publisherStateChanged') {
+                    setPublisher(prev => ({
                         ...prev,
                         active: data.payload?.status === 'active',
-                        eventsPublishedTotal:
-                            data.payload?.eventsQueuedTotal ?? prev.eventsPublishedTotal,
+                        eventsPublishedTotal: data.payload?.eventsQueuedTotal ?? prev.eventsPublishedTotal,
                     }));
                 }
             });

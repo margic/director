@@ -372,6 +372,18 @@ app.on('ready', () => {
       return true;
   });
 
+  ipcMain.handle('publisher:lookup-config', async (_event, publisherCode: string) => {
+    const token = await authService.getAccessToken();
+    if (!token) throw new Error('Not authenticated');
+    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.publisherConfig(publisherCode)}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}${body ? ` — ${body}` : ''}`);
+    }
+    return res.json();
+  });
+
   ipcMain.handle('config:set', async (event, key, value) => {
     configService.set(key as any, value);
 

@@ -57,6 +57,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   discordSendTest: (text: string) => ipcRenderer.invoke('discord:send-test', text),
   discordUpdateVoicePreference: (voice: string) => ipcRenderer.invoke('discord:update-voice-preference', voice),
   
+  // Publisher API
+  publisher: {
+    lookupConfig: (publisherCode: string) => ipcRenderer.invoke('publisher:lookup-config', publisherCode),
+  },
+
   // Telemetry API
   telemetry: {
     trackEvent: (name: string, properties?: { [key: string]: string }, measurements?: { [key: string]: number }) => 

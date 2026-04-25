@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Activity, User, Loader2, Radio } from 'lucide-react'
+import { Activity, User } from 'lucide-react'
 import { UserProfile, RaceSession } from '../types'
 import { extensionViews } from '../extension-views'
 import { DirectorDashboardCard } from '../components/director/DirectorDashboardCard'

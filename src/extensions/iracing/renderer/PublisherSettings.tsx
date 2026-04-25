@@ -3,16 +3,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Radio, ArrowLeftRight } from 'lucide-react';
+import { Radio, ArrowLeftRight, Search, CheckCircle2, XCircle } from 'lucide-react';
 
 interface PublisherConfig {
   enabled: boolean;
   publisherCode: string;
   raceSessionId: string;
   identityDisplayName: string;
-  endpointUrl: string;
   batchIntervalMs: number;
 }
+
+type LookupState = 'idle' | 'loading' | 'success' | 'error';
 
 type PublisherStatusKind = 'active' | 'idle' | 'connecting' | 'error' | 'disabled';
 
@@ -43,7 +44,6 @@ const DEFAULT_CONFIG: PublisherConfig = {
   publisherCode: '',
   raceSessionId: '',
   identityDisplayName: '',
-  endpointUrl: 'https://simracecenter.com/api/telemetry/events',
   batchIntervalMs: 500,
 };
 
@@ -58,6 +58,8 @@ export const PublisherSettings = () => {
   const [incomingDriverId, setIncomingDriverId] = useState('');
   const [outgoingDriverId, setOutgoingDriverId] = useState('');
   const [swapInitiating, setSwapInitiating] = useState(false);
+  const [lookupState, setLookupState] = useState<LookupState>('idle');
+  const [lookupError, setLookupError] = useState<string | null>(null);
   const eventIdSeq = useRef(0);
 
   useEffect(() => {
@@ -69,14 +71,12 @@ export const PublisherSettings = () => {
           publisherCode,
           raceSessionId,
           identityDisplayName,
-          endpointUrl,
           batchIntervalMs,
         ] = await Promise.all([
           window.electronAPI.config.get('publisher.enabled'),
           window.electronAPI.config.get('publisher.publisherCode'),
           window.electronAPI.config.get('publisher.raceSessionId'),
           window.electronAPI.config.get('publisher.identityDisplayName'),
-          window.electronAPI.config.get('publisher.endpointUrl'),
           window.electronAPI.config.get('publisher.batchIntervalMs'),
         ]);
         setConfig({
@@ -84,7 +84,6 @@ export const PublisherSettings = () => {
           publisherCode: publisherCode ?? '',
           raceSessionId: raceSessionId ?? '',
           identityDisplayName: identityDisplayName ?? '',
-          endpointUrl: endpointUrl ?? DEFAULT_CONFIG.endpointUrl,
           batchIntervalMs: batchIntervalMs ?? DEFAULT_CONFIG.batchIntervalMs,
         });
       } catch (e) {
@@ -130,7 +129,6 @@ export const PublisherSettings = () => {
         window.electronAPI.config.set('publisher.publisherCode', config.publisherCode),
         window.electronAPI.config.set('publisher.raceSessionId', config.raceSessionId),
         window.electronAPI.config.set('publisher.identityDisplayName', config.identityDisplayName),
-        window.electronAPI.config.set('publisher.endpointUrl', config.endpointUrl),
         window.electronAPI.config.set('publisher.batchIntervalMs', config.batchIntervalMs),
       ]);
     } catch (e) {
@@ -187,6 +185,35 @@ export const PublisherSettings = () => {
       setSwapInitiating(false);
     }
   }, [outgoingDriverId, incomingDriverId, incomingDriverName]);
+
+  const handleLookup = useCallback(async () => {
+    if (!config.publisherCode.trim()) return;
+    setLookupState('loading');
+    setLookupError(null);
+    try {
+      const result = await window.electronAPI?.publisher?.lookupConfig(config.publisherCode.trim());
+      if (!result) throw new Error('No result returned');
+      // Auto-fill resolved fields and immediately persist them.
+      // endpointUrl is not derived from gatewayUrl — the transport always uses
+      // the spec default (https://simracecenter.com/api/telemetry/events).
+      const updates: Partial<PublisherConfig> = {
+        raceSessionId: result.raceSessionId ?? '',
+        identityDisplayName: result.displayName ?? '',
+      };
+      setConfig((c) => ({ ...c, ...updates }));
+      await Promise.all([
+        window.electronAPI?.config?.set('publisher.publisherCode', config.publisherCode.trim()),
+        window.electronAPI?.config?.set('publisher.raceSessionId', result.raceSessionId ?? ''),
+        window.electronAPI?.config?.set('publisher.identityDisplayName', result.displayName ?? ''),
+        // Clear any previously saved endpointUrl so the transport uses the spec default
+        window.electronAPI?.config?.set('publisher.endpointUrl', ''),
+      ]);
+      setLookupState('success');
+    } catch (e: any) {
+      setLookupError(e?.message ?? 'Lookup failed');
+      setLookupState('error');
+    }
+  }, [config.publisherCode]);
 
   const formatTime = (ms?: number): string => {
     if (!ms) return '—';
@@ -376,60 +403,86 @@ export const PublisherSettings = () => {
         </CardHeader>
         <CardContent className="space-y-6">
 
-          {/* Enable toggle */}
-          <div className="flex items-center justify-between rounded-lg border border-border p-4">
+          {/* Step 1 — Publisher Code + Lookup */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium uppercase text-muted-foreground">Publisher Code</label>
+            <div className="flex gap-2">
+              <Input
+                placeholder="e.g. rig-01"
+                className="bg-background border-border font-mono flex-1"
+                value={config.publisherCode}
+                onChange={(e) => {
+                  setConfig((c) => ({ ...c, publisherCode: e.target.value }));
+                  setLookupState('idle');
+                  setLookupError(null);
+                }}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleLookup(); }}
+              />
+              <Button
+                onClick={handleLookup}
+                disabled={!config.publisherCode.trim() || lookupState === 'loading'}
+                className="bg-secondary hover:bg-secondary/90 text-white font-rajdhani uppercase tracking-wider font-bold shrink-0"
+              >
+                <Search className="w-4 h-4 mr-1.5" />
+                {lookupState === 'loading' ? 'Looking up…' : 'Lookup'}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Your unique rig code from Race Control. Click <strong>Lookup</strong> to auto-discover session details.
+            </p>
+          </div>
+
+          {/* Lookup result — shown after a successful or failed lookup */}
+          {lookupState === 'error' && lookupError && (
+            <div className="flex items-center gap-2 rounded-md border border-destructive bg-destructive/10 px-3 py-2.5">
+              <XCircle className="w-4 h-4 text-destructive shrink-0" />
+              <div>
+                <p className="text-xs font-rajdhani uppercase tracking-widest font-bold text-destructive">Lookup Failed</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{lookupError}</p>
+              </div>
+            </div>
+          )}
+
+          {lookupState === 'success' && (
+            <div className="rounded-md border border-[color:var(--color-green-flag)] bg-[color:var(--color-green-flag)]/10 px-3 py-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-[color:var(--color-green-flag)] shrink-0" />
+                <p className="text-xs font-rajdhani uppercase tracking-widest font-bold text-[color:var(--color-green-flag)]">
+                  Configuration Resolved
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-6">
+                <div>
+                  <p className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Driver</p>
+                  <p className="text-sm font-jetbrains text-foreground">{config.identityDisplayName || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Session ID</p>
+                  <p className="text-xs font-jetbrains text-muted-foreground truncate" title={config.raceSessionId}>{config.raceSessionId || '—'}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Enable toggle — always visible but needs a resolved session */}
+          <div className={`flex items-center justify-between rounded-lg border p-4 transition-colors ${
+            lookupState === 'success' || config.raceSessionId
+              ? 'border-border'
+              : 'border-border opacity-50'
+          }`}>
             <div className="space-y-0.5">
               <label className="text-sm font-medium uppercase text-muted-foreground">Enable Publisher</label>
               <p className="text-xs text-muted-foreground">
-                Publish telemetry events from this rig to Race Control.
+                {lookupState !== 'success' && !config.raceSessionId
+                  ? 'Complete a successful Lookup first.'
+                  : 'Publish telemetry events from this rig to Race Control.'}
               </p>
             </div>
             <Switch
               checked={config.enabled}
+              disabled={!config.raceSessionId}
               onCheckedChange={handleToggleEnabled}
             />
-          </div>
-
-          {/* Publisher Code */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium uppercase text-muted-foreground">Publisher Code</label>
-            <Input
-              placeholder="e.g. rig-01"
-              className="bg-background border-border font-mono"
-              value={config.publisherCode}
-              onChange={(e) => setConfig((c) => ({ ...c, publisherCode: e.target.value }))}
-            />
-            <p className="text-xs text-muted-foreground">
-              Unique identifier for this rig. Used to tag all outbound events.
-            </p>
-          </div>
-
-          {/* Race Session ID */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium uppercase text-muted-foreground">Race Session ID</label>
-            <Input
-              placeholder="session-uuid from Race Control"
-              className="bg-background border-border font-mono"
-              value={config.raceSessionId}
-              onChange={(e) => setConfig((c) => ({ ...c, raceSessionId: e.target.value }))}
-            />
-            <p className="text-xs text-muted-foreground">
-              Obtained from Race Control after session check-in.
-            </p>
-          </div>
-
-          {/* Identity Display Name override */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium uppercase text-muted-foreground">Driver Display Name Override</label>
-            <Input
-              placeholder="Leave blank to use iRacing username"
-              className="bg-background border-border font-mono"
-              value={config.identityDisplayName}
-              onChange={(e) => setConfig((c) => ({ ...c, identityDisplayName: e.target.value }))}
-            />
-            <p className="text-xs text-muted-foreground">
-              Override the display name sent with publisher events. Useful when the iRacing name differs from the race entry.
-            </p>
           </div>
 
           {/* Advanced */}
@@ -438,14 +491,6 @@ export const PublisherSettings = () => {
               Advanced
             </summary>
             <div className="mt-4 space-y-4 pl-1">
-              <div className="space-y-2">
-                <label className="text-sm font-medium uppercase text-muted-foreground">Endpoint URL</label>
-                <Input
-                  className="bg-background border-border font-mono text-xs"
-                  value={config.endpointUrl}
-                  onChange={(e) => setConfig((c) => ({ ...c, endpointUrl: e.target.value }))}
-                />
-              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium uppercase text-muted-foreground">Batch Interval (ms)</label>
                 <Input
@@ -463,20 +508,20 @@ export const PublisherSettings = () => {
                   How often normal-priority events are flushed. High-priority events always flush immediately.
                 </p>
               </div>
+
+              {saveError && (
+                <p className="text-xs text-destructive">{saveError}</p>
+              )}
+
+              <Button
+                onClick={handleSave}
+                disabled={saving}
+                className="w-full bg-primary hover:bg-primary/90 text-white font-rajdhani uppercase tracking-wider font-bold"
+              >
+                {saving ? 'Saving…' : 'Save Advanced Settings'}
+              </Button>
             </div>
           </details>
-
-          {saveError && (
-            <p className="text-xs text-destructive">{saveError}</p>
-          )}
-
-          <Button
-            onClick={handleSave}
-            disabled={saving}
-            className="w-full bg-primary hover:bg-primary/90 text-white font-rajdhani uppercase tracking-wider font-bold"
-          >
-            {saving ? 'Saving…' : 'Save Publisher Settings'}
-          </Button>
         </CardContent>
       </Card>
     </div>

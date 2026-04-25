@@ -17,6 +17,7 @@ import {
   PortableSequence,
   CheckinStatus,
   SessionOperationalConfig,
+  RaceContext,
 } from './director-types';
 import { SequenceScheduler } from './sequence-scheduler';
 import { CloudPoller } from './cloud-poller';
@@ -76,6 +77,8 @@ export class DirectorOrchestrator extends EventEmitter {
   private scheduler: SequenceScheduler;
   private cloudPoller: CloudPoller | null = null;
   private currentRaceSessionId: string | null = null;
+  /** Last known iRacing state snapshot, updated from iracing.raceStateChanged events. */
+  private lastIRacingState: any = null;
 
   constructor(
     private authService: AuthService,
@@ -110,6 +113,11 @@ export class DirectorOrchestrator extends EventEmitter {
     // Subscribe to extension connection state changes for re-check-in
     if (this.eventBus) {
       this.listenForConnectionEvents();
+
+      // Cache latest iRacing state for raceContext in sequences/next POST body
+      this.eventBus.on('iracing.raceStateChanged', (data: { payload: any }) => {
+        this.lastIRacingState = data.payload;
+      });
     }
 
     // Load config and set initial mode
@@ -139,6 +147,80 @@ export class DirectorOrchestrator extends EventEmitter {
   }
 
   /**
+   * Build a RaceContext snapshot from the last known iRacing state.
+   * Used as the required body for POST .../sequences/next.
+   */
+  private buildRaceContext(): RaceContext {
+    const state = this.lastIRacingState;
+
+    if (!state) {
+      return {
+        sessionType: 'Race',
+        sessionFlags: 'disconnected',
+        lapsRemain: -1,
+        carCount: 0,
+        contextTimestamp: new Date().toISOString(),
+      };
+    }
+
+    // Decode iRacing SessionFlags bitmask → RC flag string
+    const flagBits: number = state.sessionFlags ?? 0;
+    const FLAG_RED     = 0x0010;
+    const FLAG_YELLOW  = 0x0008;
+    const FLAG_CAUTION = 0x4000;
+    let sessionFlags = 'green';
+    if (flagBits & FLAG_RED) sessionFlags = 'red';
+    else if ((flagBits & FLAG_CAUTION) || (flagBits & FLAG_YELLOW)) sessionFlags = 'caution';
+
+    // Infer session type: Race sessions have a fixed lap count; others are unlimited
+    const totalLaps: number = state.totalSessionLaps ?? 0;
+    const sessionType = totalLaps > 0 ? 'Race' : 'Practice';
+
+    // iRacing returns 32767 for unlimited laps — normalize to -1
+    const rawLapsRemain: number = state.sessionLapsRemain ?? -1;
+    const lapsRemain = rawLapsRemain > 32000 ? -1 : rawLapsRemain;
+
+    const carCount: number = Array.isArray(state.cars) ? state.cars.length : 0;
+    const timeRemain: number = state.sessionTimeRemain ?? -1;
+
+    // Build per-driver context (focused cars only — top 20 to avoid oversized payload)
+    const cars: any[] = Array.isArray(state.cars) ? state.cars.slice(0, 20) : [];
+    const drivers = cars.length > 0
+      ? cars.map((c: any) => ({
+          carNumber: String(c.carNumber ?? ''),
+          gapToAhead: c.gapToCarAhead ?? 0,
+          lapsCompleted: c.lapsCompleted ?? 0,
+          bestLap: c.bestLapTime ?? 0,
+          classPosition: c.classPosition ?? 0,
+        }))
+      : undefined;
+
+    // Pitting cars
+    const pitting = cars
+      .filter((c: any) => c.onPitRoad)
+      .map((c: any) => String(c.carNumber ?? ''));
+
+    // Focused car
+    const focusedIdx: number = state.focusedCarIdx ?? -1;
+    const focusedCar = focusedIdx >= 0 ? cars.find((c: any) => c.carIdx === focusedIdx) : null;
+
+    return {
+      sessionType,
+      sessionFlags,
+      lapsRemain,
+      carCount,
+      contextTimestamp: new Date().toISOString(),
+      ...(timeRemain > 0 ? { timeRemainSec: Math.round(timeRemain) } : {}),
+      ...(state.leaderLap > 0 ? { leaderLap: state.leaderLap } : {}),
+      ...(totalLaps > 0 ? { totalLaps } : {}),
+      ...(state.trackName ? { trackName: state.trackName } : {}),
+      ...(focusedCar ? { focusedCarNumber: String(focusedCar.carNumber) } : {}),
+      ...(pitting.length > 0 ? { pitting } : {}),
+      ...(drivers ? { drivers } : {}),
+    };
+  }
+
+  /**
    * Handle SessionManager state changes.
    * Implements mode transitions based on session selection/clearing.
    */
@@ -147,14 +229,13 @@ export class DirectorOrchestrator extends EventEmitter {
 
     if ((sessionState === 'selected' || sessionState === 'checked-in') && selectedSession) {
       // Session selected or checked in
-      const config = this.getConfig();
       this.currentRaceSessionId = selectedSession.raceSessionId;
 
       if (this.mode === 'stopped') {
-        // Transition: stopped → manual or auto (based on config)
-        const targetMode = config.autoStartOnSessionSelect ? 'auto' : 'manual';
-        console.log(`[DirectorOrchestrator] Session selected. Transitioning: stopped → ${targetMode}`);
-        await this.setMode(targetMode);
+        // Session selected while stopped — record the session but do NOT auto-start.
+        // The human director must explicitly start the agent when ready.
+        console.log(`[DirectorOrchestrator] Session selected (mode stays stopped until manually started)`);
+        this.emitStateChanged();
       } else {
         // Session state changed while already in manual/auto — update CloudPoller if needed
         if (sessionState === 'checked-in' && this.cloudPoller) {
@@ -253,6 +334,7 @@ export class DirectorOrchestrator extends EventEmitter {
       {
         idleRetryMs,
         getActiveIntents: () => this.getActiveIntents(),
+        getRaceContext: () => this.buildRaceContext(),
         onSequence: (sequence) => this.handleSequence(sequence),
         onSessionEnded: () => this.handleSessionEnded(),
         checkinId: checkinId || undefined,

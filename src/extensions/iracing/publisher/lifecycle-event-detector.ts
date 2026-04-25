@@ -4,7 +4,7 @@
  * Emits publisher lifecycle events:
  *
  *   PUBLISHER_HELLO       — on extension activate with publisher.enabled=true
- *   PUBLISHER_HEARTBEAT   — 1Hz, only when no other event was emitted in the last second
+ *   PUBLISHER_HEARTBEAT   — 30s, only when no other event was emitted in the last 30 seconds
  *   PUBLISHER_GOODBYE     — on extension deactivate / app shutdown
  *   IRACING_CONNECTED     — when iRacing shared memory becomes available
  *   IRACING_DISCONNECTED  — when iRacing shared memory is lost
@@ -31,7 +31,7 @@ export interface LifecycleDetectorContext {
 // Constants
 // ---------------------------------------------------------------------------
 
-const HEARTBEAT_INTERVAL_MS = 1000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 const CAPABILITIES = ['telemetry-v1'];
 const NOCAR = { carIdx: -1, carNumber: '', driverName: '' };
 
@@ -88,9 +88,9 @@ export class LifecycleEventDetector {
   }
 
   /**
-   * Call at ~1 Hz from the telemetry poll loop.
+   * Call at ~30s intervals from the telemetry poll loop.
    * Returns a `PUBLISHER_HEARTBEAT` event ONLY if no other event was emitted in
-   * the past second. Returns an empty array otherwise.
+   * the past 30 seconds. Returns an empty array otherwise.
    */
   checkHeartbeat(ctx: LifecycleDetectorContext): PublisherEvent[] {
     const now = this.getNow();

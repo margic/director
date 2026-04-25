@@ -19,7 +19,7 @@
  *   - State (SessionState, prevFrame) is reset on SESSION_LOADED — the
  *     session-lifecycle detector fires that event and we observe it after the
  *     detector pass.
- *   - Heartbeat is a 1Hz timer that suppresses itself if any other event was
+ *   - Heartbeat is a 30s timer that suppresses itself if any other event was
  *     emitted in the last second (suppression is internal to LifecycleEventDetector).
  *   - A fake `fetchFn` and `nowFn` may be injected for tests; production code
  *     uses the globals.
@@ -73,9 +73,9 @@ export interface PublisherOrchestratorConfig {
 // PublisherOrchestrator
 // ---------------------------------------------------------------------------
 
-const DEFAULT_ENDPOINT = 'https://simracecenter.com/api/telemetry/events';
+const DEFAULT_RC_BASE_URL = 'https://simracecenter.com';
 const DEFAULT_BATCH_INTERVAL_MS = 2000;
-const HEARTBEAT_INTERVAL_MS = 1000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 
 export class PublisherOrchestrator {
   private transport: PublisherTransport | null = null;
@@ -325,9 +325,14 @@ export class PublisherOrchestrator {
 
     this.publisherCode = String(this.cfg.director.settings['publisher.publisherCode'] ?? '');
     this.raceSessionId = String(this.cfg.director.settings['publisher.raceSessionId'] ?? '');
-    const endpointUrl = String(
-      this.cfg.director.settings['publisher.endpointUrl'] ?? DEFAULT_ENDPOINT,
-    );
+    // Derive the telemetry endpoint from the global RC API base URL.
+    // app.rcApiBaseUrl is injected by the extension host from auth-config.apiConfig.baseUrl
+    // (which reads VITE_API_BASE_URL at build/start time). This ensures all parts of
+    // the director point at the same Race Control API without per-extension hardcoding.
+    const rcBaseUrl = String(
+      this.cfg.director.settings['app.rcApiBaseUrl'] ?? DEFAULT_RC_BASE_URL,
+    ).replace(/\/$/, '');
+    const endpointUrl = `${rcBaseUrl}/api/telemetry/events`;
     const batchIntervalMs = Number(
       this.cfg.director.settings['publisher.batchIntervalMs'] ?? DEFAULT_BATCH_INTERVAL_MS,
     );
@@ -397,6 +402,11 @@ export class PublisherOrchestrator {
   private dispatchEvents(events: PublisherEvent[]): void {
     if (events.length === 0 || !this.transport) return;
     for (const ev of events) {
+      console.log(
+        `[publisher] → ${ev.type}`,
+        ev.car?.carNumber ? `car#${ev.car.carNumber} (${ev.car.driverName})` : '',
+        ev.payload,
+      );
       this.transport.enqueue(ev);
       this.lifecycleDetector.notifyEventEmitted();
       this.cfg.director.emitEvent('iracing.publisherEventEmitted', {

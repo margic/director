@@ -8,6 +8,7 @@ import { ViewRegistry } from './view-registry';
 import { ExtensionEventBus } from './event-bus';
 import { IpcMessage, ExecuteIntentPayload, LoadExtensionPayload, InvokePayload, ViewsContribution, ViewContribution } from './extension-types';
 import { configService } from '../config-service';
+import { apiConfig } from '../auth-config';
 import { AuthService } from '../auth-service';
 import { OverlayBus } from '../overlay/overlay-bus';
 import { OverlayRegistration, OverlayRegion } from '../overlay/overlay-types';
@@ -419,6 +420,10 @@ export class ExtensionHostService {
         settings[key] = val;
       }
     }
+    // Inject global app settings available to all extensions.
+    // app.rcApiBaseUrl is the Race Control API base URL — used by extensions
+    // to build endpoint URLs without hardcoding the host.
+    settings['app.rcApiBaseUrl'] = configService.getAny('app.rcApiBaseUrl') || apiConfig.baseUrl;
 
     // Send load command to child
     if (this.isReady && this.child) {

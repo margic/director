@@ -1,5 +1,14 @@
 import { EventEmitter } from 'events';
 
+/**
+ * High-frequency streaming events that fire every telemetry tick (4-5 Hz).
+ * Logging these unconditionally floods the console; they are intentionally silenced.
+ */
+const SILENT_EVENTS = new Set([
+  'iracing.raceStateChanged',
+  'iracing.publisherStateChanged',
+]);
+
 export class ExtensionEventBus extends EventEmitter {
   /**
    * Emits an event from an extension to the Core system.
@@ -15,6 +24,8 @@ export class ExtensionEventBus extends EventEmitter {
     this.emit(eventName, { extensionId, payload });
     this.emit('*', { extensionId, eventName, payload });
     
-    console.log(`[EventBus] Extension '${extensionId}' emitted '${eventName}'`);
+    if (!SILENT_EVENTS.has(eventName)) {
+      console.log(`[EventBus] Extension '${extensionId}' emitted '${eventName}'`);
+    }
   }
 }
