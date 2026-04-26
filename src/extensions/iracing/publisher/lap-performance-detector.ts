@@ -21,7 +21,7 @@
  */
 
 import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState, buildEvent } from './session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
 import type { PublisherEvent } from './event-types';
 
 const CAR_COUNT = 64;
@@ -95,7 +95,7 @@ export function detectLapPerformance(
       cs.stintBestLapTime = lastLap;
       events.push(buildEvent(
         'STINT_BEST_LAP',
-        { carIdx: i, carNumber: '', driverName: '' },
+        carRefFromRoster(state, i),
         { lapNumber: currLaps, lapTime: lastLap },
         opts,
       ));
@@ -122,7 +122,7 @@ export function detectLapPerformance(
         cs.bestLapTime = newBest;
         events.push(buildEvent(
           'PERSONAL_BEST_LAP',
-          { carIdx: i, carNumber: '', driverName: '' },
+          carRefFromRoster(state, i),
           { lapNumber: currLaps, lapTime: newBest, previousBest },
           opts,
         ));
@@ -145,7 +145,7 @@ export function detectLapPerformance(
             state.playerDegradationFired = true;
             events.push(buildEvent(
               'LAP_TIME_DEGRADATION',
-              { carIdx: i, carNumber: '', driverName: '' },
+              carRefFromRoster(state, i),
               {
                 rollingAvgSec:  avg,
                 stintBestSec:   cs.stintBestLapTime,
@@ -183,7 +183,7 @@ export function detectLapPerformance(
     const holderIdx = findCarWithBestLap(curr, sessionBest);
     events.push(buildEvent(
       'SESSION_BEST_LAP',
-      { carIdx: holderIdx, carNumber: '', driverName: '' },
+      carRefFromRoster(state, holderIdx),
       {
         lapNumber:           curr.carIdxLapCompleted[holderIdx],
         lapTime:             sessionBest,
@@ -215,7 +215,7 @@ export function detectLapPerformance(
         state.classBestLapTimes.set(classId, lapTime);
         events.push(buildEvent(
           'CLASS_BEST_LAP',
-          { carIdx, carNumber: '', driverName: '' },
+          carRefFromRoster(state, carIdx),
           {
             lapNumber:         curr.carIdxLapCompleted[carIdx],
             lapTime,

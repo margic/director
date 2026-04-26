@@ -24,7 +24,7 @@
  */
 
 import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState, buildEvent } from './session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
 import type { PublisherEvent } from './event-types';
 
 const CAR_COUNT = 64;
@@ -80,7 +80,7 @@ export function detectPitStopDetail(
     const currSurface = curr.carIdxTrackSurface[i];
     const prevOnPit   = prev.carIdxOnPitRoad[i] !== 0;
     const currOnPit   = curr.carIdxOnPitRoad[i] !== 0;
-    const car         = { carIdx: i, carNumber: '', driverName: '' };
+    const car         = carRefFromRoster(state, i);
 
     // -----------------------------------------------------------------------
     // PIT_STOP_BEGIN — surface transitions into PitStall (2)
@@ -174,7 +174,7 @@ export function detectPitStopDetail(
 
       events.push(buildEvent(
         'FUEL_LOW',
-        { carIdx: playerCarIdx, carNumber: '', driverName: '' },
+        carRefFromRoster(state, playerCarIdx),
         {
           threshold,
           fuelLevelPct:            curr.fuelLevelPct,
@@ -190,7 +190,7 @@ export function detectPitStopDetail(
     const delta = curr.fuelLevel - prev.fuelLevel;
     events.push(buildEvent(
       'FUEL_LEVEL_CHANGE',
-      { carIdx: playerCarIdx, carNumber: '', driverName: '' },
+      carRefFromRoster(state, playerCarIdx),
       {
         previousLevel: prev.fuelLevel,
         newLevel:      curr.fuelLevel,

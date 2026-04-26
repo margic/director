@@ -19,9 +19,8 @@
  */
 
 import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState } from './session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
 import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
 
 const CAR_COUNT = 64;
 
@@ -57,7 +56,7 @@ export function detectPitAndIncidents(
     const cs = getOrCreateCarState(state, i);
     const currOnPit    = curr.carIdxOnPitRoad[i] !== 0;
     const currSurface  = curr.carIdxTrackSurface[i];
-    const car          = { carIdx: i, carNumber: '', driverName: '' };
+    const car          = carRefFromRoster(state, i);
 
     // -----------------------------------------------------------------------
     // PIT_ENTRY — false→true
@@ -151,7 +150,7 @@ export function detectPitAndIncidents(
   // -------------------------------------------------------------------------
   if (prev !== null && curr.playerIncidentCount > prev.playerIncidentCount) {
     const delta = curr.playerIncidentCount - prev.playerIncidentCount;
-    const car   = { carIdx: 0, carNumber: '', driverName: '' };
+    const car   = carRefFromRoster(state, 0);
     events.push(buildEvent(
       'INCIDENT_POINT',
       car,
@@ -170,7 +169,7 @@ export function detectPitAndIncidents(
   // -------------------------------------------------------------------------
   if (!state.identityResolved && ctx.iracingUserName && ctx.playerDisplayName) {
     state.identityResolved = true;
-    const car = { carIdx: 0, carNumber: '', driverName: ctx.playerDisplayName };
+    const car = { ...carRefFromRoster(state, 0), driverName: ctx.playerDisplayName };
     events.push(buildEvent(
       'IDENTITY_RESOLVED',
       car,

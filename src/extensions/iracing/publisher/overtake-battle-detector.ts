@@ -23,7 +23,7 @@
  */
 
 import type { TelemetryFrame, SessionState, BattleState } from './session-state';
-import { getOrCreateCarState, battleKey } from './session-state';
+import { getOrCreateCarState, battleKey, carRefFromRoster } from './session-state';
 import type { PublisherEvent } from './event-types';
 import { buildEvent } from './session-state';
 
@@ -138,7 +138,7 @@ export function detectOvertakeAndBattle(
 
     events.push(buildEvent(
       'OVERTAKE',
-      { carIdx: i, carNumber: '', driverName: '' },
+      carRefFromRoster(state, i),
       overtakePayload,
       opts,
     ));
@@ -147,7 +147,7 @@ export function detectOvertakeAndBattle(
     if (currPos === 1) {
       events.push(buildEvent(
         'OVERTAKE_FOR_LEAD',
-        { carIdx: i, carNumber: '', driverName: '' },
+        carRefFromRoster(state, i),
         overtakePayload,
         opts,
       ));
@@ -161,7 +161,7 @@ export function detectOvertakeAndBattle(
     if (currClassPos === 1 && prevClassPos > 1) {
       events.push(buildEvent(
         'OVERTAKE_FOR_CLASS',
-        { carIdx: i, carNumber: '', driverName: '' },
+        carRefFromRoster(state, i),
         overtakePayload,
         opts,
       ));
@@ -215,7 +215,7 @@ export function detectOvertakeAndBattle(
 
         events.push(buildEvent(
           'BATTLE_ENGAGED',
-          { carIdx: i, carNumber: '', driverName: '' },
+          carRefFromRoster(state, i),
           {
             chaserCarIdx:          i,
             leaderCarIdx:          leaderIdx,
@@ -248,7 +248,7 @@ export function detectOvertakeAndBattle(
         ) {
           events.push(buildEvent(
             'BATTLE_CLOSING',
-            { carIdx: i, carNumber: '', driverName: '' },
+            carRefFromRoster(state, i),
             {
               chaserCarIdx:          i,
               leaderCarIdx:          leaderIdx,
@@ -276,7 +276,7 @@ export function detectOvertakeAndBattle(
       if (battle.brokenFrames >= BATTLE_BROKEN_FRAMES && battle.status === STATUS_ENGAGED) {
         events.push(buildEvent(
           'BATTLE_BROKEN',
-          { carIdx: i, carNumber: '', driverName: '' },
+          carRefFromRoster(state, i),
           {
             chaserCarIdx:          battle.chaserCarIdx,
             leaderCarIdx:          battle.leaderCarIdx,
@@ -332,10 +332,10 @@ export function detectOvertakeAndBattle(
       if (existing !== 'LAPPED_AHEAD') {
         events.push(buildEvent(
           'LAPPED_TRAFFIC_AHEAD',
-          { carIdx: i, carNumber: '', driverName: '' },
+          carRefFromRoster(state, i),
           {
             targetCarIdx:    leaderIdx,
-            targetCarNumber: '',
+            targetCarNumber: state.knownRoster.get(leaderIdx)?.carNumber ?? '',
             distanceMeters:  approxDistanceMeters,
           },
           opts,
@@ -347,10 +347,10 @@ export function detectOvertakeAndBattle(
       if (existing !== 'BEING_LAPPED') {
         events.push(buildEvent(
           'BEING_LAPPED',
-          { carIdx: i, carNumber: '', driverName: '' },
+          carRefFromRoster(state, i),
           {
             targetCarIdx:    leaderIdx,
-            targetCarNumber: '',
+            targetCarNumber: state.knownRoster.get(leaderIdx)?.carNumber ?? '',
             distanceMeters:  approxDistanceMeters,
           },
           opts,
@@ -407,7 +407,7 @@ export function detectOvertakeAndBattle(
       cs.isStoppedOnTrack = true;
       events.push(buildEvent(
         'STOPPED_ON_TRACK',
-        { carIdx: i, carNumber: '', driverName: '' },
+        carRefFromRoster(state, i),
         {
           lapDistPct:         currPct,
           stoppedDurationSec: stoppedFor,

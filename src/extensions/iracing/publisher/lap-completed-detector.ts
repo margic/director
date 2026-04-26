@@ -11,7 +11,7 @@
 
 import type { TelemetryFrame, SessionState } from './session-state';
 import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
+import { buildEvent, carRefFromRoster } from './session-state';
 
 const CAR_COUNT = 64;
 
@@ -47,7 +47,7 @@ export function detectLapCompleted(
     const currLaps = curr.carIdxLapCompleted[i];
 
     if (currLaps > prevLaps) {
-      const car = { carIdx: i, carNumber: '', driverName: '' };
+      const car = carRefFromRoster(state, i);
 
       events.push(buildEvent(
         'LAP_COMPLETED',

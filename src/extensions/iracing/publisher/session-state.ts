@@ -314,6 +314,18 @@ export function battleKey(carA: number, carB: number): string {
   return carA < carB ? `${carA}-${carB}` : `${carB}-${carA}`;
 }
 
+/**
+ * Returns a CarRefInput for the given carIdx, resolved from the session roster.
+ * Falls back to empty strings if the car isn't in the roster yet.
+ */
+export function carRefFromRoster(
+  state: SessionState,
+  carIdx: number,
+): { carIdx: number; carNumber: string; driverName: string } {
+  const ref = state.knownRoster.get(carIdx);
+  return { carIdx, carNumber: ref?.carNumber ?? '', driverName: ref?.driverName ?? '' };
+}
+
 // ---------------------------------------------------------------------------
 // Event builder — attaches the session / rig context to a bare event
 // ---------------------------------------------------------------------------

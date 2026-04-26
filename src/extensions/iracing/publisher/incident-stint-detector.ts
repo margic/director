@@ -21,7 +21,7 @@
  */
 
 import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState, buildEvent } from './session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
 import type { PublisherEvent } from './event-types';
 
 /** Team incident thresholds for INCIDENT_LIMIT_WARNING (in percent). */
@@ -66,7 +66,7 @@ export function detectIncidentsAndMilestones(
     const delta = curr.teamIncidentCount - prev.teamIncidentCount;
     events.push(buildEvent(
       'TEAM_INCIDENT_POINT',
-      { carIdx: playerCarIdx, carNumber: '', driverName: '' },
+      carRefFromRoster(state, playerCarIdx),
       {
         incidentPoints:      delta,
         totalIncidentPoints: curr.teamIncidentCount,
@@ -87,7 +87,7 @@ export function detectIncidentsAndMilestones(
           state.firedIncidentWarnings.add(thresholdPct);
           events.push(buildEvent(
             'INCIDENT_LIMIT_WARNING',
-            { carIdx: playerCarIdx, carNumber: '', driverName: '' },
+            carRefFromRoster(state, playerCarIdx),
             {
               thresholdPercent: thresholdPct,
               currentCount:     curr.teamIncidentCount,
@@ -126,7 +126,7 @@ export function detectIncidentsAndMilestones(
           cs.firedStintMilestones.add(milestonePct);
           events.push(buildEvent(
             'STINT_MILESTONE',
-            { carIdx: playerCarIdx, carNumber: '', driverName: '' },
+            carRefFromRoster(state, playerCarIdx),
             {
               milestonePercent:  milestonePct,
               lapsCompleted:     stintLapsCompleted,

@@ -21,7 +21,7 @@
  */
 
 import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState, buildEvent } from './session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
 import type { PublisherEvent, PublisherCarRef } from './event-types';
 
 export interface DriverSwapRosterContext {
@@ -70,7 +70,7 @@ export function detectDriverSwapAndRoster(
 
       events.push(buildEvent(
         'DRIVER_SWAP_COMPLETED',
-        { carIdx: playerCarIdx, carNumber: '', driverName: state.pendingSwapIncomingDriverName },
+        { ...carRefFromRoster(state, playerCarIdx), driverName: state.pendingSwapIncomingDriverName },
         {
           swapDurationSec,
           incomingDriverId:   state.pendingSwapIncomingDriverId,
@@ -119,7 +119,7 @@ export function detectDriverSwapAndRoster(
         state.knownRoster = new Map(current);
         events.push(buildEvent(
           'ROSTER_UPDATED',
-          { carIdx: playerCarIdx, carNumber: '', driverName: '' },
+          carRefFromRoster(state, playerCarIdx),
           { added, removed },
           opts,
         ));

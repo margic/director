@@ -279,7 +279,7 @@ export class PublisherOrchestrator {
     const playerCarIdx = this.playerCarIdx ?? 0;
     const event = buildEvent(
       'DRIVER_SWAP_INITIATED',
-      { carIdx: playerCarIdx, carNumber: '', driverName: outgoingDriverId },
+      { carIdx: playerCarIdx, carNumber: this.state.knownRoster.get(playerCarIdx)?.carNumber ?? '', driverName: outgoingDriverId },
       { outgoingDriverId, incomingDriverId, incomingDriverName },
       { raceSessionId: this.raceSessionId, publisherCode: this.publisherCode, frame: this.lastFrame },
     );
