@@ -376,3 +376,56 @@ describe('heartbeat', () => {
     expect(beats.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// setRaceSessionId — issue #109
+// ---------------------------------------------------------------------------
+
+describe('setRaceSessionId', () => {
+  it('updates the session ID carried on subsequent events', async () => {
+    const { orch, batches } = makeOrchestrator({
+      'publisher.raceSessionId': 'stale-session-id',
+    });
+    orch.activate();
+
+    // Flush initial PUBLISHER_HELLO (tagged with stale ID) before the rebind
+    await vi.advanceTimersByTimeAsync(1100);
+    batches.length = 0; // discard pre-bind events
+
+    // Bind to the real (checked-in) session
+    orch.setRaceSessionId('d2f3e1c4-b4b8-416b-93c0-ccdc8604a502');
+
+    // Trigger a telemetry event — this fires AFTER the session rebind
+    const f1 = makeFrame({ sessionState: SessionStateEnum.Racing, sessionFlags: 0 });
+    orch.onTelemetryFrame(f1);
+    const f2 = cloneFrame(f1);
+    f2.sessionFlags = FlagBits.Green;
+    orch.onTelemetryFrame(f2); // FLAG_GREEN fires here
+
+    await vi.advanceTimersByTimeAsync(1100);
+
+    const allPostBindEvents = batches.flat();
+    expect(allPostBindEvents.length).toBeGreaterThan(0);
+    // Every event emitted after the rebind must carry the new session ID
+    expect(allPostBindEvents.every((e) => e.raceSessionId === 'd2f3e1c4-b4b8-416b-93c0-ccdc8604a502')).toBe(true);
+  });
+
+  it('is a no-op when the session ID is already the same value', () => {
+    const { orch, director } = makeOrchestrator({
+      'publisher.raceSessionId': 'session-abc',
+    });
+    orch.activate();
+    director.logs.length = 0;
+
+    orch.setRaceSessionId('session-abc'); // same value
+
+    // No log should be emitted for a no-op bind
+    expect(director.logs.filter((l) => l.message.includes('bound'))).toHaveLength(0);
+  });
+
+  it('works when called before the publisher is started', () => {
+    const { orch } = makeOrchestrator({ 'publisher.enabled': false });
+    // No throw — safe to call regardless of running state
+    expect(() => orch.setRaceSessionId('new-session-id')).not.toThrow();
+  });
+});

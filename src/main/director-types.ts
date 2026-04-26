@@ -392,6 +392,16 @@ export interface RaceContext {
     lapsCompleted: number;
     bestLap: number;
     classPosition: number;
+    /** Overall track position (1-indexed). From CarIdxPosition[carIdx]. */
+    pos?: number;
+    /** Driver display name. From DriverInfo.Drivers[carIdx].UserName. */
+    driverName?: string;
+    /** Car class short name (e.g. "MX5", "GT3"). From CarClassShortName. */
+    carClass?: string;
+    /** Whether the car is on the racing surface (not pitting/off-world). */
+    isOnTrack?: boolean;
+    /** Last completed lap time in seconds. From CarIdxLastLapTime[carIdx]. */
+    lastLap?: number;
   }>;
 }
 

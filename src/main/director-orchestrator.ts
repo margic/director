@@ -199,6 +199,11 @@ export class DirectorOrchestrator extends EventEmitter {
           lapsCompleted: c.lapsCompleted ?? 0,
           bestLap: c.bestLapTime ?? 0,
           classPosition: c.classPosition ?? 0,
+          pos: c.position > 0 ? c.position : undefined,
+          driverName: c.driverName || undefined,
+          carClass: c.carClass || undefined,
+          isOnTrack: typeof c.onPitRoad === 'boolean' ? !c.onPitRoad : undefined,
+          lastLap: c.lastLapTime > 0 ? c.lastLapTime : undefined,
         }))
       : undefined;
 
@@ -237,6 +242,16 @@ export class DirectorOrchestrator extends EventEmitter {
     if ((sessionState === 'selected' || sessionState === 'checked-in') && selectedSession) {
       // Session selected or checked in
       this.currentRaceSessionId = selectedSession.raceSessionId;
+
+      // Bind the confirmed raceSessionId to the publisher so telemetry events
+      // are tagged correctly (fix for issue #109 — empty raceSessionId).
+      // Uses executeInternalDirective (not executeIntent) so this lifecycle
+      // call is never exposed as a broadcast capability to the RC AI planner.
+      if (sessionState === 'checked-in') {
+        this.extensionHost.executeInternalDirective('iracing.publisher.bindSession', {
+          raceSessionId: selectedSession.raceSessionId,
+        });
+      }
 
       if (this.mode === 'stopped') {
         // Session selected while stopped — record the session but do NOT auto-start.

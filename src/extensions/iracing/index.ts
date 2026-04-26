@@ -229,6 +229,29 @@ export async function activate(director: ExtensionAPI) {
         },
     );
 
+    // Session binding — internal directive fired by DirectorOrchestrator once
+    // check-in confirms the raceSessionId (issue #109). Not advertised as a
+    // capability; never appears in the AI planner's intent list.
+    // Also auto-enables the publisher so the operator doesn't need to toggle it
+    // manually — if the Director has checked into a session, telemetry should flow.
+    director.registerIntentHandler(
+        'iracing.publisher.bindSession',
+        async (payload: { raceSessionId: string }) => {
+            if (payload?.raceSessionId) {
+                publisherOrchestrator?.setRaceSessionId(payload.raceSessionId);
+                publisherOrchestrator?.setEnabled(true);
+                // Restart the telemetry polling loop at the publisher rate (200ms / 5Hz).
+                if (pBase) {
+                    if (telemetryInterval) {
+                        clearInterval(telemetryInterval);
+                        telemetryInterval = null;
+                    }
+                    startTelemetryPolling(director);
+                }
+            }
+        },
+    );
+
     // Driver swap — operator-triggered from the publisher panel UI.
     director.registerIntentHandler(
         'iracing.publisher.initiateDriverSwap',

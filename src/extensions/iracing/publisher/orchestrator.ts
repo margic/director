@@ -293,6 +293,21 @@ export class PublisherOrchestrator {
   }
 
   /**
+   * Hot-update the raceSessionId without restarting the publisher.
+   * Called from the `iracing.publisher.bindSession` intent handler once
+   * the Director checks into a session and receives a confirmed raceSessionId
+   * from Race Control. All subsequent events will carry the correct ID.
+   */
+  setRaceSessionId(raceSessionId: string): void {
+    if (this.raceSessionId === raceSessionId) return;
+    this.raceSessionId = raceSessionId;
+    this.cfg.director.log(
+      'info',
+      `Publisher session bound to raceSessionId=${raceSessionId}`,
+    );
+  }
+
+  /**
    * Hot-toggle the publisher without restarting the extension.
    * Called from the `iracing.publisher.setEnabled` intent handler when the
    * user flips the switch in the settings UI.

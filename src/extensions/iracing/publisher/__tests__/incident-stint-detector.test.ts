@@ -226,7 +226,7 @@ describe('STINT_MILESTONE', () => {
     const cs = state.carStates.set(0, {
       position: 0, classPosition: 0, onPitRoad: true, trackSurface: 4,
       lastLapTime: 0, bestLapTime: 0, lapsCompleted: 20, lapDistPct: 0,
-      stintBestLapTime: 0, sessionFlags: 0, pitEntryLap: null,
+      stintBestLapTime: 0, sessionFlags: 0, pitEntryLap: null, pitEntryPosition: null,
       pitStallArrivalTime: null, fuelLevelOnPitEntry: null, offTrackFrames: 0,
       stoppedFrames: 0, isStoppedOnTrack: false, stoppedStartSessionTime: null,
       pitStallArrivalFuelLevel: null, onOutLap: false, pitExitLapsCompleted: null,

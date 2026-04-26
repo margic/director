@@ -206,6 +206,31 @@ export class ExtensionHostService {
     this.child.postMessage(msg);
   }
 
+  /**
+   * Send an internal lifecycle directive to the extension process, bypassing
+   * the capability catalog check. Used exclusively for Director-internal
+   * housekeeping (e.g. binding the publisher to the current session after
+   * check-in) that must never appear in the broadcast intent/capability surface
+   * exposed to the Race Control AI planner.
+   *
+   * The target extension must have registered a handler via `registerIntentHandler`
+   * for the given directive name. No manifest entry is required.
+   */
+  public executeInternalDirective(directive: string, data: any): void {
+    if (!this.isReady || !this.child) {
+      console.warn(`[ExtensionHost] Cannot execute internal directive '${directive}': Host not ready.`);
+      return;
+    }
+
+    const payload: ExecuteIntentPayload = {
+      requestId: randomUUID(),
+      intent: directive,
+      data,
+    };
+
+    this.child.postMessage({ type: 'EXECUTE_INTENT', payload } as IpcMessage);
+  }
+
   // executeCommand removed in favor of Intents
 
   public getViews(type?: 'panel' | 'dialog' | 'overlay' | 'widget') {
