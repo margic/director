@@ -99,6 +99,8 @@ export interface CarState {
   sessionFlags: number;
   /** Lap on which the car entered the pits */
   pitEntryLap: number | null;
+  /** CarIdxPosition at the time of PIT_ENTRY (used for POSITION_CHANGE on exit) */
+  pitEntryPosition: number | null;
   /** SessionTime when the car arrived in the pit stall */
   pitStallArrivalTime: number | null;
   /** FuelLevel when the car entered the pits */
@@ -245,6 +247,7 @@ function makeDefaultCarState(): CarState {
     stintBestLapTime: 0,
     sessionFlags: 0,
     pitEntryLap: null,
+    pitEntryPosition: null,
     pitStallArrivalTime: null,
     fuelLevelOnPitEntry: null,
     offTrackFrames: 0,

@@ -62,7 +62,8 @@ export function detectPitAndIncidents(
     // PIT_ENTRY — false→true
     // -----------------------------------------------------------------------
     if (currOnPit && !cs.onPitRoad) {
-      cs.pitEntryLap = curr.carIdxLapCompleted[i];
+      cs.pitEntryLap      = curr.carIdxLapCompleted[i];
+      cs.pitEntryPosition = curr.carIdxPosition[i];
       // Record fuel at pit entry for player car (used by Tier 2)
       if (i === 0) cs.fuelLevelOnPitEntry = curr.fuelLevel;
 
@@ -100,10 +101,26 @@ export function detectPitAndIncidents(
           },
           opts,
         ));
+
+        // POSITION_CHANGE — emit when the car gained or lost positions during the pit stop.
+        const entryPos = cs.pitEntryPosition;
+        if (entryPos !== null && newPos !== entryPos) {
+          events.push(buildEvent(
+            'POSITION_CHANGE',
+            car,
+            {
+              previousPosition: entryPos,
+              newPosition:      newPos,
+              reason:           'pit_cycle',
+            },
+            opts,
+          ));
+        }
       }
 
       // Reset pit tracking fields
       cs.pitEntryLap           = null;
+      cs.pitEntryPosition      = null;
       cs.pitStallArrivalTime   = null;
       cs.fuelLevelOnPitEntry   = null;
     }

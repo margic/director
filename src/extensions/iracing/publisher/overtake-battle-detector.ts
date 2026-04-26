@@ -327,14 +327,15 @@ export function detectOvertakeAndBattle(
     if (leaderLap < chaserLap) {
       // The car ahead is a lapped car — chaser is catching lapped traffic.
       if (existing !== 'LAPPED_AHEAD') {
-        const car = carRefFromRoster(state, i);
-        if (car) {
+        const car       = carRefFromRoster(state, i);
+        const targetRef = state.knownRoster.get(leaderIdx);
+        if (car && targetRef) {
           events.push(buildEvent(
             'LAPPED_TRAFFIC_AHEAD',
             car,
             {
               targetCarIdx:    leaderIdx,
-              targetCarNumber: state.knownRoster.get(leaderIdx)?.carNumber ?? '',
+              targetCarNumber: targetRef.carNumber,
               distanceMeters:  approxDistanceMeters,
             },
             opts,
@@ -345,14 +346,15 @@ export function detectOvertakeAndBattle(
     } else if (leaderLap > chaserLap) {
       // The car ahead has MORE laps — chaser is about to be lapped.
       if (existing !== 'BEING_LAPPED') {
-        const car = carRefFromRoster(state, i);
-        if (car) {
+        const car       = carRefFromRoster(state, i);
+        const targetRef = state.knownRoster.get(leaderIdx);
+        if (car && targetRef) {
           events.push(buildEvent(
             'BEING_LAPPED',
             car,
             {
               targetCarIdx:    leaderIdx,
-              targetCarNumber: state.knownRoster.get(leaderIdx)?.carNumber ?? '',
+              targetCarNumber: targetRef.carNumber,
               distanceMeters:  approxDistanceMeters,
             },
             opts,

@@ -17,7 +17,7 @@
 
 import type { TelemetryFrame, SessionState } from './session-state';
 import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
+import { buildEvent, carRefFromRoster } from './session-state';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -91,14 +91,14 @@ export function detectPlayerPhysics(
 
   const events: PublisherEvent[] = [];
   const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
-  const playerRef = { carIdx: playerCarIdx, carNumber: '', driverName: '' };
+  const playerRef = carRefFromRoster(state, playerCarIdx);
 
   const tick = curr.sessionTick;
 
   // -------------------------------------------------------------------------
   // SPIN_DETECTED
   // -------------------------------------------------------------------------
-  if (tick >= state.spinDetectedCooldownUntilTick) {
+  if (playerRef && tick >= state.spinDetectedCooldownUntilTick) {
     const prevAngle = prev.steeringWheelAngle;
     const currAngle = curr.steeringWheelAngle;
     const playerSpeed = curr.speed;
@@ -119,7 +119,7 @@ export function detectPlayerPhysics(
   // -------------------------------------------------------------------------
   // BIG_HIT
   // -------------------------------------------------------------------------
-  if (tick >= state.bigHitCooldownUntilTick) {
+  if (playerRef && tick >= state.bigHitCooldownUntilTick) {
     const torqueSpiked = curr.steeringWheelPctTorque >= BIG_HIT_TORQUE_THRESHOLD;
     const speedCrashed = prev.speed - curr.speed >= BIG_HIT_SPEED_DROP_MPS;
 
@@ -136,7 +136,7 @@ export function detectPlayerPhysics(
     const playerSpeed = curr.speed;
 
     // Only fire while actively racing at speed
-    if (playerSpeed >= SLOW_CAR_MIN_ACTIVE_MPS) {
+    if (playerRef && playerSpeed >= SLOW_CAR_MIN_ACTIVE_MPS) {
       const currGap  = curr.carIdxF2Time[playerCarIdx];
       const prevGap  = prev.carIdxF2Time[playerCarIdx];
       const closing  = prevGap - currGap >= SLOW_CAR_CLOSING_RATE_SEC;
