@@ -280,9 +280,62 @@ components:
           type: object
           additionalProperties:
             $ref: '#/components/schemas/ConnectionHealth'
+        cameraGroups:
+          type: array
+          description: |
+            iRacing camera groups cached from the SDK. Sending this allows the
+            AI prompts to reference numeric group IDs instead of string names,
+            preventing parseInt("TV1") → NaN failures in the Director.
+          items:
+            $ref: '#/components/schemas/CameraGroup'
+        scenes:
+          type: array
+          description: |
+            Available OBS scenes from the connected OBS instance. Sent at
+            check-in so AI prompts reference real scene names instead of
+            guessing. Discovered via OBS WebSocket GetSceneList.
+          items:
+            type: string
+        drivers:
+          type: array
+          description: |
+            Drivers in the current simulator session, discovered at runtime
+            from iRacing session YAML. Supplements the cloud-side
+            SessionOperationalConfig.drivers list.
+          items:
+            $ref: '#/components/schemas/CapabilityDriver'
       required:
         - intents
         - connections
+    CameraGroup:
+      type: object
+      description: An iRacing camera group entry mapping a human-readable name to its numeric SDK ID.
+      properties:
+        groupNum:
+          type: integer
+          description: iRacing camera group number used in broadcastMessage SDK calls
+        groupName:
+          type: string
+          description: Human-readable camera group name (e.g., "TV1", "Chase", "Blimp")
+      required:
+        - groupNum
+        - groupName
+    CapabilityDriver:
+      type: object
+      description: A driver discovered at runtime from the simulator session.
+      properties:
+        carNumber:
+          type: string
+          description: Racing car number
+        userName:
+          type: string
+          description: Driver's simulator username
+        carName:
+          type: string
+          description: Car model name (e.g., "Porsche 911 GT3 R")
+      required:
+        - carNumber
+        - userName
     IntentCapability:
       type: object
       properties:

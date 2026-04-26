@@ -142,6 +142,22 @@ app.on('ready', () => {
     const catalog = extensionHost.getCapabilityCatalog();
     const allIntents = catalog.getAllIntents();
     const connections = extensionHost.getConnectionHealth();
+
+    // Enrich capabilities with runtime data cached from extension events.
+    // These allow the AI Planner/Executor to reference real camera group IDs,
+    // scene names, and driver numbers instead of guessing or using stale data.
+    const camPayload = eventBus.getLastEventPayload('iracing.cameraGroupsChanged');
+    const driverPayload = eventBus.getLastEventPayload('iracing.driversChanged');
+    const obsPayload = eventBus.getLastEventPayload('obs.scenes');
+
+    const cameraGroups: { groupNum: number; groupName: string }[] =
+      (camPayload?.groups ?? []).map((g: any) => ({ groupNum: g.groupNum, groupName: g.groupName }));
+
+    const drivers: { carNumber: string; userName: string; carName: string }[] =
+      (driverPayload?.drivers ?? []).map((d: any) => ({ carNumber: d.carNumber, userName: d.userName, carName: d.carName }));
+
+    const scenes: string[] = obsPayload?.scenes ?? [];
+
     return {
       intents: allIntents.map(entry => ({
         intent: entry.intent.intent,
@@ -150,6 +166,9 @@ app.on('ready', () => {
         schema: entry.intent.schema as Record<string, unknown> | undefined,
       })),
       connections,
+      ...(cameraGroups.length > 0 && { cameraGroups }),
+      ...(scenes.length > 0 && { scenes }),
+      ...(drivers.length > 0 && { drivers }),
     };
   });
   sessionManager.setLocalSequencesGetter(async () => {

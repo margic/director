@@ -250,9 +250,28 @@ export interface IntentCapability {
   schema?: Record<string, unknown>;
 }
 
+/** iRacing camera group — maps a human-readable name to its numeric SDK ID. */
+export interface CameraGroup {
+  groupNum: number;
+  groupName: string;
+}
+
+/** Driver discovered at runtime from the simulator session. */
+export interface CapabilityDriver {
+  carNumber: string;
+  userName: string;
+  carName: string;
+}
+
 export interface DirectorCapabilities {
   intents: IntentCapability[];
   connections: Record<string, ConnectionHealth>;
+  /** iRacing camera groups cached from the SDK at check-in time. */
+  cameraGroups?: CameraGroup[];
+  /** Available OBS scenes discovered via GetSceneList at check-in time. */
+  scenes?: string[];
+  /** Drivers in the current simulator session at check-in time. */
+  drivers?: CapabilityDriver[];
 }
 
 export interface SessionCheckinRequest {
