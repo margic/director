@@ -60,13 +60,30 @@ export interface CloudPollerOptions {
    * Used to enforce minimum polling frequency (1/4 of TTL) to maintain heartbeat.
    */
   checkinTtlSeconds?: number;
+
+  /**
+   * How many ms before the estimated sequence end to fire the pre-fetch request.
+   * Only active when onSequenceStarted() is called with a known estimatedDurationMs.
+   * Default: 8000ms (8 seconds — accounts for RC two-tier AI latency).
+   */
+  prefetchLeadMs?: number;
+
+  /**
+   * Minimum time after sequence start before firing the pre-fetch.
+   * Prevents hammering RC immediately on very short sequences.
+   * Default: 2000ms.
+   */
+  minPrefetchMs?: number;
 }
 
 export class CloudPoller {
   private isRunning = false;
   private loopInterval: NodeJS.Timeout | null = null;
+  private prefetchTimer: NodeJS.Timeout | null = null;
   private lastCompletedSequenceId: string | null = null;
   private readonly idleRetryMs: number;
+  private readonly prefetchLeadMs: number;
+  private readonly minPrefetchMs: number;
 
   constructor(
     private authService: AuthService,
@@ -74,6 +91,8 @@ export class CloudPoller {
     private options: CloudPollerOptions
   ) {
     this.idleRetryMs = options.idleRetryMs ?? 5000;
+    this.prefetchLeadMs = options.prefetchLeadMs ?? 8000;
+    this.minPrefetchMs = options.minPrefetchMs ?? 2000;
   }
 
   /**
@@ -99,6 +118,10 @@ export class CloudPoller {
     if (this.loopInterval) {
       clearTimeout(this.loopInterval);
       this.loopInterval = null;
+    }
+    if (this.prefetchTimer) {
+      clearTimeout(this.prefetchTimer);
+      this.prefetchTimer = null;
     }
   }
 
@@ -141,9 +164,56 @@ export class CloudPoller {
     }
   }
 
+  /**
+   * Notify the poller that a new sequence has started executing.
+   * If estimatedDurationMs is known, schedules a pre-fetch so the next sequence
+   * is ready in the queue the moment the current one finishes.
+   *
+   * Pre-fetch fires at: max(estimatedDurationMs - prefetchLeadMs, minPrefetchMs)
+   *
+   * On 200: the sequence is enqueued immediately — zero gap on completion.
+   * On 204: silent no-op — onSequenceCompleted drives the next request normally.
+   * On error: logged and discarded — normal completion path still works.
+   */
+  onSequenceStarted(sequenceId: string, estimatedDurationMs?: number): void {
+    // Clear any previously scheduled prefetch
+    if (this.prefetchTimer) {
+      clearTimeout(this.prefetchTimer);
+      this.prefetchTimer = null;
+    }
+
+    if (!estimatedDurationMs || estimatedDurationMs <= 0 || !this.isRunning) {
+      return; // No timing hint — rely on onSequenceCompleted
+    }
+
+    const fireAt = Math.max(estimatedDurationMs - this.prefetchLeadMs, this.minPrefetchMs);
+    console.log(
+      `[CloudPoller] Pre-fetch scheduled in ${fireAt}ms` +
+      ` (estimated: ${estimatedDurationMs}ms, lead: ${this.prefetchLeadMs}ms, seq: ${sequenceId})`
+    );
+
+    this.prefetchTimer = setTimeout(async () => {
+      this.prefetchTimer = null;
+      if (!this.isRunning) return;
+      await this.firePrefetch();
+    }, fireAt);
+  }
+
   // ---------------------------------------------------------------------------
   // Private
   // ---------------------------------------------------------------------------
+
+  /**
+   * One-shot pre-fetch fired during sequence execution to warm up the queue.
+   * Calls fetchNextSequence() and discards the scheduling delay — this does NOT
+   * drive the main polling loop. The main loop resumes via onSequenceCompleted().
+   */
+  private async firePrefetch(): Promise<void> {
+    console.log('[CloudPoller] Firing pre-fetch for next sequence');
+    // fetchNextSequence() calls onSequence() on 200, which enqueues the next sequence.
+    // The returned delay is intentionally ignored — loop scheduling is handled separately.
+    await this.fetchNextSequence();
+  }
 
   /**
    * Main polling loop.

@@ -93,6 +93,13 @@ export class DirectorOrchestrator extends EventEmitter {
 
     // Subscribe to scheduler progress events
     this.scheduler.on('progress', (progress) => {
+      // Trigger pre-fetch when sequence starts (if estimated duration is known)
+      if (progress.stepIntent === 'sequence.start' && this.cloudPoller) {
+        const seq = this.scheduler.getExecutingSequence(progress.sequenceId);
+        const estimatedDurationMs = seq?.metadata?.['totalDurationMs'] as number | undefined;
+        this.cloudPoller.onSequenceStarted(progress.sequenceId, estimatedDurationMs);
+      }
+
       // Update current sequence tracking from scheduler progress
       if (progress.stepStatus === 'running' && progress.stepIntent !== 'sequence.start' && progress.stepIntent !== 'sequence.end') {
         this.currentSequenceId = progress.sequenceId;
