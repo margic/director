@@ -89,15 +89,17 @@ export function detectPitStopDetail(
       cs.pitStallArrivalTime        = curr.sessionTime;
       cs.pitStallArrivalFuelLevel   = i === playerCarIdx ? curr.fuelLevel : 0;
 
-      events.push(buildEvent(
-        'PIT_STOP_BEGIN',
-        car,
-        {
-          arrivalSessionTime: curr.sessionTime,
-          fuelLevelOnEntry:   cs.pitStallArrivalFuelLevel,
-        },
-        opts,
-      ));
+      if (car) {
+        events.push(buildEvent(
+          'PIT_STOP_BEGIN',
+          car,
+          {
+            arrivalSessionTime: curr.sessionTime,
+            fuelLevelOnEntry:   cs.pitStallArrivalFuelLevel,
+          },
+          opts,
+        ));
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -112,15 +114,17 @@ export function detectPitStopDetail(
         ? curr.fuelLevel - cs.pitStallArrivalFuelLevel
         : 0;
 
-      events.push(buildEvent(
-        'PIT_STOP_END',
-        car,
-        {
-          serviceDurationSec,
-          fuelLevelDelta,
-        },
-        opts,
-      ));
+      if (car) {
+        events.push(buildEvent(
+          'PIT_STOP_END',
+          car,
+          {
+            serviceDurationSec,
+            fuelLevelDelta,
+          },
+          opts,
+        ));
+      }
 
       cs.pitStallArrivalTime      = null;
       cs.pitStallArrivalFuelLevel = null;
@@ -143,7 +147,7 @@ export function detectPitStopDetail(
       if (currLaps > exitLaps) {
         cs.onOutLap             = false;
         cs.pitExitLapsCompleted = null;
-        events.push(buildEvent('OUT_LAP', car, {}, opts));
+        if (car) events.push(buildEvent('OUT_LAP', car, {}, opts));
       }
     }
   }
@@ -167,37 +171,43 @@ export function detectPitStopDetail(
       !state.firedFuelLowThresholds.has(threshold) &&
       curr.fuelLevelPct < threshold
     ) {
-      state.firedFuelLowThresholds.add(threshold);
-      const estimatedLapsRemaining = state.playerFuelPerLap > 0
-        ? Math.floor(curr.fuelLevel / state.playerFuelPerLap)
-        : 0;
+      const fuelCar = carRefFromRoster(state, playerCarIdx);
+      if (fuelCar) {
+        state.firedFuelLowThresholds.add(threshold);
+        const estimatedLapsRemaining = state.playerFuelPerLap > 0
+          ? Math.floor(curr.fuelLevel / state.playerFuelPerLap)
+          : 0;
 
-      events.push(buildEvent(
-        'FUEL_LOW',
-        carRefFromRoster(state, playerCarIdx),
-        {
-          threshold,
-          fuelLevelPct:            curr.fuelLevelPct,
-          estimatedLapsRemaining,
-        },
-        opts,
-      ));
+        events.push(buildEvent(
+          'FUEL_LOW',
+          fuelCar,
+          {
+            threshold,
+            fuelLevelPct:            curr.fuelLevelPct,
+            estimatedLapsRemaining,
+          },
+          opts,
+        ));
+      }
     }
   }
 
   // FUEL_LEVEL_CHANGE — player refuel detection (FuelLevel jumps up)
   if (curr.fuelLevel > prev.fuelLevel + fuelJumpThreshold) {
-    const delta = curr.fuelLevel - prev.fuelLevel;
-    events.push(buildEvent(
-      'FUEL_LEVEL_CHANGE',
-      carRefFromRoster(state, playerCarIdx),
-      {
-        previousLevel: prev.fuelLevel,
-        newLevel:      curr.fuelLevel,
-        deltaLitres:   delta,
-      },
-      opts,
-    ));
+    const fuelCar = carRefFromRoster(state, playerCarIdx);
+    if (fuelCar) {
+      const delta = curr.fuelLevel - prev.fuelLevel;
+      events.push(buildEvent(
+        'FUEL_LEVEL_CHANGE',
+        fuelCar,
+        {
+          previousLevel: prev.fuelLevel,
+          newLevel:      curr.fuelLevel,
+          deltaLitres:   delta,
+        },
+        opts,
+      ));
+    }
   }
 
   return events;

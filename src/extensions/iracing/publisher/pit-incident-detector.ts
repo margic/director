@@ -66,16 +66,18 @@ export function detectPitAndIncidents(
       // Record fuel at pit entry for player car (used by Tier 2)
       if (i === 0) cs.fuelLevelOnPitEntry = curr.fuelLevel;
 
-      events.push(buildEvent(
-        'PIT_ENTRY',
-        car,
-        {
-          entryLap:       curr.carIdxLapCompleted[i],
-          position:       curr.carIdxPosition[i],
-          gapToLeaderSec: curr.carIdxF2Time[i],
-        },
-        opts,
-      ));
+      if (car) {
+        events.push(buildEvent(
+          'PIT_ENTRY',
+          car,
+          {
+            entryLap:       curr.carIdxLapCompleted[i],
+            position:       curr.carIdxPosition[i],
+            gapToLeaderSec: curr.carIdxF2Time[i],
+          },
+          opts,
+        ));
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -87,16 +89,18 @@ export function detectPitAndIncidents(
       // positionsLost: positive = lost positions (went down the order)
       const positionsLost = newPos > cs.position ? newPos - cs.position : 0;
 
-      events.push(buildEvent(
-        'PIT_EXIT',
-        car,
-        {
-          exitLap,
-          newPosition:    newPos,
-          positionsLost,
-        },
-        opts,
-      ));
+      if (car) {
+        events.push(buildEvent(
+          'PIT_EXIT',
+          car,
+          {
+            exitLap,
+            newPosition:    newPos,
+            positionsLost,
+          },
+          opts,
+        ));
+      }
 
       // Reset pit tracking fields
       cs.pitEntryLap           = null;
@@ -111,15 +115,17 @@ export function detectPitAndIncidents(
       cs.offTrackFrames++;
       if (cs.offTrackFrames === 2) {
         // Rising edge: fire exactly once when the count reaches 2
-        events.push(buildEvent(
-          'OFF_TRACK',
-          car,
-          {
-            lapDistPct:      curr.carIdxLapDistPct[i],
-            speedAtExitMps:  0, // speed not in TelemetryFrame; Tier 2 can enrich
-          },
-          opts,
-        ));
+        if (car) {
+          events.push(buildEvent(
+            'OFF_TRACK',
+            car,
+            {
+              lapDistPct:      curr.carIdxLapDistPct[i],
+              speedAtExitMps:  0, // speed not in TelemetryFrame; Tier 2 can enrich
+            },
+            opts,
+          ));
+        }
       }
     } else {
       if (cs.offTrackFrames >= 2) {
@@ -127,12 +133,14 @@ export function detectPitAndIncidents(
         const timeOffTrackSec = prev
           ? curr.sessionTime - (prev.sessionTime - (cs.offTrackFrames - 1) * 0.2)
           : 0;
-        events.push(buildEvent(
-          'BACK_ON_TRACK',
-          car,
-          { timeOffTrackSec: Math.max(0, timeOffTrackSec) },
-          opts,
-        ));
+        if (car) {
+          events.push(buildEvent(
+            'BACK_ON_TRACK',
+            car,
+            { timeOffTrackSec: Math.max(0, timeOffTrackSec) },
+            opts,
+          ));
+        }
       }
       cs.offTrackFrames = 0;
     }
@@ -151,15 +159,17 @@ export function detectPitAndIncidents(
   if (prev !== null && curr.playerIncidentCount > prev.playerIncidentCount) {
     const delta = curr.playerIncidentCount - prev.playerIncidentCount;
     const car   = carRefFromRoster(state, 0);
-    events.push(buildEvent(
-      'INCIDENT_POINT',
-      car,
-      {
-        incidentPoints:      delta,
-        totalIncidentPoints: curr.playerIncidentCount,
-      },
-      opts,
-    ));
+    if (car) {
+      events.push(buildEvent(
+        'INCIDENT_POINT',
+        car,
+        {
+          incidentPoints:      delta,
+          totalIncidentPoints: curr.playerIncidentCount,
+        },
+        opts,
+      ));
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -168,17 +178,20 @@ export function detectPitAndIncidents(
   // identity override service has resolved.
   // -------------------------------------------------------------------------
   if (!state.identityResolved && ctx.iracingUserName && ctx.playerDisplayName) {
-    state.identityResolved = true;
-    const car = { ...carRefFromRoster(state, 0), driverName: ctx.playerDisplayName };
-    events.push(buildEvent(
-      'IDENTITY_RESOLVED',
-      car,
-      {
-        iracingUserName:    ctx.iracingUserName,
-        displayName:        ctx.playerDisplayName,
-      },
-      opts,
-    ));
+    const baseRef = carRefFromRoster(state, 0);
+    if (baseRef) {
+      state.identityResolved = true;
+      const car = { ...baseRef, driverName: ctx.playerDisplayName };
+      events.push(buildEvent(
+        'IDENTITY_RESOLVED',
+        car,
+        {
+          iracingUserName:    ctx.iracingUserName,
+          displayName:        ctx.playerDisplayName,
+        },
+        opts,
+      ));
+    }
   }
 
   return events;

@@ -48,6 +48,7 @@ export function detectLapCompleted(
 
     if (currLaps > prevLaps) {
       const car = carRefFromRoster(state, i);
+      if (!car) continue;
 
       events.push(buildEvent(
         'LAP_COMPLETED',

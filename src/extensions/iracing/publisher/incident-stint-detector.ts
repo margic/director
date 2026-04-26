@@ -64,15 +64,18 @@ export function detectIncidentsAndMilestones(
   // -------------------------------------------------------------------------
   if (curr.teamIncidentCount > prev.teamIncidentCount) {
     const delta = curr.teamIncidentCount - prev.teamIncidentCount;
-    events.push(buildEvent(
-      'TEAM_INCIDENT_POINT',
-      carRefFromRoster(state, playerCarIdx),
-      {
-        incidentPoints:      delta,
-        totalIncidentPoints: curr.teamIncidentCount,
-      },
-      opts,
-    ));
+    const teamIncidentCar = carRefFromRoster(state, playerCarIdx);
+    if (teamIncidentCar) {
+      events.push(buildEvent(
+        'TEAM_INCIDENT_POINT',
+        teamIncidentCar,
+        {
+          incidentPoints:      delta,
+          totalIncidentPoints: curr.teamIncidentCount,
+        },
+        opts,
+      ));
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -84,17 +87,20 @@ export function detectIncidentsAndMilestones(
       if (!state.firedIncidentWarnings.has(thresholdPct)) {
         const crossingCount = Math.ceil(curr.incidentLimit * thresholdPct / 100);
         if (curr.teamIncidentCount >= crossingCount) {
-          state.firedIncidentWarnings.add(thresholdPct);
-          events.push(buildEvent(
-            'INCIDENT_LIMIT_WARNING',
-            carRefFromRoster(state, playerCarIdx),
-            {
-              thresholdPercent: thresholdPct,
-              currentCount:     curr.teamIncidentCount,
-              incidentLimit:    curr.incidentLimit,
-            },
-            opts,
-          ));
+          const limitWarnCar = carRefFromRoster(state, playerCarIdx);
+          if (limitWarnCar) {
+            state.firedIncidentWarnings.add(thresholdPct);
+            events.push(buildEvent(
+              'INCIDENT_LIMIT_WARNING',
+              limitWarnCar,
+              {
+                thresholdPercent: thresholdPct,
+                currentCount:     curr.teamIncidentCount,
+                incidentLimit:    curr.incidentLimit,
+              },
+              opts,
+            ));
+          }
         }
       }
     }
@@ -123,17 +129,20 @@ export function detectIncidentsAndMilestones(
       if (!cs.firedStintMilestones.has(milestonePct)) {
         const threshold = (estimatedStintLaps * milestonePct) / 100;
         if (stintLapsCompleted >= threshold) {
-          cs.firedStintMilestones.add(milestonePct);
-          events.push(buildEvent(
-            'STINT_MILESTONE',
-            carRefFromRoster(state, playerCarIdx),
-            {
-              milestonePercent:  milestonePct,
-              lapsCompleted:     stintLapsCompleted,
-              estimatedStintLaps,
-            },
-            opts,
-          ));
+          const milestoneCar = carRefFromRoster(state, playerCarIdx);
+          if (milestoneCar) {
+            cs.firedStintMilestones.add(milestonePct);
+            events.push(buildEvent(
+              'STINT_MILESTONE',
+              milestoneCar,
+              {
+                milestonePercent:  milestonePct,
+                lapsCompleted:     stintLapsCompleted,
+                estimatedStintLaps,
+              },
+              opts,
+            ));
+          }
         }
       }
     }

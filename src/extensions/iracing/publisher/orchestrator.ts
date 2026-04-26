@@ -43,6 +43,7 @@ import { detectPlayerPhysics } from './player-physics-detector';
 import {
   createSessionState,
   buildEvent,
+  carRefFromRoster,
   type SessionState,
   type TelemetryFrame,
 } from './session-state';
@@ -277,13 +278,16 @@ export class PublisherOrchestrator {
     this.state.pendingSwapInitiatedSessionTime   = this.lastFrame.sessionTime;
 
     const playerCarIdx = this.playerCarIdx ?? 0;
-    const event = buildEvent(
-      'DRIVER_SWAP_INITIATED',
-      { carIdx: playerCarIdx, carNumber: this.state.knownRoster.get(playerCarIdx)?.carNumber ?? '', driverName: outgoingDriverId },
-      { outgoingDriverId, incomingDriverId, incomingDriverName },
-      { raceSessionId: this.raceSessionId, publisherCode: this.publisherCode, frame: this.lastFrame },
-    );
-    this.dispatchEvents([event]);
+    const carRef = carRefFromRoster(this.state, playerCarIdx);
+    if (carRef) {
+      const event = buildEvent(
+        'DRIVER_SWAP_INITIATED',
+        { ...carRef, driverName: outgoingDriverId },
+        { outgoingDriverId, incomingDriverId, incomingDriverName },
+        { raceSessionId: this.raceSessionId, publisherCode: this.publisherCode, frame: this.lastFrame },
+      );
+      this.dispatchEvents([event]);
+    }
 
     this.emitOperatorState(this.lastPlayerOnPitRoad, true);
   }

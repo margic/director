@@ -68,17 +68,20 @@ export function detectDriverSwapAndRoster(
       // Increment stint counter — the incoming driver is starting a new stint.
       state.playerStintNumber += 1;
 
-      events.push(buildEvent(
-        'DRIVER_SWAP_COMPLETED',
-        { ...carRefFromRoster(state, playerCarIdx), driverName: state.pendingSwapIncomingDriverName },
-        {
-          swapDurationSec,
-          incomingDriverId:   state.pendingSwapIncomingDriverId,
-          incomingDriverName: state.pendingSwapIncomingDriverName,
-          stintNumberStarting: state.playerStintNumber,
-        },
-        opts,
-      ));
+      const swapBaseRef = carRefFromRoster(state, playerCarIdx);
+      if (swapBaseRef) {
+        events.push(buildEvent(
+          'DRIVER_SWAP_COMPLETED',
+          { ...swapBaseRef, driverName: state.pendingSwapIncomingDriverName },
+          {
+            swapDurationSec,
+            incomingDriverId:   state.pendingSwapIncomingDriverId,
+            incomingDriverName: state.pendingSwapIncomingDriverName,
+            stintNumberStarting: state.playerStintNumber,
+          },
+          opts,
+        ));
+      }
 
       // Clear pending swap state
       state.driverSwapPending = false;
@@ -117,12 +120,15 @@ export function detectDriverSwapAndRoster(
 
       if (added.length > 0 || removed.length > 0) {
         state.knownRoster = new Map(current);
-        events.push(buildEvent(
-          'ROSTER_UPDATED',
-          carRefFromRoster(state, playerCarIdx),
-          { added, removed },
-          opts,
-        ));
+        const rosterCar = carRefFromRoster(state, playerCarIdx);
+        if (rosterCar) {
+          events.push(buildEvent(
+            'ROSTER_UPDATED',
+            rosterCar,
+            { added, removed },
+            opts,
+          ));
+        }
       }
     }
   }

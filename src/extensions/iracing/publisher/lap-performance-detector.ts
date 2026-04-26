@@ -93,12 +93,15 @@ export function detectLapPerformance(
     if (lastLap > 0 && (cs.stintBestLapTime === 0 || lastLap < cs.stintBestLapTime)) {
       const prevStintBest = cs.stintBestLapTime;
       cs.stintBestLapTime = lastLap;
-      events.push(buildEvent(
-        'STINT_BEST_LAP',
-        carRefFromRoster(state, i),
-        { lapNumber: currLaps, lapTime: lastLap },
-        opts,
-      ));
+      const stintBestCar = carRefFromRoster(state, i);
+      if (stintBestCar) {
+        events.push(buildEvent(
+          'STINT_BEST_LAP',
+          stintBestCar,
+          { lapNumber: currLaps, lapTime: lastLap },
+          opts,
+        ));
+      }
       // Reset the player degradation latch — the stint just got a fresh best.
       if (i === ctx.playerCarIdx) {
         state.playerDegradationFired = false;
@@ -120,12 +123,15 @@ export function detectLapPerformance(
       ) {
         const previousBest = cs.bestLapTime;
         cs.bestLapTime = newBest;
-        events.push(buildEvent(
-          'PERSONAL_BEST_LAP',
-          carRefFromRoster(state, i),
-          { lapNumber: currLaps, lapTime: newBest, previousBest },
-          opts,
-        ));
+        const personalBestCar = carRefFromRoster(state, i);
+        if (personalBestCar) {
+          events.push(buildEvent(
+            'PERSONAL_BEST_LAP',
+            personalBestCar,
+            { lapNumber: currLaps, lapTime: newBest, previousBest },
+            opts,
+          ));
+        }
       }
 
       if (lastLap > 0) {
@@ -142,17 +148,20 @@ export function detectLapPerformance(
           const avg = state.playerLapTimeBuffer.reduce((a, b) => a + b, 0) / LAP_DEGRADATION_BUFFER_SIZE;
           const degradationPct = (avg - cs.stintBestLapTime) / cs.stintBestLapTime;
           if (degradationPct >= threshold) {
-            state.playerDegradationFired = true;
-            events.push(buildEvent(
-              'LAP_TIME_DEGRADATION',
-              carRefFromRoster(state, i),
-              {
-                rollingAvgSec:  avg,
-                stintBestSec:   cs.stintBestLapTime,
-                degradationPct,
-              },
-              opts,
-            ));
+            const degradationCar = carRefFromRoster(state, i);
+            if (degradationCar) {
+              state.playerDegradationFired = true;
+              events.push(buildEvent(
+                'LAP_TIME_DEGRADATION',
+                degradationCar,
+                {
+                  rollingAvgSec:  avg,
+                  stintBestSec:   cs.stintBestLapTime,
+                  degradationPct,
+                },
+                opts,
+              ));
+            }
           }
         }
       }
@@ -181,16 +190,19 @@ export function detectLapPerformance(
     state.sessionBestLapTime = sessionBest;
     // Find which car holds it for the event car ref.
     const holderIdx = findCarWithBestLap(curr, sessionBest);
-    events.push(buildEvent(
-      'SESSION_BEST_LAP',
-      carRefFromRoster(state, holderIdx),
-      {
-        lapNumber:           curr.carIdxLapCompleted[holderIdx],
-        lapTime:             sessionBest,
-        previousSessionBest,
-      },
-      opts,
-    ));
+    const sessionBestCar = carRefFromRoster(state, holderIdx);
+    if (sessionBestCar) {
+      events.push(buildEvent(
+        'SESSION_BEST_LAP',
+        sessionBestCar,
+        {
+          lapNumber:           curr.carIdxLapCompleted[holderIdx],
+          lapTime:             sessionBest,
+          previousSessionBest,
+        },
+        opts,
+      ));
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -213,17 +225,20 @@ export function detectLapPerformance(
       const previous = state.classBestLapTimes.get(classId) ?? 0;
       if (previous === 0 || lapTime < previous) {
         state.classBestLapTimes.set(classId, lapTime);
-        events.push(buildEvent(
-          'CLASS_BEST_LAP',
-          carRefFromRoster(state, carIdx),
-          {
-            lapNumber:         curr.carIdxLapCompleted[carIdx],
-            lapTime,
-            carClassId:        classId,
-            carClassShortName: carClassShortNames.get(classId) ?? '',
-          },
-          opts,
-        ));
+        const classBestCar = carRefFromRoster(state, carIdx);
+        if (classBestCar) {
+          events.push(buildEvent(
+            'CLASS_BEST_LAP',
+            classBestCar,
+            {
+              lapNumber:         curr.carIdxLapCompleted[carIdx],
+              lapTime,
+              carClassId:        classId,
+              carClassShortName: carClassShortNames.get(classId) ?? '',
+            },
+            opts,
+          ));
+        }
       }
     }
   }

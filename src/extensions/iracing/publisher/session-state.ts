@@ -316,14 +316,15 @@ export function battleKey(carA: number, carB: number): string {
 
 /**
  * Returns a CarRefInput for the given carIdx, resolved from the session roster.
- * Falls back to empty strings if the car isn't in the roster yet.
+ * Returns null if the car isn't in the roster yet — callers must skip the event.
  */
 export function carRefFromRoster(
   state: SessionState,
   carIdx: number,
-): { carIdx: number; carNumber: string; driverName: string } {
+): { carIdx: number; carNumber: string; driverName: string } | null {
   const ref = state.knownRoster.get(carIdx);
-  return { carIdx, carNumber: ref?.carNumber ?? '', driverName: ref?.driverName ?? '' };
+  if (!ref) return null;
+  return { carIdx, carNumber: ref.carNumber, driverName: ref.driverName };
 }
 
 // ---------------------------------------------------------------------------
