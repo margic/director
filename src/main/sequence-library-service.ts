@@ -34,6 +34,7 @@ export class SequenceLibraryService {
   private cloudCacheTimestamp = 0;
   private customCache: PortableSequence[] = [];
   private activeSessionId: string | null = null;
+  private activeCheckinId: string | null = null;
 
   constructor(
     private capabilityCatalog: CapabilityCatalog,
@@ -71,8 +72,9 @@ export class SequenceLibraryService {
    * Clears any existing cloud cache and fetches templates for the new session.
    * Returns 'ready' if templates loaded, 'pending' if planner still running.
    */
-  async setSession(raceSessionId: string): Promise<'ready' | 'pending'> {
+  async setSession(raceSessionId: string, checkinId?: string): Promise<'ready' | 'pending'> {
     this.activeSessionId = raceSessionId;
+    this.activeCheckinId = checkinId ?? null;
     this.cloudCache = [];
     this.cloudCacheTimestamp = 0;
     return this.loadCloud();
@@ -318,7 +320,10 @@ export class SequenceLibraryService {
         return 'pending';
       }
 
-      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listTemplates(this.activeSessionId)}`;
+      const templatePath = apiConfig.endpoints.listTemplates(this.activeSessionId);
+      const url = this.activeCheckinId
+        ? `${apiConfig.baseUrl}${templatePath}?checkinId=${encodeURIComponent(this.activeCheckinId)}`
+        : `${apiConfig.baseUrl}${templatePath}`;
       console.log(`[SequenceLibrary] Fetching session templates from: ${url}`);
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },

@@ -230,6 +230,7 @@ export interface IElectronAPI {
       history: () => Promise<ExecutionResult[]>;
       getExecuting: (sequenceId: string) => Promise<PortableSequence | null>;
       onProgress: (callback: (progress: SequenceProgress) => void) => () => void;
+      onLibraryUpdated: (callback: () => void) => () => void;
   };
   catalog: {
       intents: () => Promise<IntentCatalogEntry[]>;

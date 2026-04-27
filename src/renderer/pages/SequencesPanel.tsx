@@ -108,6 +108,15 @@ export const SequencesPanel: React.FC<SequencesPanelProps> = ({ initialTab = 'ed
     return unsubscribe;
   }, []);
 
+  // Reload sequence library when cloud templates become available after check-in
+  useEffect(() => {
+    if (!window.electronAPI?.sequences?.onLibraryUpdated) return;
+    const unsubscribe = window.electronAPI.sequences.onLibraryUpdated(() => {
+      loadData();
+    });
+    return unsubscribe;
+  }, [loadData]);
+
   // Handlers
   const handleSelectSequence = useCallback((seq: PortableSequence) => {
     setSelectedSequence(seq);

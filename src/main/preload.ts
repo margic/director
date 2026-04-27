@@ -107,6 +107,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('sequence:progress', subscription);
         return () => ipcRenderer.removeListener('sequence:progress', subscription);
       },
+      onLibraryUpdated: (callback: () => void) => {
+        const subscription = () => callback();
+        ipcRenderer.on('sequence:library-updated', subscription);
+        return () => ipcRenderer.removeListener('sequence:library-updated', subscription);
+      },
   },
 
   // Capability Catalog API

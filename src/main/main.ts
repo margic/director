@@ -188,11 +188,45 @@ app.on('ready', () => {
         console.warn('[Main] Failed to load cloud templates:', err);
       });
     } else if (state.state === 'checked-in' && state.selectedSession) {
-      // Refresh templates after check-in (Planner runs asynchronously after checkin)
-      sequenceLibrary.setSession(state.selectedSession.raceSessionId).then((result) => {
-        console.log(`[Main] Cloud templates after check-in: ${result}`);
+      // Refresh templates after check-in (Planner runs asynchronously after checkin).
+      // If still pending, retry every 10s for up to 2 minutes, then push
+      // sequence:library-updated to the renderer when templates land.
+      const sessionIdForRetry = state.selectedSession.raceSessionId;
+      let retryCount = 0;
+      const MAX_RETRIES = 12; // 12 × 10s = 2 minutes
+      const RETRY_INTERVAL_MS = 10_000;
+
+      const tryLoadTemplates = () => {
+        sequenceLibrary.loadCloud().then((result) => {
+          console.log(`[Main] Cloud templates after check-in (attempt ${retryCount + 1}): ${result}`);
+          if (result === 'ready') {
+            // Notify renderer so the Sequences panel refreshes automatically
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('sequence:library-updated');
+            }
+          } else if (result === 'pending' && retryCount < MAX_RETRIES) {
+            retryCount++;
+            setTimeout(tryLoadTemplates, RETRY_INTERVAL_MS);
+          } else if (retryCount >= MAX_RETRIES) {
+            console.warn(`[Main] Cloud templates still not ready after ${MAX_RETRIES} retries for session ${sessionIdForRetry}`);
+          }
+        }).catch((err) => {
+          console.warn('[Main] Failed to refresh cloud templates after check-in:', err);
+        });
+      };
+
+      sequenceLibrary.setSession(sessionIdForRetry, state.checkinId ?? undefined).then((result) => {
+        console.log(`[Main] Cloud templates initial load: ${result}`);
+        if (result === 'ready') {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sequence:library-updated');
+          }
+        } else if (result === 'pending') {
+          retryCount = 1;
+          setTimeout(tryLoadTemplates, RETRY_INTERVAL_MS);
+        }
       }).catch((err) => {
-        console.warn('[Main] Failed to refresh cloud templates after check-in:', err);
+        console.warn('[Main] Failed to set session for cloud templates:', err);
       });
     } else if (state.state === 'none' || state.state === 'discovered') {
       sequenceLibrary.clearSession();
