@@ -142,20 +142,43 @@ app.on('ready', () => {
     const catalog = extensionHost.getCapabilityCatalog();
     const allIntents = catalog.getAllIntents();
     const connections = extensionHost.getConnectionHealth();
-    const cameraGroups = extensionHost.getCameraGroups();
-    const scenes = extensionHost.getObsScenes();
-    const drivers = extensionHost.getDrivers();
-    return {
-      intents: allIntents.map(entry => ({
+
+    // Enrich capabilities with runtime data cached from extension events.
+    // These allow the AI Planner/Executor to reference real camera group IDs,
+    // scene names, and driver numbers instead of guessing or using stale data.
+    const camPayload = eventBus.getLastEventPayload('iracing.cameraGroupsChanged');
+    const driverPayload = eventBus.getLastEventPayload('iracing.driversChanged');
+    const obsPayload = eventBus.getLastEventPayload('obs.scenes');
+
+    const cameraGroups: { groupNum: number; groupName: string }[] =
+      (camPayload?.groups ?? []).map((g: any) => ({ groupNum: g.groupNum, groupName: g.groupName }));
+
+    const drivers: { carNumber: string; userName: string; carName: string }[] =
+      (driverPayload?.drivers ?? []).map((d: any) => ({ carNumber: d.carNumber, userName: d.userName, carName: d.carName }));
+
+    const scenes: string[] = obsPayload?.scenes ?? [];
+
+    // #112: only include broadcast intents in capabilities — exclude operational/query
+    const broadcastIntents = allIntents
+      .filter(entry => (entry.intent.category ?? 'broadcast') === 'broadcast')
+      .map(entry => ({
         intent: entry.intent.intent,
         extensionId: entry.extensionId,
         active: entry.enabled,
         schema: entry.intent.schema as Record<string, unknown> | undefined,
-      })),
+        description: entry.intent.description,
+      }));
+
+    // #113: collect per-extension aiContext prose for the Planner
+    const extensionContexts = catalog.getExtensionAiContexts();
+
+    return {
+      intents: broadcastIntents,
       connections,
       ...(cameraGroups.length > 0 && { cameraGroups }),
       ...(scenes.length > 0 && { scenes }),
       ...(drivers.length > 0 && { drivers }),
+      ...(extensionContexts.length > 0 && { extensionContexts }),
     };
   });
   sessionManager.setLocalSequencesGetter(async () => {
@@ -164,15 +187,59 @@ app.on('ready', () => {
     return [...builtin, ...custom].slice(0, 50);
   });
 
-  // Wire session lifecycle to sequence library — load cloud templates after check-in.
-  // Templates are generated server-side by the Planner after check-in completes.
-  // We pass the checkinId so stale templates from previous check-ins are filtered out.
+  // Wire race context getter — includes simulator snapshot in checkin body (issue #114)
+  sessionManager.setRaceContextGetter(() => directorOrchestrator.getRaceContext());
+
+  // Wire session lifecycle to sequence library — load cloud templates when session is available
+  // Templates are generated server-side after check-in, but we attempt to load them early
+  // in case a previous check-in already triggered the Planner.
   sessionManager.on('stateChanged', (state: any) => {
-    if (state.state === 'checked-in' && state.selectedSession) {
-      sequenceLibrary.setSession(state.selectedSession.raceSessionId, state.checkinId).then((result) => {
-        console.log(`[Main] Cloud templates after check-in: ${result}`);
+    if (state.state === 'selected' && state.selectedSession) {
+      sequenceLibrary.setSession(state.selectedSession.raceSessionId).then((result) => {
+        console.log(`[Main] Cloud templates for session ${state.selectedSession.raceSessionId}: ${result}`);
       }).catch((err) => {
-        console.warn('[Main] Failed to load cloud templates after check-in:', err);
+        console.warn('[Main] Failed to load cloud templates:', err);
+      });
+    } else if (state.state === 'checked-in' && state.selectedSession) {
+      // Refresh templates after check-in (Planner runs asynchronously after checkin).
+      // If still pending, retry every 10s for up to 2 minutes, then push
+      // sequence:library-updated to the renderer when templates land.
+      const sessionIdForRetry = state.selectedSession.raceSessionId;
+      let retryCount = 0;
+      const MAX_RETRIES = 20; // 20 × 15s = 5 minutes
+      const RETRY_INTERVAL_MS = 15_000;
+
+      const tryLoadTemplates = () => {
+        sequenceLibrary.loadCloud().then((result) => {
+          console.log(`[Main] Cloud templates after check-in (attempt ${retryCount + 1}): ${result}`);
+          if (result === 'ready') {
+            // Notify renderer so the Sequences panel refreshes automatically
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('sequence:library-updated');
+            }
+          } else if (result === 'pending' && retryCount < MAX_RETRIES) {
+            retryCount++;
+            setTimeout(tryLoadTemplates, RETRY_INTERVAL_MS);
+          } else if (retryCount >= MAX_RETRIES) {
+            console.warn(`[Main] Cloud templates still not ready after ${MAX_RETRIES} retries for session ${sessionIdForRetry}`);
+          }
+        }).catch((err) => {
+          console.warn('[Main] Failed to refresh cloud templates after check-in:', err);
+        });
+      };
+
+      sequenceLibrary.setSession(sessionIdForRetry, state.checkinId ?? undefined).then((result) => {
+        console.log(`[Main] Cloud templates initial load: ${result}`);
+        if (result === 'ready') {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('sequence:library-updated');
+          }
+        } else if (result === 'pending') {
+          retryCount = 1;
+          setTimeout(tryLoadTemplates, RETRY_INTERVAL_MS);
+        }
+      }).catch((err) => {
+        console.warn('[Main] Failed to set session for cloud templates:', err);
       });
     } else if (state.state === 'none' || state.state === 'discovered') {
       sequenceLibrary.clearSession();
@@ -369,6 +436,18 @@ app.on('ready', () => {
       }
 
       return true;
+  });
+
+  ipcMain.handle('publisher:lookup-config', async (_event, publisherCode: string) => {
+    const token = await authService.getAccessToken();
+    if (!token) throw new Error('Not authenticated');
+    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.publisherConfig(publisherCode)}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}${body ? ` — ${body}` : ''}`);
+    }
+    return res.json();
   });
 
   ipcMain.handle('config:set', async (event, key, value) => {

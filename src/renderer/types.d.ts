@@ -191,6 +191,17 @@ export interface IElectronAPI {
   discordDisconnect: () => Promise<void>;
   discordSendTest: (text: string) => Promise<void>;
   discordUpdateVoicePreference: (voice: string) => Promise<any>;
+  publisher: {
+    lookupConfig: (publisherCode: string) => Promise<{
+      raceSessionId: string;
+      displayName: string;
+      nickname: string;
+      iracingName: string;
+      publisherCode: string;
+      gatewayUrl: string;
+      driverId: string;
+    }>;
+  };
   config: {
     get: (key: string) => Promise<any>;
     set: (key: string, value: any) => Promise<void>;
@@ -219,6 +230,7 @@ export interface IElectronAPI {
       history: () => Promise<ExecutionResult[]>;
       getExecuting: (sequenceId: string) => Promise<PortableSequence | null>;
       onProgress: (callback: (progress: SequenceProgress) => void) => () => void;
+      onLibraryUpdated: (callback: () => void) => () => void;
   };
   catalog: {
       intents: () => Promise<IntentCatalogEntry[]>;

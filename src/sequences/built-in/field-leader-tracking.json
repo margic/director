@@ -1,0 +1,29 @@
+{
+  "id": "seq_field_leader_tracking",
+  "name": "Field Leader Tracking",
+  "version": "1.0.0",
+  "description": "Continuous multi-angle tracking of the race leader, useful for pure broadcast coverage.",
+  "category": "builtin",
+  "priority": false,
+  "variables": [
+    { "name": "targetDriver", "label": "Leader Car Number", "type": "text", "required": true, "source": "cloud" },
+    { "name": "durationMs", "label": "Wait Duration", "type": "number", "required": true, "source": "cloud" }
+  ],
+  "steps": [
+    { "id": "step_1", "intent": "obs.switchScene", "payload": { "sceneName": "Director Solo" } },
+    { "id": "step_2", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "11" } },
+    { "id": "step_3", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 10000, "maxMs": 16000 }, "narrativePurpose": "establish" } },
+    { "id": "step_4", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "12" } },
+    { "id": "step_5", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 8000, "maxMs": 14000 }, "narrativePurpose": "build" } },
+    { "id": "step_6", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "20" } },
+    { "id": "step_7", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 8000, "maxMs": 14000 }, "narrativePurpose": "action" } },
+    { "id": "step_8", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "19" } },
+    { "id": "step_9", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 9000, "maxMs": 16000 }, "narrativePurpose": "resolve" } }
+  ],
+  "metadata": {
+    "source": "ai-planner",
+    "applicability": "Standard race leader coverage for wide-field broadcast moments.",
+    "racePhase": "field",
+    "durationRange": { "min": 35000, "max": 60000 }
+  }
+}

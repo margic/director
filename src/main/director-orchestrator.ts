@@ -18,7 +18,6 @@ import {
   CheckinStatus,
   SessionOperationalConfig,
   RaceContext,
-  BattleInfo,
 } from './director-types';
 import { SequenceScheduler } from './sequence-scheduler';
 import { CloudPoller } from './cloud-poller';
@@ -30,6 +29,7 @@ import { ExtensionEventBus } from './extension-host/event-bus';
 import { configService } from './config-service';
 import { SessionManager } from './session-manager';
 import { SequenceLibraryService } from './sequence-library-service';
+import { RaceAnalyzer } from './race-analyzer';
 
 export type DirectorMode = 'stopped' | 'manual' | 'auto';
 
@@ -50,6 +50,7 @@ export interface DirectorOrchestratorState {
 
 export interface DirectorConfig {
   defaultMode?: DirectorMode;
+  autoStartOnSessionSelect?: boolean;
 }
 
 /**
@@ -58,11 +59,12 @@ export interface DirectorConfig {
  * Modes:
  * - stopped: No session selected, no polling
  * - manual: Session selected, no auto-polling, UI can trigger manual execution
- * - auto: Session selected AND checked in, CloudPoller running, sequences executed automatically
+ * - auto: Session selected, CloudPoller running, sequences executed automatically
  *
  * Transitions:
- * - stopped → manual: When session is selected
- * - manual → auto: When user clicks Start (requires active check-in)
+ * - stopped → manual: When session is selected (if autoStartOnSessionSelect=false)
+ * - stopped → auto: When session is selected (if autoStartOnSessionSelect=true)
+ * - manual → auto: When setMode('auto') is called
  * - auto → manual: When setMode('manual') is called
  * - any → stopped: When session is cleared or 410 Gone received
  */
@@ -76,15 +78,10 @@ export class DirectorOrchestrator extends EventEmitter {
   private scheduler: SequenceScheduler;
   private cloudPoller: CloudPoller | null = null;
   private currentRaceSessionId: string | null = null;
-  private lastRaceState: any | null = null;       // Cached iRacing RaceState
-  private lastObsScene: string | null = null;      // Cached OBS current scene
-  /** Gap history for developing-battle detection. Key: "carA:carB" (sorted), Value: last N gap samples. */
-  private gapHistory: Map<string, number[]> = new Map();
-  private static readonly GAP_HISTORY_SIZE = 5;
-  /** Tracks sequence IDs sourced from the director-loop that are pending completion. */
-  private pendingCloudSequenceIds: Set<string> = new Set();
-  /** Single historyChanged listener for cloud sequence completion — wired once in constructor. */
-  private cloudCompletionListener: ((history: any[]) => void) | null = null;
+  /** Last known iRacing state snapshot, updated from iracing.raceStateChanged events. */
+  private lastIRacingState: any = null;
+  /** Synthesizes higher-order narrative events from raw race state history. */
+  private readonly raceAnalyzer = new RaceAnalyzer();
 
   constructor(
     private authService: AuthService,
@@ -99,6 +96,13 @@ export class DirectorOrchestrator extends EventEmitter {
 
     // Subscribe to scheduler progress events
     this.scheduler.on('progress', (progress) => {
+      // Trigger pre-fetch when sequence starts (if estimated duration is known)
+      if (progress.stepIntent === 'sequence.start' && this.cloudPoller) {
+        const seq = this.scheduler.getExecutingSequence(progress.sequenceId);
+        const estimatedDurationMs = seq?.metadata?.['totalDurationMs'] as number | undefined;
+        this.cloudPoller.onSequenceStarted(progress.sequenceId, estimatedDurationMs);
+      }
+
       // Update current sequence tracking from scheduler progress
       if (progress.stepStatus === 'running' && progress.stepIntent !== 'sequence.start' && progress.stepIntent !== 'sequence.end') {
         this.currentSequenceId = progress.sequenceId;
@@ -119,6 +123,12 @@ export class DirectorOrchestrator extends EventEmitter {
     // Subscribe to extension connection state changes for re-check-in
     if (this.eventBus) {
       this.listenForConnectionEvents();
+
+      // Cache latest iRacing state for raceContext in sequences/next POST body
+      this.eventBus.on('iracing.raceStateChanged', (data: { payload: any }) => {
+        this.lastIRacingState = data.payload;
+        this.raceAnalyzer.update(data.payload);
+      });
     }
 
     // Load config and set initial mode
@@ -135,6 +145,7 @@ export class DirectorOrchestrator extends EventEmitter {
     const config = configService.get('director') as any;
     return {
       defaultMode: config?.defaultMode ?? 'stopped',
+      autoStartOnSessionSelect: config?.autoStartOnSessionSelect ?? false,
     };
   }
 
@@ -144,6 +155,118 @@ export class DirectorOrchestrator extends EventEmitter {
   private updateConfig(updates: Partial<DirectorConfig>): void {
     const current = configService.get('director') as any;
     configService.set('director', { ...current, ...updates });
+  }
+
+  /**
+   * Returns the current race context snapshot for external consumers (e.g. SessionManager checkin).
+   * Returns null if iRacing has never connected and no state is available.
+   */
+  public getRaceContext(): RaceContext | null {
+    if (!this.lastIRacingState) return null;
+    return this.buildRaceContext();
+  }
+
+  /**
+   * Build a RaceContext snapshot from the last known iRacing state.
+   * Used as the required body for POST .../sequences/next.
+   */
+  private buildRaceContext(): RaceContext {
+    const state = this.lastIRacingState;
+
+    if (!state) {
+      return {
+        sessionType: 'Race',
+        sessionFlags: 'disconnected',
+        lapsRemain: -1,
+        carCount: 0,
+        contextTimestamp: new Date().toISOString(),
+      };
+    }
+
+    // Decode iRacing SessionFlags bitmask → RC flag string
+    const flagBits: number = state.sessionFlags ?? 0;
+    const FLAG_RED     = 0x0010;
+    const FLAG_YELLOW  = 0x0008;
+    const FLAG_CAUTION = 0x4000;
+    let sessionFlags = 'green';
+    if (flagBits & FLAG_RED) sessionFlags = 'red';
+    else if ((flagBits & FLAG_CAUTION) || (flagBits & FLAG_YELLOW)) sessionFlags = 'caution';
+
+    // Infer session type: Race sessions have a fixed lap count; others are unlimited
+    const totalLaps: number = state.totalSessionLaps ?? 0;
+    const sessionType = totalLaps > 0 ? 'Race' : 'Practice';
+
+    // iRacing returns 32767 for unlimited laps — normalize to -1
+    const rawLapsRemain: number = state.sessionLapsRemain ?? -1;
+    const lapsRemain = rawLapsRemain > 32000 ? -1 : rawLapsRemain;
+
+    const carCount: number = Array.isArray(state.cars) ? state.cars.length : 0;
+    const timeRemain: number = state.sessionTimeRemain ?? -1;
+
+    // Build per-driver context (focused cars only — top 20 to avoid oversized payload)
+    const cars: any[] = Array.isArray(state.cars) ? state.cars.slice(0, 20) : [];
+    const drivers = cars.length > 0
+      ? cars.map((c: any) => ({
+          carNumber: String(c.carNumber ?? ''),
+          gapToAhead: c.gapToCarAhead ?? 0,
+          lapsCompleted: c.lapsCompleted ?? 0,
+          bestLap: c.bestLapTime ?? 0,
+          classPosition: c.classPosition ?? 0,
+          pos: c.position > 0 ? c.position : undefined,
+          driverName: c.driverName || undefined,
+          carClass: c.carClass || undefined,
+          isOnTrack: typeof c.onPitRoad === 'boolean' ? !c.onPitRoad : undefined,
+          lastLap: c.lastLapTime > 0 ? c.lastLapTime : undefined,
+        }))
+      : undefined;
+
+    // Pitting cars
+    const pitting = cars
+      .filter((c: any) => c.onPitRoad)
+      .map((c: any) => String(c.carNumber ?? ''));
+
+    // Active battles: pairs of cars within 1.0s of each other
+    const battles: Array<{ cars: string[]; gapSec: number }> = [];
+    for (let i = 1; i < cars.length; i++) {
+      const gap = cars[i].gapToCarAhead ?? 0;
+      if (gap > 0 && gap < 1.0) {
+        battles.push({
+          cars: [String(cars[i - 1].carNumber ?? ''), String(cars[i].carNumber ?? '')],
+          gapSec: Math.round(gap * 1000) / 1000,
+        });
+      }
+    }
+
+    // Focused car
+    const focusedIdx: number = state.focusedCarIdx ?? -1;
+    const focusedCar = focusedIdx >= 0 ? cars.find((c: any) => c.carIdx === focusedIdx) : null;
+
+    // Synthesized narrative events since last request
+    const recentEvents = this.raceAnalyzer.consumeEvents();
+
+    // Stint laps for the focused driver
+    const focusedCarNum = focusedCar ? String(focusedCar.carNumber) : null;
+    const stintLaps = focusedCarNum
+      ? this.raceAnalyzer.getStintLaps(focusedCarNum, focusedCar?.lapsCompleted ?? 0) ?? undefined
+      : undefined;
+
+    return {
+      sessionType,
+      sessionFlags,
+      lapsRemain,
+      carCount,
+      contextTimestamp: new Date().toISOString(),
+      ...(timeRemain > 0 ? { timeRemainSec: Math.round(timeRemain) } : {}),
+      ...(state.leaderLap > 0 ? { leaderLap: state.leaderLap } : {}),
+      ...(totalLaps > 0 ? { totalLaps } : {}),
+      ...(state.trackName ? { trackName: state.trackName } : {}),
+      ...(focusedCar ? { focusedCarNumber: String(focusedCar.carNumber) } : {}),
+      ...(pitting.length > 0 ? { pitting } : {}),
+      ...(battles.length > 0 ? { battles } : {}),
+      ...(drivers ? { drivers } : {}),
+      ...(recentEvents.length > 0 ? { recentEvents } : {}),
+      ...(stintLaps !== undefined ? { stintLaps } : {}),
+    };
   }
 
   /**
@@ -157,10 +280,23 @@ export class DirectorOrchestrator extends EventEmitter {
       // Session selected or checked in
       this.currentRaceSessionId = selectedSession.raceSessionId;
 
+      // Bind the confirmed raceSessionId to the publisher so telemetry events
+      // are tagged correctly (fix for issue #109 — empty raceSessionId).
+      // Uses executeInternalDirective (not executeIntent) so this lifecycle
+      // call is never exposed as a broadcast capability to the RC AI planner.
+      if (sessionState === 'checked-in') {
+        this.extensionHost.executeInternalDirective('iracing.publisher.bindSession', {
+          raceSessionId: selectedSession.raceSessionId,
+        });
+      }
+
       if (this.mode === 'stopped') {
-        // Always transition to manual — agent must be started explicitly via the UI
-        console.log('[DirectorOrchestrator] Session selected. Transitioning: stopped → manual');
-        await this.setMode('manual');
+        // Session selected while stopped — auto-transition to manual or auto
+        // depending on the autoStartOnSessionSelect config.
+        const config = this.getConfig();
+        const targetMode = config.autoStartOnSessionSelect ? 'auto' : 'manual';
+        console.log(`[DirectorOrchestrator] Session selected — transitioning to ${targetMode}`);
+        await this.setMode(targetMode);
       } else {
         // Session state changed while already in manual/auto — update CloudPoller if needed
         if (sessionState === 'checked-in' && this.cloudPoller) {
@@ -180,6 +316,7 @@ export class DirectorOrchestrator extends EventEmitter {
         await this.setMode('stopped');
       }
       this.currentRaceSessionId = null;
+      this.raceAnalyzer.reset();
     }
   }
 
@@ -205,14 +342,11 @@ export class DirectorOrchestrator extends EventEmitter {
       return this.getState();
     }
 
-    // Auto mode requires an active check-in — agent cannot run without a session check-in
-    if (newMode === 'auto') {
-      const smState = this.sessionManager.getState();
-      if (!smState.checkinId || smState.checkinStatus !== 'standby') {
-        console.warn('[DirectorOrchestrator] Cannot start agent without an active session check-in');
-        this.lastError = 'Session not checked in';
-        return this.getState();
-      }
+    // Auto mode additionally requires an active check-in.
+    if (newMode === 'auto' && !this.sessionManager.getCheckinId()) {
+      console.warn('[DirectorOrchestrator] Cannot transition to auto without active check-in');
+      this.lastError = 'Session not checked in';
+      return this.getState();
     }
 
     // Stop CloudPoller if running (when leaving auto mode)
@@ -220,12 +354,6 @@ export class DirectorOrchestrator extends EventEmitter {
       console.log('[DirectorOrchestrator] Stopping CloudPoller');
       this.cloudPoller.stop();
       this.cloudPoller = null;
-      // Remove the single completion listener
-      if (this.cloudCompletionListener) {
-        this.scheduler.off('historyChanged', this.cloudCompletionListener);
-        this.cloudCompletionListener = null;
-      }
-      this.pendingCloudSequenceIds.clear();
     }
 
     // Update mode and session ID
@@ -283,26 +411,6 @@ export class DirectorOrchestrator extends EventEmitter {
       }
     );
 
-    // Wire a single completion listener on the scheduler.
-    // When a director-loop sequence completes, notify CloudPoller to fetch next.
-    this.pendingCloudSequenceIds.clear();
-    this.cloudCompletionListener = (history: any[]) => {
-      // Check each pending sequence ID against the history
-      for (const seqId of this.pendingCloudSequenceIds) {
-        const entry = history.find((r: any) => r.sequenceId === seqId);
-        if (entry) {
-          console.log(`[DirectorOrchestrator] Sequence ${seqId} completed with status: ${entry.status}`);
-          this.pendingCloudSequenceIds.delete(seqId);
-          if (this.cloudPoller) {
-            this.cloudPoller.onSequenceCompleted(seqId);
-          }
-          // Only notify for the most recent completion per historyChanged event
-          break;
-        }
-      }
-    };
-    this.scheduler.on('historyChanged', this.cloudCompletionListener);
-
     this.cloudPoller.start();
   }
 
@@ -342,14 +450,25 @@ export class DirectorOrchestrator extends EventEmitter {
   private async handleSequence(sequence: PortableSequence): Promise<void> {
     console.log(`[DirectorOrchestrator] Received sequence from cloud: ${sequence.id} (${sequence.steps.length} steps)`);
 
-    // Track this sequence ID so the single completion listener can notify CloudPoller
-    this.pendingCloudSequenceIds.add(sequence.id);
-
     // Enqueue in scheduler with director-loop source
     await this.scheduler.enqueue(sequence, {}, {
       source: 'director-loop',
       priority: sequence.priority,
     });
+
+    // Listen for completion to notify CloudPoller
+    // historyChanged emits the full history array, so find the matching entry
+    const completionListener = (history: any[]) => {
+      const entry = history.find((r: any) => r.sequenceId === sequence.id);
+      if (entry) {
+        console.log(`[DirectorOrchestrator] Sequence ${sequence.id} completed with status: ${entry.status}`);
+        if (this.cloudPoller && this.mode === 'auto') {
+          this.cloudPoller.onSequenceCompleted(sequence.id);
+        }
+        this.scheduler.off('historyChanged', completionListener);
+      }
+    };
+    this.scheduler.on('historyChanged', completionListener);
   }
 
   /**
@@ -400,23 +519,12 @@ export class DirectorOrchestrator extends EventEmitter {
   private listenForConnectionEvents(): void {
     if (!this.eventBus) return;
 
-    // Cache iRacing race state for race context reporting
-    this.eventBus.on('iracing.raceStateChanged', (data: { extensionId: string; payload: any }) => {
-      this.lastRaceState = data.payload;
-    });
-
-    // Cache OBS current scene for race context reporting
-    this.eventBus.on('obs.scenes', (data: { extensionId: string; payload: any }) => {
-      if (data.payload?.currentScene) {
-        this.lastObsScene = data.payload.currentScene;
-      }
-    });
-
     // Handle all connection state change events
     const connectionEvents = [
       'obs.connectionStateChanged',
       'iracing.connectionStateChanged',
       'youtube.status',
+      'extension.capabilitiesChanged',
     ];
 
     connectionEvents.forEach(eventName => {
@@ -432,19 +540,6 @@ export class DirectorOrchestrator extends EventEmitter {
           });
         }
       });
-    });
-
-    // Re-check-in when extensions are enabled/disabled (capabilities/intents change)
-    this.eventBus!.on('extension.capabilitiesChanged', async (data: { extensionId: string; payload: any }) => {
-      console.log(`[DirectorOrchestrator] Extension capabilities changed: ${data.extensionId} (enabled: ${data.payload?.enabled})`);
-
-      const smState = this.sessionManager.getState();
-      if (smState.checkinId && smState.checkinStatus === 'standby') {
-        console.log('[DirectorOrchestrator] Refreshing check-in due to extension capability change');
-        await this.sessionManager.refreshCheckin().catch(error => {
-          console.error('[DirectorOrchestrator] Capability refresh failed:', error);
-        });
-      }
     });
   }
 
@@ -494,155 +589,18 @@ export class DirectorOrchestrator extends EventEmitter {
    * sequence generation to only emit steps we can execute.
    * Always includes system.wait and system.log (built-in, always available).
    */
-  // iRacing session flag bit constants
-  private static readonly FLAG_CHECKERED = 0x0001;
-  private static readonly FLAG_WHITE     = 0x0002;
-  private static readonly FLAG_GREEN     = 0x0004;
-  private static readonly FLAG_YELLOW    = 0x0008;
-  private static readonly FLAG_RED       = 0x0010;
-  private static readonly FLAG_CAUTION   = 0x4000;
-
-  /**
-   * Build a live race context snapshot from cached extension events.
-   * Returns null if no iRacing telemetry is available.
-   */
-  private buildRaceContext(): RaceContext | null {
-    if (!this.eventBus) return null;
-
-    // Read latest cached events via the event bus listeners
-    // The event bus caches aren't directly accessible — we maintain our own snapshot
-    // by reading from the last emitted event data via a lightweight listener pattern.
-    // For now, read from the orchestrator's own cached state.
-    const raceState = this.lastRaceState;
-    if (!raceState) return null;
-
-    // Decode session flags bitfield to human-readable string
-    const flags = raceState.sessionFlags ?? 0;
-    let sessionFlagsStr = 'GREEN';
-    if (flags & DirectorOrchestrator.FLAG_RED)       sessionFlagsStr = 'RED';
-    else if (flags & DirectorOrchestrator.FLAG_YELLOW || flags & DirectorOrchestrator.FLAG_CAUTION)
-                                                      sessionFlagsStr = 'YELLOW';
-    else if (flags & DirectorOrchestrator.FLAG_CHECKERED) sessionFlagsStr = 'CHECKERED';
-    else if (flags & DirectorOrchestrator.FLAG_WHITE)     sessionFlagsStr = 'WHITE';
-
-    // Detect battles using track-type-aware thresholds (#77)
-    const cars = raceState.cars ?? [];
-    const battles = detectBattles(
-      cars,
-      raceState.trackType ?? '',
-      this.gapHistory,
-    );
-
-    // Find focused car number
-    const focusedCar = cars.find((c: any) => c.carIdx === raceState.focusedCarIdx);
-
-    // Pit road activity
-    const pitting = cars.filter((c: any) => c.onPitRoad).map((c: any) => c.carNumber);
-
-    return {
-      sessionType: raceState.sessionType ?? 'Race',
-      sessionFlags: sessionFlagsStr,
-      cautionType: raceState.cautionType ?? 'none',
-      lapsRemain: raceState.sessionLapsRemain ?? -1,
-      timeRemainSec: raceState.sessionTimeRemain != null ? Math.round(raceState.sessionTimeRemain) : -1,
-      leaderLap: raceState.leaderLap ?? 0,
-      totalLaps: raceState.totalSessionLaps ?? -1,
-      focusedCarNumber: focusedCar?.carNumber ?? '',
-      currentObsScene: this.lastObsScene ?? undefined,
-      battles,
-      pitting,
-      carCount: cars.length,
-      trackName: raceState.trackName ?? '',
-      trackType: raceState.trackType ?? '',
-      seriesName: raceState.seriesName ?? '',
-    };
-  }
-
   private getActiveIntents(): string[] {
     const builtIns = ['system.wait', 'system.log'];
     try {
       const catalog = this.extensionHost.getCapabilityCatalog();
       const allIntents = catalog.getAllIntents();
+      // #112: only include broadcast intents — exclude operational/query from sequence generation
       const activeExtIntents = allIntents
-        .filter(entry => entry.enabled)
+        .filter(entry => entry.enabled && (entry.intent.category ?? 'broadcast') === 'broadcast')
         .map(entry => entry.intent.intent);
       return [...builtIns, ...activeExtIntents];
     } catch {
       return builtIns;
     }
   }
-}
-
-// =============================================================================
-// Battle Detection — exported for testability (#77)
-// =============================================================================
-
-const GAP_HISTORY_SIZE = 5;
-
-/**
- * Detect battles between consecutive cars using track-type-aware thresholds.
- * Road courses use 1.5s (wider gaps); ovals use 1.0s (tighter gaps).
- * Also detects "developing battles" where the gap has been closing over
- * the last 3-5 samples, even if not yet within the active threshold.
- *
- * @param cars - Array of cars sorted by position with gapToCarAhead
- * @param trackType - Track type string from iRacing (e.g. 'road course', 'oval')
- * @param gapHistory - Mutable map tracking gap samples per pair for developing-battle detection
- */
-export function detectBattles(
-  cars: Array<{ carNumber: string; gapToCarAhead: number }>,
-  trackType: string,
-  gapHistory: Map<string, number[]>,
-): BattleInfo[] {
-  const isRoadCourse = trackType.toLowerCase().includes('road');
-  const battleThreshold = isRoadCourse ? 1.5 : 1.0;
-  const developingThreshold = battleThreshold * 2;
-
-  const battles: BattleInfo[] = [];
-  const seenPairs = new Set<string>();
-
-  for (let i = 1; i < cars.length; i++) {
-    const gap = cars[i].gapToCarAhead;
-    if (gap <= 0) continue;
-
-    const pairKey = `${cars[i - 1].carNumber}:${cars[i].carNumber}`;
-    seenPairs.add(pairKey);
-
-    // Record gap sample for developing-battle tracking
-    let history = gapHistory.get(pairKey);
-    if (!history) {
-      history = [];
-      gapHistory.set(pairKey, history);
-    }
-    history.push(gap);
-    if (history.length > GAP_HISTORY_SIZE) {
-      history.shift();
-    }
-
-    if (gap < battleThreshold) {
-      battles.push({
-        cars: [cars[i - 1].carNumber, cars[i].carNumber],
-        gapSec: Math.round(gap * 100) / 100,
-      });
-    } else if (gap < developingThreshold && history.length >= 3) {
-      // Developing battle — gap consistently closing over recent samples
-      const isClosing = history.every((g, idx) => idx === 0 || g <= history[idx - 1]);
-      if (isClosing && history[history.length - 1] < history[0]) {
-        battles.push({
-          cars: [cars[i - 1].carNumber, cars[i].carNumber],
-          gapSec: Math.round(gap * 100) / 100,
-          developing: true,
-        });
-      }
-    }
-  }
-
-  // Prune stale gap history entries for pairs no longer consecutive
-  for (const key of gapHistory.keys()) {
-    if (!seenPairs.has(key)) {
-      gapHistory.delete(key);
-    }
-  }
-
-  return battles;
 }

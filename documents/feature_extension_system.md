@@ -110,7 +110,7 @@ These are fundamentally different states:
 | `active = true` | Extension code is running in Extension Host | iRacing extension loaded at startup |
 | `connected = true` | External system is reachable and responding | iRacing simulator is running |
 
-Both OBS and iRacing renderer components originally used `active` as a proxy for "connected", resulting in false-positive green indicators. See `feature_iracing_integration.md` Lessons Learned for the full root-cause analysis.
+Both OBS and iRacing renderer components originally used `active` as a proxy for "connected", resulting in false-positive green indicators. See [feature_iracing_extension.md](feature_iracing_extension.md) for the corrected event-driven pattern.
 
 **Correct approach:** Extensions must emit a connection state event (e.g., `iracing.connectionStateChanged`) and the renderer must subscribe to that event. See § 2.7 for the canonical patterns.
 

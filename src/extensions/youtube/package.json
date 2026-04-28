@@ -4,12 +4,14 @@
   "main": "index.js",
   "displayName": "YouTube Chat & Integration",
   "description": "Provides YouTube Live Chat integration for communication and context.",
+  "aiContext": "The YouTube extension posts messages to the live stream chat.\n- communication.talkToChat: posts a message to the active YouTube Live Chat. Use for race updates, incident callouts, and viewer engagement during key moments.",
   "contributes": {
     "intents": [
       {
         "intent": "communication.talkToChat",
         "title": "Send Chat Message",
-        "description": "Sends a message to the active YouTube Live Chat.",
+        "category": "broadcast",
+        "description": "Sends a message to the active YouTube Live Chat. Use for race updates, incident callouts, and viewer engagement during key race moments.",
         "schema": {
           "type": "object",
           "properties": {
@@ -21,11 +23,13 @@
       {
         "intent": "youtube.startMonitor",
         "title": "Start Chat Monitoring",
+        "category": "operational",
         "description": "Begins polling YouTube API for chat messages."
       },
       {
         "intent": "youtube.stopMonitor",
         "title": "Stop Chat Monitoring",
+        "category": "operational",
         "description": "Stops polling YouTube API."
       }
     ],

@@ -1,7 +1,7 @@
 /**
  * cloud-poller.ts
  *
- * Event-driven sequence fetcher for the Director Loop.
+ * Extracted polling loop from DirectorService.
  * Responsible for:
  * - Fetching next sequence from Race Control API
  * - Handling response codes (200, 204, 410)
@@ -9,17 +9,11 @@
  * - Reporting active intents to Race Control
  * - Invoking callbacks for sequence arrival and session end
  *
- * Fetch-on-completion model (per OpenAPI spec):
- * - On start: makes a single initial fetch
- * - On 200 (sequence received): stops fetching, waits for onSequenceCompleted()
- * - On 204 (no sequence): schedules a single retry (Retry-After or idleRetryMs)
- * - On onSequenceCompleted(): immediately fetches the next sequence
- *
  * Does NOT execute sequences directly — delegates to SequenceScheduler via onSequence callback.
  */
 
 import { AuthService } from './auth-service';
-import { PortableSequence, RaceContext } from './director-types';
+import { PortableSequence, RaceContext, NextSequenceRequest } from './director-types';
 import { normalizeApiResponse } from './normalizer';
 import { apiConfig } from './auth-config';
 import { telemetryService } from './telemetry-service';
@@ -33,9 +27,16 @@ export interface CloudPollerOptions {
 
   /**
    * Function that returns the list of currently active intent handlers.
-   * Sent as the `intents` query parameter to constrain sequence generation.
+   * Sent in the POST body to constrain sequence generation.
    */
   getActiveIntents: () => string[];
+
+  /**
+   * Function that returns the current live race context from iRacing.
+   * Sent as raceContext in the POST body with every sequences/next request.
+   * If not provided, a minimal disconnected context is used.
+   */
+  getRaceContext?: () => RaceContext;
 
   /**
    * Callback invoked when a sequence is received from the API.
@@ -50,12 +51,6 @@ export interface CloudPollerOptions {
   onSessionEnded: () => void;
 
   /**
-   * Returns a live race context snapshot for the Tier-2 Executor model.
-   * Included as `raceContext` in the POST body to /sequences/next.
-   */
-  getRaceContext?: () => RaceContext | null;
-
-  /**
    * Optional check-in ID for the current session.
    */
   checkinId?: string;
@@ -65,15 +60,30 @@ export interface CloudPollerOptions {
    * Used to enforce minimum polling frequency (1/4 of TTL) to maintain heartbeat.
    */
   checkinTtlSeconds?: number;
+
+  /**
+   * How many ms before the estimated sequence end to fire the pre-fetch request.
+   * Only active when onSequenceStarted() is called with a known estimatedDurationMs.
+   * Default: 8000ms (8 seconds — accounts for RC two-tier AI latency).
+   */
+  prefetchLeadMs?: number;
+
+  /**
+   * Minimum time after sequence start before firing the pre-fetch.
+   * Prevents hammering RC immediately on very short sequences.
+   * Default: 2000ms.
+   */
+  minPrefetchMs?: number;
 }
 
 export class CloudPoller {
   private isRunning = false;
-  private pendingRetry: NodeJS.Timeout | null = null;
+  private loopInterval: NodeJS.Timeout | null = null;
+  private prefetchTimer: NodeJS.Timeout | null = null;
   private lastCompletedSequenceId: string | null = null;
-  private awaitingCompletion = false;
-  private retried401 = false;
   private readonly idleRetryMs: number;
+  private readonly prefetchLeadMs: number;
+  private readonly minPrefetchMs: number;
 
   constructor(
     private authService: AuthService,
@@ -81,39 +91,42 @@ export class CloudPoller {
     private options: CloudPollerOptions
   ) {
     this.idleRetryMs = options.idleRetryMs ?? 5000;
+    this.prefetchLeadMs = options.prefetchLeadMs ?? 8000;
+    this.minPrefetchMs = options.minPrefetchMs ?? 2000;
   }
 
   /**
-   * Start the fetcher. Makes a single initial request.
+   * Start the polling loop.
    */
   start(): void {
     if (this.isRunning) {
       console.warn('[CloudPoller] Already running');
       return;
     }
-    console.log(`[CloudPoller] Starting for session: ${this.raceSessionId}`);
+    console.log(`[CloudPoller] Starting polling for session: ${this.raceSessionId}`);
     this.isRunning = true;
-    this.awaitingCompletion = false;
-    this.fetchNext();
+    this.requestLoop();
   }
 
   /**
-   * Stop the fetcher and cancel any pending retry.
+   * Stop the polling loop.
    */
   stop(): void {
     if (!this.isRunning) return;
-    console.log('[CloudPoller] Stopping');
+    console.log('[CloudPoller] Stopping polling');
     this.isRunning = false;
-    this.awaitingCompletion = false;
-    this.retried401 = false;
-    if (this.pendingRetry) {
-      clearTimeout(this.pendingRetry);
-      this.pendingRetry = null;
+    if (this.loopInterval) {
+      clearTimeout(this.loopInterval);
+      this.loopInterval = null;
+    }
+    if (this.prefetchTimer) {
+      clearTimeout(this.prefetchTimer);
+      this.prefetchTimer = null;
     }
   }
 
   /**
-   * Check if the fetcher is currently running.
+   * Check if the poller is currently running.
    */
   isPolling(): boolean {
     return this.isRunning;
@@ -136,27 +149,54 @@ export class CloudPoller {
   }
 
   /**
-   * Notify the fetcher that a sequence has completed execution.
-   * This is the primary trigger for fetching the next sequence.
-   * Only fetches if we are actually waiting for a completion signal.
+   * Notify the poller that a sequence has completed execution.
+   * Updates lastCompletedSequenceId so it's sent with the next request.
+   * Triggers immediate retry (no delay) since execution consumed the time.
    */
   onSequenceCompleted(sequenceId: string): void {
     this.lastCompletedSequenceId = sequenceId;
-    if (!this.isRunning) return;
+    // Trigger immediate retry — execution itself consumed the time (10-60s typically)
+    if (this.isRunning) {
+      if (this.loopInterval) {
+        clearTimeout(this.loopInterval);
+      }
+      this.loopInterval = setTimeout(() => this.requestLoop(), 0);
+    }
+  }
 
-    if (!this.awaitingCompletion) {
-      console.warn(`[CloudPoller] onSequenceCompleted('${sequenceId}') called but not awaiting completion — ignoring`);
-      return;
+  /**
+   * Notify the poller that a new sequence has started executing.
+   * If estimatedDurationMs is known, schedules a pre-fetch so the next sequence
+   * is ready in the queue the moment the current one finishes.
+   *
+   * Pre-fetch fires at: max(estimatedDurationMs - prefetchLeadMs, minPrefetchMs)
+   *
+   * On 200: the sequence is enqueued immediately — zero gap on completion.
+   * On 204: silent no-op — onSequenceCompleted drives the next request normally.
+   * On error: logged and discarded — normal completion path still works.
+   */
+  onSequenceStarted(sequenceId: string, estimatedDurationMs?: number): void {
+    // Clear any previously scheduled prefetch
+    if (this.prefetchTimer) {
+      clearTimeout(this.prefetchTimer);
+      this.prefetchTimer = null;
     }
 
-    console.log(`[CloudPoller] Sequence '${sequenceId}' completed — fetching next`);
-    this.awaitingCompletion = false;
-    // Cancel any pending retry (e.g. heartbeat) before fetching
-    if (this.pendingRetry) {
-      clearTimeout(this.pendingRetry);
-      this.pendingRetry = null;
+    if (!estimatedDurationMs || estimatedDurationMs <= 0 || !this.isRunning) {
+      return; // No timing hint — rely on onSequenceCompleted
     }
-    this.fetchNext();
+
+    const fireAt = Math.max(estimatedDurationMs - this.prefetchLeadMs, this.minPrefetchMs);
+    console.log(
+      `[CloudPoller] Pre-fetch scheduled in ${fireAt}ms` +
+      ` (estimated: ${estimatedDurationMs}ms, lead: ${this.prefetchLeadMs}ms, seq: ${sequenceId})`
+    );
+
+    this.prefetchTimer = setTimeout(async () => {
+      this.prefetchTimer = null;
+      if (!this.isRunning) return;
+      await this.firePrefetch();
+    }, fireAt);
   }
 
   // ---------------------------------------------------------------------------
@@ -164,45 +204,39 @@ export class CloudPoller {
   // ---------------------------------------------------------------------------
 
   /**
-   * Single fetch attempt. Handles the response and decides what to do next:
-   * - 200: deliver sequence, enter awaitingCompletion state (no more fetching)
-   * - 204: schedule a single retry after Retry-After or idleRetryMs
-   * - 410: stop (session ended)
-   * - error/other: schedule a retry after idleRetryMs
+   * One-shot pre-fetch fired during sequence execution to warm up the queue.
+   * Calls fetchNextSequence() and discards the scheduling delay — this does NOT
+   * drive the main polling loop. The main loop resumes via onSequenceCompleted().
    */
-  private async fetchNext(): Promise<void> {
+  private async firePrefetch(): Promise<void> {
+    console.log('[CloudPoller] Firing pre-fetch for next sequence');
+    // fetchNextSequence() calls onSequence() on 200, which enqueues the next sequence.
+    // The returned delay is intentionally ignored — loop scheduling is handled separately.
+    await this.fetchNextSequence();
+  }
+
+  /**
+   * Main polling loop.
+   * Fetches next sequence and schedules the next iteration based on response.
+   */
+  private async requestLoop(): Promise<void> {
     if (!this.isRunning) return;
 
     const delayMs = await this.fetchNextSequence();
 
-    // If we received a sequence (awaitingCompletion=true), don't schedule any retry.
-    // The next fetch will be triggered by onSequenceCompleted().
-    if (this.awaitingCompletion || !this.isRunning) return;
+    // Schedule next iteration if still running
+    if (this.isRunning) {
+      let interval = delayMs;
 
-    // Schedule a single retry for 204/error cases
-    this.scheduleRetry(delayMs);
-  }
+      // Heartbeat floor rate contract: poll at min(interval, checkinTtlSeconds / 4)
+      // to prevent check-in TTL from lapsing during long Retry-After intervals.
+      if (this.options.checkinId && this.options.checkinTtlSeconds) {
+        const maxIntervalMs = (this.options.checkinTtlSeconds * 1000) / 4;
+        interval = Math.min(interval, maxIntervalMs);
+      }
 
-  /**
-   * Schedule a single retry fetch after the given delay.
-   * Respects the heartbeat floor rate for check-in TTL.
-   */
-  private scheduleRetry(delayMs: number): void {
-    if (!this.isRunning) return;
-
-    let interval = delayMs;
-
-    // Heartbeat floor rate contract: retry at min(interval, checkinTtlSeconds / 4)
-    // to prevent check-in TTL from lapsing during long Retry-After intervals.
-    if (this.options.checkinId && this.options.checkinTtlSeconds) {
-      const maxIntervalMs = (this.options.checkinTtlSeconds * 1000) / 4;
-      interval = Math.min(interval, maxIntervalMs);
+      this.loopInterval = setTimeout(() => this.requestLoop(), interval);
     }
-
-    this.pendingRetry = setTimeout(() => {
-      this.pendingRetry = null;
-      this.fetchNext();
-    }, interval);
   }
 
   /**
@@ -223,28 +257,35 @@ export class CloudPoller {
     }
 
     try {
-      // Build POST body per RFC #203 — race context is the primary input
-      // to the Tier-2 Executor model's decision.
-      const body: Record<string, unknown> = {};
-
-      if (this.lastCompletedSequenceId) {
-        body.lastSequenceId = this.lastCompletedSequenceId;
+      // checkinId goes as query param fallback in case SWA strips custom headers
+      const params = new URLSearchParams();
+      if (this.options.checkinId) {
+        params.set('checkinId', this.options.checkinId);
       }
 
+      const baseUrl = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.raceSessionId)}`;
+      const url = params.toString() ? `${baseUrl}?${params}` : baseUrl;
+
+      // Build POST body per updated OpenAPI spec (POST /sequences/next with raceContext)
       const activeIntents = this.options.getActiveIntents();
-      if (activeIntents.length > 0) {
-        body.intents = activeIntents;
-      }
+      const raceContext: RaceContext = this.options.getRaceContext
+        ? this.options.getRaceContext()
+        : {
+            sessionType: 'Race',
+            sessionFlags: 'disconnected',
+            lapsRemain: -1,
+            carCount: 0,
+            contextTimestamp: new Date().toISOString(),
+          };
 
-      if (this.options.getRaceContext) {
-        const ctx = this.options.getRaceContext();
-        if (ctx) {
-          body.raceContext = ctx;
-        }
-      }
+      const requestBody: NextSequenceRequest = {
+        raceContext,
+        ...(activeIntents.length > 0 ? { intents: activeIntents } : {}),
+        ...(this.lastCompletedSequenceId ? { lastSequenceId: this.lastCompletedSequenceId } : {}),
+      };
 
-      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.nextSequence(this.raceSessionId)}`;
-      console.log('[CloudPoller] Requesting next sequence from:', url);
+      console.log('[CloudPoller] POST next sequence for session:', this.raceSessionId,
+        `(sessionType=${raceContext.sessionType}, flags=${raceContext.sessionFlags}, cars=${raceContext.carCount})`);
 
       const headers: Record<string, string> = {
         'Authorization': `Bearer ${token}`,
@@ -257,7 +298,7 @@ export class CloudPoller {
       const response = await fetch(url, {
         method: 'POST',
         headers,
-        body: JSON.stringify(body),
+        body: JSON.stringify(requestBody),
       });
 
       const duration = Date.now() - startTime;
@@ -293,74 +334,44 @@ export class CloudPoller {
         return this.idleRetryMs;
       }
 
-      // Handle 401 Unauthorized — could be expired OAuth token OR invalid check-in.
-      // The API returns 401 for both cases when enforcement mode is active.
-      // Log the response body to distinguish, then try refreshing the token once.
-      if (response.status === 401 && !this.retried401) {
-        const body = await response.text().catch(() => '');
-        console.warn(`[CloudPoller] 401 Unauthorized — ${body || 'no response body'}`);
-        console.warn(`[CloudPoller] checkinId=${this.options.checkinId ?? 'none'}`);
-        this.retried401 = true;
-        telemetryService.trackDependency(
-          'RaceControl API', url, duration, false, 401, 'HTTP',
-          { sessionId: this.raceSessionId, action: 'token-refresh', body }
-        );
-        const freshToken = await this.authService.getAccessToken(true);
-        if (freshToken) {
-          return 0; // Retry immediately with the refreshed token
-        }
-        console.error('[CloudPoller] Token refresh failed — cannot recover');
-        return this.idleRetryMs;
-      }
-
       // Handle non-2xx responses
       if (!response.ok) {
-        const body = await response.text().catch(() => '');
-        console.error(`[CloudPoller] Failed to fetch next sequence: ${response.status} ${response.statusText}${body ? ` — ${body}` : ''}`);
+        console.error(`[CloudPoller] Failed to fetch next sequence: ${response.status} ${response.statusText}`);
         telemetryService.trackDependency(
           'RaceControl API', url, duration, false, response.status, 'HTTP',
-          { sessionId: this.raceSessionId, body }
+          { sessionId: this.raceSessionId }
         );
         return this.idleRetryMs;
       }
-
-      // Successful request — reset 401 retry flag
-      this.retried401 = false;
 
       // Handle 200 OK — sequence received
       const sequenceData: any = await response.json();
-      console.log('[CloudPoller] Received sequence:', JSON.stringify(sequenceData, null, 2));
-
-      // Phase 7: Extract execution path metadata for observability (#76)
-      const executionPath = sequenceData.metadata?.executionPath as string | undefined;
+      const executionPath: string = sequenceData.metadata?.executionPath ?? 'unknown';
+      console.log(`[CloudPoller] Received sequence: ${sequenceData.id} (executionPath=${executionPath})`);
 
       telemetryService.trackDependency(
         'RaceControl API', url, duration, true, response.status, 'HTTP',
-        { sessionId: this.raceSessionId, ...(executionPath && { executionPath }) }
+        { sessionId: this.raceSessionId }
       );
 
       // Normalize API response — validates PortableSequence format (steps/intent)
       const portable = normalizeApiResponse(sequenceData);
-
-      if (executionPath) {
-        console.log(`[CloudPoller] Sequence '${portable.id}' executionPath: ${executionPath} (${duration}ms)`);
-      }
-      console.log(`[CloudPoller] Sequence ${portable.id} received via pipeline: ${executionPath ?? 'unknown'}`);
 
       telemetryService.trackEvent('Sequence.Received', {
         sequenceId: portable.id,
         sessionId: this.raceSessionId,
         stepCount: portable.steps.length.toString(),
         priority: String(portable.priority || false),
-        executionPath: typeof executionPath === 'string' ? executionPath : 'unknown',
+        executionPath,
       });
 
       // Invoke callback to enqueue the sequence in SequenceScheduler
       this.options.onSequence(portable);
 
-      // Enter awaiting-completion state: no more fetching until onSequenceCompleted()
-      this.awaitingCompletion = true;
-      return 0; // Not used — fetchNext() checks awaitingCompletion and skips scheduling
+      // Don't request next sequence immediately — wait for execution completion callback
+      // (onSequenceCompleted will trigger immediate retry)
+      // Return a large delay that will be cleared by onSequenceCompleted
+      return 3600000; // 1 hour (effectively infinite, will be cleared)
 
     } catch (error) {
       console.error('[CloudPoller] Error fetching sequence:', error);

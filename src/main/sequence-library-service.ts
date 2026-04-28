@@ -322,7 +322,10 @@ export class SequenceLibraryService {
         return 'pending';
       }
 
-      const url = `${apiConfig.baseUrl}${apiConfig.endpoints.listTemplates(this.activeSessionId)}`;
+      const templatePath = apiConfig.endpoints.listTemplates(this.activeSessionId);
+      const url = this.activeCheckinId
+        ? `${apiConfig.baseUrl}${templatePath}?checkinId=${encodeURIComponent(this.activeCheckinId)}`
+        : `${apiConfig.baseUrl}${templatePath}`;
       console.log(`[SequenceLibrary] Fetching session templates from: ${url}`);
       const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },

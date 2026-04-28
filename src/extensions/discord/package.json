@@ -4,12 +4,14 @@
   "main": "index.js",
   "displayName": "Discord Integration",
   "description": "Provides Discord features including text-to-speech announcements.",
+  "aiContext": "The Discord extension announces messages via text-to-speech in the race team voice channel.\n- communication.announce: sends a TTS announcement to the configured Discord voice channel. Keep messages concise (under 20 words). Use for race calls, safety car, checkered flag announcements, and driver spotlights.",
   "contributes": {
     "intents": [
       {
         "intent": "communication.announce",
         "title": "Announce Message",
-        "description": "Announces a message via Discord TTS.",
+        "category": "broadcast",
+        "description": "Announces a message via Discord TTS in the configured voice channel. Keep messages under 20 words. Use for race calls, safety car, and driver spotlights.",
         "schema": {
           "type": "object",
           "properties": {

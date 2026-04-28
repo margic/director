@@ -77,7 +77,8 @@ const schema = {
       }
     },
     default: {}
-  }
+  },
+  app: {}
 } as const;
 
 class ConfigService {
