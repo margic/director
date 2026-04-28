@@ -158,17 +158,27 @@ app.on('ready', () => {
 
     const scenes: string[] = obsPayload?.scenes ?? [];
 
-    return {
-      intents: allIntents.map(entry => ({
+    // #112: only include broadcast intents in capabilities — exclude operational/query
+    const broadcastIntents = allIntents
+      .filter(entry => (entry.intent.category ?? 'broadcast') === 'broadcast')
+      .map(entry => ({
         intent: entry.intent.intent,
         extensionId: entry.extensionId,
         active: entry.enabled,
         schema: entry.intent.schema as Record<string, unknown> | undefined,
-      })),
+        description: entry.intent.description,
+      }));
+
+    // #113: collect per-extension aiContext prose for the Planner
+    const extensionContexts = catalog.getExtensionAiContexts();
+
+    return {
+      intents: broadcastIntents,
       connections,
       ...(cameraGroups.length > 0 && { cameraGroups }),
       ...(scenes.length > 0 && { scenes }),
       ...(drivers.length > 0 && { drivers }),
+      ...(extensionContexts.length > 0 && { extensionContexts }),
     };
   });
   sessionManager.setLocalSequencesGetter(async () => {

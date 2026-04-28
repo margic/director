@@ -575,8 +575,9 @@ export class DirectorOrchestrator extends EventEmitter {
     try {
       const catalog = this.extensionHost.getCapabilityCatalog();
       const allIntents = catalog.getAllIntents();
+      // #112: only include broadcast intents — exclude operational/query from sequence generation
       const activeExtIntents = allIntents
-        .filter(entry => entry.enabled)
+        .filter(entry => entry.enabled && (entry.intent.category ?? 'broadcast') === 'broadcast')
         .map(entry => entry.intent.intent);
       return [...builtIns, ...activeExtIntents];
     } catch {

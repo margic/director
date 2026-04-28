@@ -4,12 +4,14 @@
   "main": "index.js",
   "displayName": "iRacing Broadcast Controller",
   "description": "Controls iRacing Cameras and Replay state via Broadcast Messages.",
+  "aiContext": "The iRacing extension controls Race Director cameras and instant replay playback.\n- broadcast.showLiveCam: switches the broadcast camera to follow a specific car. carNum is the car number string (e.g. \"64\"). camGroup is the numeric iRacing camera group ID from the CAMERA GROUPS list (TV1=11, TV2=12, Chase=20, Blimp=18, PitLane=16). Best combined with obs.switchScene to the Race Director OBS scene first.\n- broadcast.replayFromTo: plays an instant replay segment between startFrame and endFrame iRacing replay frame numbers. Use for post-incident reviews only — never use during live racing sequences.\n- broadcast.setReplaySpeed: sets replay playback multiplier (e.g. 0.5 = half speed, 2 = double speed). Always follow with a system.wait step.\n- broadcast.setReplayPosition: jumps to a specific replay frame number.\n- broadcast.setReplayState: sets replay mode. state values: 0 = play, 1 = pause. Use to freeze on a key moment.",
   "contributes": {
     "intents": [
       {
         "intent": "broadcast.showLiveCam",
         "title": "Show Live Camera",
-        "description": "Switches the live camera to valid car/group.",
+        "category": "broadcast",
+        "description": "Switches the iRacing broadcast camera to follow a specific car. carNum is the car number string (e.g. '64'). camGroup is the numeric iRacing camera group ID from the CAMERA GROUPS list (TV1=11, TV2=12, Chase=20, Blimp=18, PitLane=16). Best combined with obs.switchScene to the Race Director OBS scene first.",
         "schema": {
           "type": "object",
           "properties": {
@@ -23,7 +25,8 @@
       {
         "intent": "broadcast.replayFromTo",
         "title": "Play Replay Segment",
-        "description": "Plays a replay segment from frame A to B.",
+        "category": "broadcast",
+        "description": "Plays an instant replay segment between startFrame and endFrame iRacing replay frame numbers. Use for post-incident reviews only — never during live racing sequences. speed is optional playback multiplier (default 1).",
         "schema": {
           "type": "object",
           "properties": {
@@ -37,7 +40,8 @@
       {
         "intent": "broadcast.setReplaySpeed",
         "title": "Set Replay Speed",
-        "description": "Sets the replay playback speed.",
+        "category": "broadcast",
+        "description": "Sets replay playback multiplier. speed: 0.5 = half speed, 1 = normal, 2 = double speed. Always follow with a system.wait step.",
         "schema": {
           "type": "object",
           "properties": {
@@ -49,7 +53,8 @@
       {
         "intent": "broadcast.setReplayPosition",
         "title": "Set Replay Position",
-        "description": "Jumps to a specific replay frame.",
+        "category": "broadcast",
+        "description": "Jumps to a specific iRacing replay frame number.",
         "schema": {
           "type": "object",
           "properties": {
@@ -61,7 +66,8 @@
       {
         "intent": "broadcast.setReplayState",
         "title": "Set Replay State",
-        "description": "Sets the iRacing replay state.",
+        "category": "broadcast",
+        "description": "Sets the iRacing replay mode. state: 0 = play, 1 = pause. Use to freeze on a key frame during an instant replay sequence.",
         "schema": {
           "type": "object",
           "properties": {
@@ -73,6 +79,7 @@
       {
         "intent": "iracing.publisher.setEnabled",
         "title": "Set Publisher Enabled",
+        "category": "operational",
         "description": "Hot-toggles the telemetry publisher on or off without restarting the app.",
         "schema": {
           "type": "object",

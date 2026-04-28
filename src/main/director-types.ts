@@ -248,6 +248,8 @@ export interface IntentCapability {
   extensionId: string;
   active: boolean;
   schema?: Record<string, unknown>;
+  /** Human-readable description passed verbatim to the Planner LLM (issue #112). */
+  description?: string;
 }
 
 /** iRacing camera group — maps a human-readable name to its numeric SDK ID. */
@@ -272,6 +274,12 @@ export interface DirectorCapabilities {
   scenes?: string[];
   /** Drivers in the current simulator session at check-in time. */
   drivers?: CapabilityDriver[];
+  /**
+   * Per-extension AI context prose blocks (issue #113).
+   * Race Control injects these verbatim into the Planner prompt
+   * under a dedicated EXTENSION CONTEXT section.
+   */
+  extensionContexts?: Array<{ extensionId: string; aiContext: string }>;
 }
 
 export interface SessionCheckinRequest {

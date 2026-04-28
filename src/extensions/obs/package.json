@@ -4,12 +4,14 @@
   "main": "index.js",
   "displayName": "OBS Studio Integration",
   "description": "Provides OBS Studio scene switching and status monitoring.",
+  "aiContext": "The OBS extension switches the active OBS Studio video scene.\n- obs.switchScene: changes the active scene. sceneName must exactly match one of the valid scene names listed in ALL VALID OBS SCENES — never invent scene names. Always follow with a system.wait step of at least 1000ms to allow the scene to render before the next action.",
   "contributes": {
     "intents": [
       {
         "intent": "obs.switchScene",
         "title": "Switch OBS Scene",
-        "description": "Changes the active OBS scene.",
+        "category": "broadcast",
+        "description": "Changes the active OBS Studio scene. sceneName must exactly match a scene name from ALL VALID OBS SCENES. Always follow with a system.wait step of at least 1000ms.",
         "schema": {
           "type": "object",
           "properties": {
@@ -23,6 +25,7 @@
       {
         "intent": "obs.getScenes",
         "title": "Get Available Scenes",
+        "category": "query",
         "description": "Emits the list of available OBS scenes."
       }
     ],

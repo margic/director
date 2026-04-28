@@ -29,6 +29,8 @@ export interface EventCatalogEntry {
 export class CapabilityCatalog {
   private intents: Map<string, CatalogEntry> = new Map();
   private events: Map<string, EventCatalogEntry> = new Map();
+  /** Per-extension aiContext prose blocks (issue #113). */
+  private aiContexts: Map<string, string> = new Map();
 
   /**
    * Registers all intents and events from an extension manifest.
@@ -36,6 +38,10 @@ export class CapabilityCatalog {
    */
   public registerExtension(extensionId: string, manifest: ExtensionManifest, enabled: boolean): void {
     const displayName = (manifest as any).displayName || manifest.name;
+
+    if (manifest.aiContext) {
+      this.aiContexts.set(extensionId, manifest.aiContext);
+    }
 
     if (manifest.contributes?.intents) {
       for (const intent of manifest.contributes.intents) {
@@ -75,6 +81,7 @@ export class CapabilityCatalog {
         this.events.delete(key);
       }
     }
+    this.aiContexts.delete(extensionId);
   }
 
   /**
@@ -108,6 +115,15 @@ export class CapabilityCatalog {
    */
   public getAllEvents(): EventCatalogEntry[] {
     return Array.from(this.events.values());
+  }
+
+  /**
+   * Returns per-extension aiContext prose blocks for inclusion in the
+   * capabilities payload (issue #113). Only returns contexts for extensions
+   * that are currently registered.
+   */
+  public getExtensionAiContexts(): Array<{ extensionId: string; aiContext: string }> {
+    return Array.from(this.aiContexts.entries()).map(([extensionId, aiContext]) => ({ extensionId, aiContext }));
   }
 
   /**
