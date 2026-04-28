@@ -344,6 +344,7 @@ export interface SessionWrapRequest {
 export interface SequenceTemplate {
   id: string;
   raceSessionId: string;
+  checkinId?: string;
   name: string;
   description?: string;
   applicability: string;
