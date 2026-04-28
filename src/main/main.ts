@@ -193,8 +193,8 @@ app.on('ready', () => {
       // sequence:library-updated to the renderer when templates land.
       const sessionIdForRetry = state.selectedSession.raceSessionId;
       let retryCount = 0;
-      const MAX_RETRIES = 12; // 12 × 10s = 2 minutes
-      const RETRY_INTERVAL_MS = 10_000;
+      const MAX_RETRIES = 20; // 20 × 15s = 5 minutes
+      const RETRY_INTERVAL_MS = 15_000;
 
       const tryLoadTemplates = () => {
         sequenceLibrary.loadCloud().then((result) => {

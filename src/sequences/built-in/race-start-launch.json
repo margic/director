@@ -1,0 +1,32 @@
+{
+  "id": "seq_race_start_launch",
+  "name": "Race Start Launch",
+  "version": "1.0.0",
+  "description": "Captures the launch sequence. Starts wide, cuts to onboard for the launch, moves to chase cam to show position changes.",
+  "category": "builtin",
+  "priority": false,
+  "variables": [
+    { "name": "targetDriver", "label": "Driver Car Number", "type": "text", "required": true, "source": "cloud" },
+    { "name": "durationMs", "label": "Wait Duration", "type": "number", "required": true, "source": "cloud" },
+    { "name": "ttsMessage", "label": "Start Announcement", "type": "text", "required": true, "source": "cloud" }
+  ],
+  "steps": [
+    { "id": "step_1", "intent": "communication.announce", "payload": { "message": "${ttsMessage}" } },
+    { "id": "step_2", "intent": "obs.switchScene", "payload": { "sceneName": "Director Solo" } },
+    { "id": "step_3", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "11" } },
+    { "id": "step_4", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 5000, "maxMs": 8000, "paceModifier": "compress-on-action" }, "narrativePurpose": "establish" } },
+    { "id": "step_5", "intent": "obs.switchScene", "payload": { "sceneName": "Rig 1 Solo" } },
+    { "id": "step_6", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 6000, "maxMs": 10000, "paceModifier": "compress-on-action" }, "narrativePurpose": "build" } },
+    { "id": "step_7", "intent": "obs.switchScene", "payload": { "sceneName": "Director Solo" } },
+    { "id": "step_8", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "20" } },
+    { "id": "step_9", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 8000, "maxMs": 12000 }, "narrativePurpose": "action" } },
+    { "id": "step_10", "intent": "obs.switchScene", "payload": { "sceneName": "Rig 1 Solo" } },
+    { "id": "step_11", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 6000, "maxMs": 10000 }, "narrativePurpose": "resolve" } }
+  ],
+  "metadata": {
+    "source": "ai-planner",
+    "applicability": "Crucial template for the race start. Focuses on our driver's getaway off the line.",
+    "racePhase": "opening",
+    "durationRange": { "min": 30000, "max": 50000 }
+  }
+}
