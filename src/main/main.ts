@@ -187,6 +187,9 @@ app.on('ready', () => {
     return [...builtin, ...custom].slice(0, 50);
   });
 
+  // Wire race context getter — includes simulator snapshot in checkin body (issue #114)
+  sessionManager.setRaceContextGetter(() => directorOrchestrator.getRaceContext());
+
   // Wire session lifecycle to sequence library — load cloud templates when session is available
   // Templates are generated server-side after check-in, but we attempt to load them early
   // in case a previous check-in already triggered the Planner.

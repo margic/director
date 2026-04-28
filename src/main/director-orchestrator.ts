@@ -158,6 +158,15 @@ export class DirectorOrchestrator extends EventEmitter {
   }
 
   /**
+   * Returns the current race context snapshot for external consumers (e.g. SessionManager checkin).
+   * Returns null if iRacing has never connected and no state is available.
+   */
+  public getRaceContext(): RaceContext | null {
+    if (!this.lastIRacingState) return null;
+    return this.buildRaceContext();
+  }
+
+  /**
    * Build a RaceContext snapshot from the last known iRacing state.
    * Used as the required body for POST .../sequences/next.
    */

@@ -288,6 +288,8 @@ export interface SessionCheckinRequest {
   capabilities: DirectorCapabilities;
   /** Optional: local sequence library for Planner training (max 50, 100KB) */
   sequences?: PortableSequence[];
+  /** Optional: live simulator snapshot at check-in time (issue #114). Enables Planner phase-weighting. */
+  raceContext?: RaceContext;
 }
 
 export interface SessionCheckinResponse {
