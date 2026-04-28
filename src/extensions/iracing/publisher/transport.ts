@@ -157,6 +157,15 @@ export class PublisherTransport {
   }
 
   /**
+   * Discard all events currently waiting in the queue without sending them.
+   * Called when the session is rebound so that pre-rebind events (which carry
+   * the old raceSessionId) are not forwarded under the new session.
+   */
+  clearQueue(): void {
+    this.queue = [];
+  }
+
+  /**
    * Flush up to MAX_BATCH_SIZE events from the front of the queue.
    * Re-entrant-safe — concurrent calls are dropped while one is in flight.
    * Respects the retry backoff — skips silently while in backoff.

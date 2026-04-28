@@ -76,7 +76,7 @@ export interface PublisherOrchestratorConfig {
 
 const DEFAULT_RC_BASE_URL = 'https://simracecenter.com';
 const DEFAULT_BATCH_INTERVAL_MS = 2000;
-const HEARTBEAT_INTERVAL_MS = 30_000;
+const HEARTBEAT_INTERVAL_MS = 1_000;
 
 export class PublisherOrchestrator {
   private transport: PublisherTransport | null = null;
@@ -301,6 +301,9 @@ export class PublisherOrchestrator {
   setRaceSessionId(raceSessionId: string): void {
     if (this.raceSessionId === raceSessionId) return;
     this.raceSessionId = raceSessionId;
+    // Discard any pending events from the previous session — they carry the
+    // old raceSessionId and would be rejected or mis-attributed by the server.
+    this.transport?.clearQueue();
     this.cfg.director.log(
       'info',
       `Publisher session bound to raceSessionId=${raceSessionId}`,

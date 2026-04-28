@@ -291,10 +291,12 @@ export class DirectorOrchestrator extends EventEmitter {
       }
 
       if (this.mode === 'stopped') {
-        // Session selected while stopped — record the session but do NOT auto-start.
-        // The human director must explicitly start the agent when ready.
-        console.log(`[DirectorOrchestrator] Session selected (mode stays stopped until manually started)`);
-        this.emitStateChanged();
+        // Session selected while stopped — auto-transition to manual or auto
+        // depending on the autoStartOnSessionSelect config.
+        const config = this.getConfig();
+        const targetMode = config.autoStartOnSessionSelect ? 'auto' : 'manual';
+        console.log(`[DirectorOrchestrator] Session selected — transitioning to ${targetMode}`);
+        await this.setMode(targetMode);
       } else {
         // Session state changed while already in manual/auto — update CloudPoller if needed
         if (sessionState === 'checked-in' && this.cloudPoller) {
@@ -337,6 +339,13 @@ export class DirectorOrchestrator extends EventEmitter {
     if (newMode !== 'stopped' && !selectedSession) {
       console.warn('[DirectorOrchestrator] Cannot transition to manual/auto without selected session');
       this.lastError = 'No session selected';
+      return this.getState();
+    }
+
+    // Auto mode additionally requires an active check-in.
+    if (newMode === 'auto' && !this.sessionManager.getCheckinId()) {
+      console.warn('[DirectorOrchestrator] Cannot transition to auto without active check-in');
+      this.lastError = 'Session not checked in';
       return this.getState();
     }
 
@@ -515,6 +524,7 @@ export class DirectorOrchestrator extends EventEmitter {
       'obs.connectionStateChanged',
       'iracing.connectionStateChanged',
       'youtube.status',
+      'extension.capabilitiesChanged',
     ];
 
     connectionEvents.forEach(eventName => {

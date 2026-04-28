@@ -346,7 +346,8 @@ export class CloudPoller {
 
       // Handle 200 OK — sequence received
       const sequenceData: any = await response.json();
-      console.log('[CloudPoller] Received sequence:', JSON.stringify(sequenceData, null, 2));
+      const executionPath: string = sequenceData.metadata?.executionPath ?? 'unknown';
+      console.log(`[CloudPoller] Received sequence: ${sequenceData.id} (executionPath=${executionPath})`);
 
       telemetryService.trackDependency(
         'RaceControl API', url, duration, true, response.status, 'HTTP',
@@ -361,6 +362,7 @@ export class CloudPoller {
         sessionId: this.raceSessionId,
         stepCount: portable.steps.length.toString(),
         priority: String(portable.priority || false),
+        executionPath,
       });
 
       // Invoke callback to enqueue the sequence in SequenceScheduler

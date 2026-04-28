@@ -328,39 +328,35 @@ export function detectOvertakeAndBattle(
       // The car ahead is a lapped car — chaser is catching lapped traffic.
       if (existing !== 'LAPPED_AHEAD') {
         const car       = carRefFromRoster(state, i);
-        const targetRef = state.knownRoster.get(leaderIdx);
-        if (car && targetRef) {
-          events.push(buildEvent(
-            'LAPPED_TRAFFIC_AHEAD',
-            car,
-            {
-              targetCarIdx:    leaderIdx,
-              targetCarNumber: targetRef.carNumber,
-              distanceMeters:  approxDistanceMeters,
-            },
-            opts,
-          ));
-          state.trafficAnnouncements.set(pairKey, 'LAPPED_AHEAD');
-        }
+        const targetRef = state.knownRoster.get(leaderIdx) ?? { carNumber: '' };
+        events.push(buildEvent(
+          'LAPPED_TRAFFIC_AHEAD',
+          car,
+          {
+            targetCarIdx:    leaderIdx,
+            targetCarNumber: targetRef.carNumber,
+            distanceMeters:  approxDistanceMeters,
+          },
+          opts,
+        ));
+        state.trafficAnnouncements.set(pairKey, 'LAPPED_AHEAD');
       }
     } else if (leaderLap > chaserLap) {
       // The car ahead has MORE laps — chaser is about to be lapped.
       if (existing !== 'BEING_LAPPED') {
         const car       = carRefFromRoster(state, i);
-        const targetRef = state.knownRoster.get(leaderIdx);
-        if (car && targetRef) {
-          events.push(buildEvent(
-            'BEING_LAPPED',
-            car,
-            {
-              targetCarIdx:    leaderIdx,
-              targetCarNumber: targetRef.carNumber,
-              distanceMeters:  approxDistanceMeters,
-            },
-            opts,
-          ));
-          state.trafficAnnouncements.set(pairKey, 'BEING_LAPPED');
-        }
+        const targetRef = state.knownRoster.get(leaderIdx) ?? { carNumber: '' };
+        events.push(buildEvent(
+          'BEING_LAPPED',
+          car,
+          {
+            targetCarIdx:    leaderIdx,
+            targetCarNumber: targetRef.carNumber,
+            distanceMeters:  approxDistanceMeters,
+          },
+          opts,
+        ));
+        state.trafficAnnouncements.set(pairKey, 'BEING_LAPPED');
       }
     }
   }
