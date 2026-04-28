@@ -1,12 +1,36 @@
 /**
- * RaceAnalyzer — Local race narrative synthesizer for the Director Agent.
+ * RaceAnalyzer — Field-public race narrative synthesizer for the Director Agent.
  *
- * Consumes `iracing.raceStateChanged` snapshots (the same data that populates
- * the RaceContext leaderboard) and derives higher-order narrative events that
- * would otherwise require a cloud backend. Since there is exactly one Director
- * Agent per session, all of these events can be computed on-device.
+ * ## Data boundary — STRICT
  *
- * Caller pattern:
+ * This class operates exclusively on **public per-car (CarIdx[]) shared memory
+ * arrays** that are broadcast to every observer on the network. It must NEVER
+ * read or receive:
+ *
+ *   ✗ PlayerCarMyIncidentCount / PlayerCarTeamIncidentCount  (rig-specific)
+ *   ✗ FuelLevel / FuelLevelPct                               (rig-specific)
+ *   ✗ SteeringWheelAngle / Speed / physics scalars            (rig-specific)
+ *   ✗ Any other `PlayerCar*` iRacing variable
+ *
+ * Those values are **publisher-domain events** — they belong to the sim rig
+ * that owns the player car. The publisher emits them to Race Control. The
+ * Director Agent receives them back as context from RC; it never reads them
+ * directly from shared memory.
+ *
+ * ## Allowed data sources (all from CarIdx[] public arrays)
+ *
+ *   ✓ CarIdxPosition         — overall position
+ *   ✓ CarIdxClassPosition    — class position
+ *   ✓ CarIdxLapCompleted     — laps completed
+ *   ✓ CarIdxLapDistPct       — lap distance %
+ *   ✓ CarIdxF2Time           — gap to leader
+ *   ✓ CarIdxLastLapTime      — last lap time
+ *   ✓ CarIdxBestLapTime      — session best lap
+ *   ✓ CarIdxOnPitRoad        — on pit road flag
+ *   ✓ SessionLapsRemainEx    — laps remaining (session scalar)
+ *   ✓ SessionLapsRemain      — laps remaining fallback
+ *
+ * ## Caller pattern
  *   1. Call `update(state)` on every raceStateChanged event.
  *   2. Call `consumeEvents()` in `buildRaceContext()` to drain the queue and
  *      include the events in the `recentEvents` field of NextSequenceRequest.
@@ -407,15 +431,24 @@ export class RaceAnalyzer {
 // Minimal local type mirrors (avoids circular imports with iracing extension)
 // ---------------------------------------------------------------------------
 
+/**
+ * Only fields sourced from public CarIdx[] shared memory arrays are permitted
+ * here. Do NOT add FuelLevel, incident counts, or any PlayerCar* variable.
+ */
 interface RaceCarState {
+  // --- CarIdxPosition / CarIdxClassPosition ---
   carNumber: string | number;
   position: number;
   classPosition: number;
+  // --- CarIdxLapCompleted / CarIdxLapDistPct ---
   lapsCompleted: number;
   lapDistPct: number;
+  // --- CarIdxF2Time (gap to leader; gapToCarAhead computed in buildRaceState) ---
   gapToLeader: number;
   gapToCarAhead: number;
+  // --- CarIdxOnPitRoad ---
   onPitRoad: boolean;
+  // --- CarIdxLastLapTime / CarIdxBestLapTime ---
   lastLapTime: number;
   bestLapTime: number;
 }
