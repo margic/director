@@ -1,0 +1,29 @@
+{
+  "id": "seq_cockpit_immersion",
+  "name": "Cockpit Immersion",
+  "version": "1.0.0",
+  "description": "Heavy onboard and tight tracking shots to emphasize the driver's perspective and effort.",
+  "category": "builtin",
+  "priority": false,
+  "variables": [
+    { "name": "targetDriver", "label": "Driver Car Number", "type": "text", "required": true, "source": "cloud" },
+    { "name": "durationMs", "label": "Wait Duration", "type": "number", "required": true, "source": "cloud" }
+  ],
+  "steps": [
+    { "id": "step_1", "intent": "obs.switchScene", "payload": { "sceneName": "Rig 1 Solo" } },
+    { "id": "step_2", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 12000, "maxMs": 18000 }, "narrativePurpose": "establish" } },
+    { "id": "step_3", "intent": "obs.switchScene", "payload": { "sceneName": "Director Solo" } },
+    { "id": "step_4", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "12" } },
+    { "id": "step_5", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 6000, "maxMs": 10000 }, "narrativePurpose": "build" } },
+    { "id": "step_6", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "9" } },
+    { "id": "step_7", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 8000, "maxMs": 12000 }, "narrativePurpose": "action" } },
+    { "id": "step_8", "intent": "obs.switchScene", "payload": { "sceneName": "Rig 1 Solo" } },
+    { "id": "step_9", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 6000, "maxMs": 10000 }, "narrativePurpose": "resolve" } }
+  ],
+  "metadata": {
+    "source": "ai-planner",
+    "applicability": "Perfect for when a driver is pushing hard for a fastest lap or closing a large gap.",
+    "racePhase": "rhythm",
+    "durationRange": { "min": 30000, "max": 50000 }
+  }
+}

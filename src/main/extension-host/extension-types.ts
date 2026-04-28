@@ -4,6 +4,12 @@ export interface ExtensionManifest {
   version: string;
   main: string;
   description?: string;
+  /**
+   * Prose block injected verbatim into the Planner LLM prompt (issue #113).
+   * Explains what the extension provides, how its intents relate to each other,
+   * and any runtime constraints the Planner must respect.
+   */
+  aiContext?: string;
   contributes?: {
     intents?: IntentContribution[];
     commands?: CommandContribution[];
@@ -59,6 +65,14 @@ export interface IntentContribution {
   intent: string; // e.g. "communication.announce"
   title: string;
   description?: string;
+  /**
+   * Controls whether this intent is included in the checkin capabilities payload.
+   * - 'broadcast': included — a valid broadcast sequence step (camera, replay, scene, announce)
+   * - 'operational': excluded — internal control intent, never a sequence step
+   * - 'query': excluded — returns data rather than performing an action
+   * Defaults to 'broadcast' if omitted (backwards-compatible).
+   */
+  category?: 'broadcast' | 'operational' | 'query';
   schema?: object; // JSON Schema for payload validation
 }
 

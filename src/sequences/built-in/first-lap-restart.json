@@ -1,0 +1,32 @@
+{
+  "id": "seq_first_lap_restart",
+  "name": "First Lap Restart",
+  "version": "1.0.0",
+  "description": "Captures a mid-race restart. Tracks the leader jumping to the green, followed by our driver's onboard.",
+  "category": "builtin",
+  "priority": false,
+  "variables": [
+    { "name": "targetDriver", "label": "Driver Car Number", "type": "text", "required": true, "source": "cloud" },
+    { "name": "durationMs", "label": "Wait Duration", "type": "number", "required": true, "source": "cloud" },
+    { "name": "ttsMessage", "label": "Restart Announcement", "type": "text", "required": true, "source": "cloud" }
+  ],
+  "steps": [
+    { "id": "step_1", "intent": "communication.announce", "payload": { "message": "${ttsMessage}" } },
+    { "id": "step_2", "intent": "obs.switchScene", "payload": { "sceneName": "Director Solo" } },
+    { "id": "step_3", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "11" } },
+    { "id": "step_4", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 6000, "maxMs": 10000, "paceModifier": "compress-on-action" }, "narrativePurpose": "establish" } },
+    { "id": "step_5", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "20" } },
+    { "id": "step_6", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 7000, "maxMs": 11000 }, "narrativePurpose": "build" } },
+    { "id": "step_7", "intent": "obs.switchScene", "payload": { "sceneName": "Rig 1 Solo" } },
+    { "id": "step_8", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 8000, "maxMs": 12000 }, "narrativePurpose": "action" } },
+    { "id": "step_9", "intent": "obs.switchScene", "payload": { "sceneName": "Director Solo" } },
+    { "id": "step_10", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "13" } },
+    { "id": "step_11", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 6000, "maxMs": 10000 }, "narrativePurpose": "resolve" } }
+  ],
+  "metadata": {
+    "source": "ai-planner",
+    "applicability": "Used specifically for green-flag restarts following a caution period.",
+    "racePhase": "opening",
+    "durationRange": { "min": 35000, "max": 50000 }
+  }
+}

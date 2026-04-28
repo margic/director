@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Camera, Play, Pause, SkipBack, SkipForward, Car, Eye, Video, ChevronDown, ChevronUp, Users, Search, Flag, LayoutDashboard } from 'lucide-react';
+import { Camera, Play, Pause, SkipBack, SkipForward, Car, Eye, Video, ChevronDown, ChevronUp, Users, Search, Flag, LayoutDashboard, Radio } from 'lucide-react';
+import { PublisherSettings } from './PublisherSettings';
 import { useSetPageHeader } from '../../../renderer/contexts/PageHeaderContext';
 import { RaceViewMockup } from './RaceViewMockup';
 
@@ -46,7 +47,7 @@ interface IracingPanelProps {
   cameras?: any[]; // Legacy prop — no longer primary source
 }
 
-type PanelView = 'control-desk' | 'race-view';
+type PanelView = 'control-desk' | 'race-view' | 'publisher';
 
 export const IracingPanel = ({ cameras = [] }: IracingPanelProps) => {
   const [activeView, setActiveView] = useState<PanelView>('control-desk');
@@ -274,10 +275,25 @@ export const IracingPanel = ({ cameras = [] }: IracingPanelProps) => {
           <Flag className='w-3.5 h-3.5' />
           Race View
         </button>
+        <button
+          onClick={() => setActiveView('publisher')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-rajdhani uppercase tracking-widest font-bold transition-all ${
+            activeView === 'publisher'
+              ? 'bg-primary text-white shadow-[0_0_12px_rgba(255,95,31,0.2)]'
+              : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
+          }`}
+        >
+          <Radio className='w-3.5 h-3.5' />
+          Publisher
+        </button>
       </div>
 
       {/* Active view content */}
-      {activeView === 'race-view' ? (
+      {activeView === 'publisher' ? (
+        <div className='flex-1 min-h-0 overflow-y-auto'>
+          <PublisherSettings />
+        </div>
+      ) : activeView === 'race-view' ? (
         <div className='flex-1 min-h-0'>
           <RaceViewMockup
             raceState={raceState}
@@ -295,7 +311,7 @@ export const IracingPanel = ({ cameras = [] }: IracingPanelProps) => {
             }}
           />
         </div>
-      ) : (
+      ) : activeView === 'control-desk' ? (
       <div className='space-y-6 flex-1'>
       {/* Driver Selection — spans full width */}
       <div className='bg-card border border-border rounded-lg p-6'>
@@ -484,7 +500,7 @@ export const IracingPanel = ({ cameras = [] }: IracingPanelProps) => {
         </div>
       </div>
     </div>
-      )}
+      ) : null}
     </div>
   );
 };

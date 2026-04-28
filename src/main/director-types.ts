@@ -248,25 +248,38 @@ export interface IntentCapability {
   extensionId: string;
   active: boolean;
   schema?: Record<string, unknown>;
+  /** Human-readable description passed verbatim to the Planner LLM (issue #112). */
+  description?: string;
 }
 
+/** iRacing camera group — maps a human-readable name to its numeric SDK ID. */
 export interface CameraGroup {
   groupNum: number;
   groupName: string;
 }
 
+/** Driver discovered at runtime from the simulator session. */
 export interface CapabilityDriver {
   carNumber: string;
   userName: string;
-  carName?: string;
+  carName: string;
 }
 
 export interface DirectorCapabilities {
   intents: IntentCapability[];
   connections: Record<string, ConnectionHealth>;
+  /** iRacing camera groups cached from the SDK at check-in time. */
   cameraGroups?: CameraGroup[];
+  /** Available OBS scenes discovered via GetSceneList at check-in time. */
   scenes?: string[];
+  /** Drivers in the current simulator session at check-in time. */
   drivers?: CapabilityDriver[];
+  /**
+   * Per-extension AI context prose blocks (issue #113).
+   * Race Control injects these verbatim into the Planner prompt
+   * under a dedicated EXTENSION CONTEXT section.
+   */
+  extensionContexts?: Array<{ extensionId: string; aiContext: string }>;
 }
 
 export interface SessionCheckinRequest {
@@ -275,6 +288,8 @@ export interface SessionCheckinRequest {
   capabilities: DirectorCapabilities;
   /** Optional: local sequence library for Planner training (max 50, 100KB) */
   sequences?: PortableSequence[];
+  /** Optional: live simulator snapshot at check-in time (issue #114). Enables Planner phase-weighting. */
+  raceContext?: RaceContext;
 }
 
 export interface SessionCheckinResponse {
@@ -329,7 +344,6 @@ export interface SessionWrapRequest {
 export interface SequenceTemplate {
   id: string;
   raceSessionId: string;
-  checkinId: string;
   name: string;
   description?: string;
   applicability: string;
@@ -342,6 +356,94 @@ export interface SequenceTemplate {
   variables: SequenceVariable[];
   source: 'ai-planner' | 'operator-library' | 'hybrid';
   ttl?: number;
+}
+
+/**
+ * Live race context sent with every POST .../sequences/next request.
+ * Mirrors the RC API's RaceContext schema (OpenAPI spec).
+ */
+export interface RaceContext {
+  /** Current session type, e.g. "Race", "Practice", "Qualify". Required. */
+  sessionType: string;
+  /** Current flag state as a string, e.g. "green", "caution", "red", "disconnected". Required. */
+  sessionFlags: string;
+  /** Remaining laps; -1 if unlimited. Required. */
+  lapsRemain: number;
+  /** Number of cars currently on track. Required. */
+  carCount: number;
+  /** ISO-8601 timestamp when this context snapshot was taken. */
+  contextTimestamp: string;
+  /** Caution scope when in caution state. */
+  cautionType?: 'local' | 'fullCourse' | 'none';
+  /** Seconds remaining in the session; omit if lap-count session. */
+  timeRemainSec?: number;
+  /** Lap number of the race leader. */
+  leaderLap?: number;
+  /** Total laps for this session; omit if unlimited. */
+  totalLaps?: number;
+  /** Car number of the currently focused/spectated car. */
+  focusedCarNumber?: string;
+  /** Name of the current OBS scene. */
+  currentObsScene?: string;
+  /** Active battles: pairs of car numbers within a gap threshold. */
+  battles?: Array<{ cars: string[]; gapSec: number }>;
+  /** Car numbers currently in pit road. */
+  pitting?: string[];
+  /** Track display name. */
+  trackName?: string;
+  /** Type of track layout, e.g. "oval", "road". */
+  trackType?: string;
+  /** Series name. */
+  seriesName?: string;
+  /** Per-driver context for AI decision making. */
+  drivers?: Array<{
+    carNumber: string;
+    gapToAhead: number;
+    lapsCompleted: number;
+    bestLap: number;
+    classPosition: number;
+    /** Overall track position (1-indexed). From CarIdxPosition[carIdx]. */
+    pos?: number;
+    /** Driver display name. From DriverInfo.Drivers[carIdx].UserName. */
+    driverName?: string;
+    /** Car class short name (e.g. "MX5", "GT3"). From CarClassShortName. */
+    carClass?: string;
+    /** Whether the car is on the racing surface (not pitting/off-world). */
+    isOnTrack?: boolean;
+    /** Last completed lap time in seconds. From CarIdxLastLapTime[carIdx]. */
+    lastLap?: number;
+  }>;
+  /**
+   * Higher-order narrative events synthesized by the Director Agent since the
+   * previous sequences/next request. Derived entirely from local shared memory
+   * — no cloud round-trip required.
+   */
+  recentEvents?: Array<{
+    /** Event classifier. E.g. "LEADER_CHANGE", "LAPS_MILESTONE", "BATTLE_APPROACHING". */
+    type: string;
+    /** Plain-English description for the AI planner. */
+    description: string;
+    /** ISO-8601 timestamp when the event was detected. */
+    timestamp: string;
+    /** Car most directly relevant to this event, if applicable. */
+    carNumber?: string;
+    /** Structured data for programmatic use by the AI planner. */
+    data?: Record<string, unknown>;
+  }>;
+  /** Laps the focused driver has been on-track since their last pit stop (stint age). */
+  stintLaps?: number;
+}
+
+/**
+ * Request body for POST .../sequences/next.
+ */
+export interface NextSequenceRequest {
+  /** Live race context snapshot. Required. */
+  raceContext: RaceContext;
+  /** ID of the last completed sequence, for chaining/logging. */
+  lastSequenceId?: string;
+  /** Comma-separated or array of active intent handlers. */
+  intents?: string | string[];
 }
 
 /** Tunable generation parameters for the AI Director pipeline. */
@@ -357,34 +459,5 @@ export interface GenerationParams {
   narrativePriority?: 'battles' | 'leader' | 'balanced';
   plannerModel?: string;
   executorModel?: string;
-}
-
-// ============================================================================
-// Race Context — live telemetry snapshot sent with /sequences/next
-// Gives the Tier-2 Executor model race awareness for sequence selection.
-// ============================================================================
-
-export interface BattleInfo {
-  cars: string[];        // Car numbers involved
-  gapSec: number;        // Gap between them in seconds
-  developing?: boolean;  // True if gap is closing (not yet within threshold, but trending toward battle)
-}
-
-export interface RaceContext {
-  sessionType: string;           // 'Practice', 'Qualify', 'Race'
-  sessionFlags: string;          // Human-readable: 'GREEN', 'YELLOW', 'RED', 'CHECKERED', 'WHITE'
-  cautionType: string;           // 'local', 'fullCourse', 'none' — from WeekendInfo.CourseCautions
-  lapsRemain: number;            // -1 if unknown / timed race
-  timeRemainSec: number;         // -1 if unknown / lap race
-  leaderLap: number;
-  totalLaps: number;             // -1 if timed
-  focusedCarNumber: string;      // Currently focused car number (broadcast camera target)
-  currentObsScene?: string;      // Currently active OBS scene name
-  battles: BattleInfo[];         // Pairs of cars within 1s gap
-  pitting: string[];             // Car numbers currently on pit road
-  carCount: number;              // Total cars on track
-  trackName: string;
-  trackType: string;             // 'road course', 'oval', 'dirt road', etc.
-  seriesName: string;            // e.g. 'Global Mazda MX-5 Cup'
 }
 

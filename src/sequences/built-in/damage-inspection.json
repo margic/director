@@ -1,0 +1,30 @@
+{
+  "id": "seq_damage_inspection",
+  "name": "Damage Inspection",
+  "version": "1.0.0",
+  "description": "Tight tracking to survey damage on the car after contact.",
+  "category": "builtin",
+  "priority": false,
+  "variables": [
+    { "name": "targetDriver", "label": "Driver Car Number", "type": "text", "required": true, "source": "cloud" },
+    { "name": "durationMs", "label": "Wait Duration", "type": "number", "required": true, "source": "cloud" }
+  ],
+  "steps": [
+    { "id": "step_1", "intent": "obs.switchScene", "payload": { "sceneName": "Director Solo" } },
+    { "id": "step_2", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "4" } },
+    { "id": "step_3", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 7000, "maxMs": 12000 }, "narrativePurpose": "establish" } },
+    { "id": "step_4", "intent": "obs.switchScene", "payload": { "sceneName": "Rig 1 Solo" } },
+    { "id": "step_5", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 6000, "maxMs": 10000 }, "narrativePurpose": "build" } },
+    { "id": "step_6", "intent": "obs.switchScene", "payload": { "sceneName": "Director Solo" } },
+    { "id": "step_7", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "7" } },
+    { "id": "step_8", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 6000, "maxMs": 11000 }, "narrativePurpose": "action" } },
+    { "id": "step_9", "intent": "broadcast.showLiveCam", "payload": { "carNum": "${targetDriver}", "camGroup": "3" } },
+    { "id": "step_10", "intent": "system.wait", "payload": { "durationMs": "${durationMs}" }, "metadata": { "holdHint": { "minMs": 7000, "maxMs": 12000 }, "narrativePurpose": "resolve" } }
+  ],
+  "metadata": {
+    "source": "ai-planner",
+    "applicability": "Ideal after any contact event to visually survey the car's condition.",
+    "racePhase": "caution",
+    "durationRange": { "min": 25000, "max": 45000 }
+  }
+}

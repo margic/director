@@ -31,6 +31,11 @@
   --color-card: hsl(220 15% 8%);
   --color-card-foreground: hsl(210 40% 98%);
 
+  /* Racing flag tokens — used by status indicators across extensions */
+  --color-green-flag: hsl(142 71% 45%);
+  --color-yellow-flag: hsl(45 100% 50%);
+  --color-red-flag: hsl(356 85% 57%);
+
   --radius: 0.5rem;
   --radius-lg: var(--radius);
   --radius-md: calc(var(--radius) - 2px);

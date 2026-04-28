@@ -66,6 +66,8 @@ export class SessionManager extends EventEmitter {
   private buildCapabilities?: () => DirectorCapabilities;
   /** Optional callback to get local sequences for Planner training */
   private getLocalSequences?: () => Promise<import('./director-types').PortableSequence[]>;
+  /** Optional callback to get current race context snapshot for checkin body (issue #114) */
+  private getRaceContext?: () => import('./director-types').RaceContext | null;
 
   constructor(private authService: AuthService) {
     super();
@@ -83,6 +85,14 @@ export class SessionManager extends EventEmitter {
    */
   setLocalSequencesGetter(getter: () => Promise<import('./director-types').PortableSequence[]>): void {
     this.getLocalSequences = getter;
+  }
+
+  /**
+   * Set the race context getter (provided by main.ts after orchestrator is ready).
+   * Called at check-in time to include a simulator snapshot for the Planner (issue #114).
+   */
+  setRaceContextGetter(getter: () => import('./director-types').RaceContext | null): void {
+    this.getRaceContext = getter;
   }
 
   /**
@@ -334,6 +344,19 @@ export class SessionManager extends EventEmitter {
         }
       } catch (err) {
         console.warn('[SessionManager] Failed to gather local sequences:', err);
+      }
+    }
+
+    // Include live race context snapshot for Planner phase-weighting (issue #114)
+    if (this.getRaceContext) {
+      try {
+        const raceContext = this.getRaceContext();
+        if (raceContext) {
+          body.raceContext = raceContext;
+          console.log(`[SessionManager] Including raceContext in check-in (sessionType=${raceContext.sessionType})`);
+        }
+      } catch (err) {
+        console.warn('[SessionManager] Failed to get raceContext for check-in:', err);
       }
     }
 

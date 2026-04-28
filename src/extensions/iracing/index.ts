@@ -1,10 +1,19 @@
 import koffi from 'koffi';
 import yaml from 'js-yaml';
 import { resolveCameraGroup } from './camera-utils';
+import { assembleTelemetryFrame, getTelemetryIntervalMs } from './telemetry-frame';
+import type { RawTelemetryReads } from './telemetry-frame';
+import type { TelemetryFrame } from './publisher/session-state';
+import { PublisherOrchestrator } from './publisher/orchestrator';
+
+// Extension manifest version — bump in package.json when changing capabilities.
+// Kept as a literal because tsconfig.main.json doesn't enable resolveJsonModule.
+const EXTENSION_VERSION = '1.0.0';
 
 // Define Extension API (must match ExtensionApiImpl in extension-process.ts)
 interface ExtensionAPI {
   settings: Record<string, any>;
+  getAuthToken(): Promise<string | null>;
   registerIntentHandler(intent: string, handler: (payload: any) => Promise<void>): void;
   emitEvent(event: string, payload: any): void;
   log(level: 'info' | 'warn' | 'error', message: string): void;
@@ -34,10 +43,6 @@ interface SessionInfoResult {
   drivers: DriverEntry[];
   trackName: string;
   sessionLaps: number;
-  sessionType: string;      // 'Practice' | 'Qualify' | 'Race'
-  cautionType: string;      // 'local' | 'fullCourse' | 'none'
-  trackType: string;        // 'road course' | 'oval' | 'dirt road' etc.
-  seriesName: string;       // e.g. 'Global Mazda MX-5 Cup'
 }
 
 // --- Telemetry Types ---
@@ -93,10 +98,6 @@ interface RaceState {
   leaderLap: number;
   totalSessionLaps: number;
   trackName: string;
-  sessionType: string;
-  cautionType: string;
-  trackType: string;
-  seriesName: string;
 }
 
 // Constants
@@ -139,16 +140,29 @@ let checkInterval: NodeJS.Timeout | null = null;
 let isConnected = false;
 let lastFlagState: string | null = null;
 
+// Publisher pipeline callback — set via registerTelemetryFrameCallback()
+type TelemetryFrameCallback = (frame: TelemetryFrame) => void;
+let telemetryFrameCallback: TelemetryFrameCallback | null = null;
+
+/**
+ * Register a callback to receive a TelemetryFrame snapshot on each telemetry
+ * poll tick. Called by the publisher pipeline (wired in a later issue).
+ * Pass null to unregister.
+ */
+export function registerTelemetryFrameCallback(cb: TelemetryFrameCallback | null): void {
+    telemetryFrameCallback = cb;
+}
+
 // Telemetry state
 let varHeaders: Map<string, VarHeader> = new Map();
 let lastVarHeaderCount = -1;
 let telemetryInterval: NodeJS.Timeout | null = null;
 let cachedTrackName = '';
 let cachedSessionLaps = 0;
-let cachedSessionType = '';
-let cachedCautionType = '';
-let cachedTrackType = '';
-let cachedSeriesName = '';
+
+// Publisher orchestrator (issue #106) — instantiated at activate(), drives the
+// detector + transport pipeline. Null when the extension is inactive.
+let publisherOrchestrator: PublisherOrchestrator | null = null;
 
 export async function activate(director: ExtensionAPI) {
     directorAPI = director;
@@ -161,7 +175,7 @@ export async function activate(director: ExtensionAPI) {
     }
 
     isWindows = process.platform === 'win32';
-    
+
     // Initialize Native Functions
     initNativeFunctions(director);
 
@@ -185,6 +199,70 @@ export async function activate(director: ExtensionAPI) {
     director.registerIntentHandler('broadcast.setReplayState', async (payload: { state: number }) => {
         broadcastMessage(IRSDK_REPLAY_SETSTATE, payload.state, 0, 0);
     });
+
+    // Publisher orchestrator (issue #106) — starts internally only if
+    // publisher.enabled === true. Registering the telemetry frame callback is
+    // safe regardless of publisher state; the orchestrator no-ops when not running.
+    publisherOrchestrator = new PublisherOrchestrator({
+        director,
+        version: EXTENSION_VERSION,
+    });
+    publisherOrchestrator.activate();
+    registerTelemetryFrameCallback((frame) => {
+        publisherOrchestrator?.onTelemetryFrame(frame);
+    });
+
+    // Publisher hot-toggle — fired by the settings UI switch without restarting the app.
+    director.registerIntentHandler(
+        'iracing.publisher.setEnabled',
+        async (payload: { enabled: boolean }) => {
+            publisherOrchestrator?.setEnabled(payload.enabled);
+            // Restart the telemetry polling loop so the interval matches the
+            // new state (200ms / 5Hz with publisher, 250ms / 4Hz without).
+            if (pBase) {
+                if (telemetryInterval) {
+                    clearInterval(telemetryInterval);
+                    telemetryInterval = null;
+                }
+                startTelemetryPolling(director);
+            }
+        },
+    );
+
+    // Session binding — internal directive fired by DirectorOrchestrator once
+    // check-in confirms the raceSessionId (issue #109). Not advertised as a
+    // capability; never appears in the AI planner's intent list.
+    // Also auto-enables the publisher so the operator doesn't need to toggle it
+    // manually — if the Director has checked into a session, telemetry should flow.
+    director.registerIntentHandler(
+        'iracing.publisher.bindSession',
+        async (payload: { raceSessionId: string }) => {
+            if (payload?.raceSessionId) {
+                publisherOrchestrator?.setRaceSessionId(payload.raceSessionId);
+                publisherOrchestrator?.setEnabled(true);
+                // Restart the telemetry polling loop at the publisher rate (200ms / 5Hz).
+                if (pBase) {
+                    if (telemetryInterval) {
+                        clearInterval(telemetryInterval);
+                        telemetryInterval = null;
+                    }
+                    startTelemetryPolling(director);
+                }
+            }
+        },
+    );
+
+    // Driver swap — operator-triggered from the publisher panel UI.
+    director.registerIntentHandler(
+        'iracing.publisher.initiateDriverSwap',
+        async (payload: { outgoingDriverId: string; incomingDriverId: string; incomingDriverName: string }) => {
+            publisherOrchestrator?.initiateDriverSwap(
+                payload.outgoingDriverId ?? '',
+                payload.incomingDriverId ?? '',
+                payload.incomingDriverName ?? '',
+            );
+        },
+    );
 
     // Start Polling (if on Windows)
     startPolling(director);
@@ -273,10 +351,6 @@ function closeSharedMemory(director: ExtensionAPI) {
     cachedDrivers = [];
     cachedTrackName = '';
     cachedSessionLaps = 0;
-    cachedSessionType = '';
-    cachedCautionType = '';
-    cachedTrackType = '';
-    cachedSeriesName = '';
     director.log('info', 'iRacing shared memory unmapped');
 }
 
@@ -369,29 +443,19 @@ function readSessionInfo(director: ExtensionAPI): SessionInfoResult | null {
 
         // --- Track & Session ---
         const trackName = parsed?.WeekendInfo?.TrackDisplayName ?? '';
-        const trackType = parsed?.WeekendInfo?.TrackType ?? '';
-        const seriesName = parsed?.WeekendInfo?.SeriesDisplayName ?? '';
-        const cautionTypeRaw = parsed?.WeekendInfo?.CourseCautions ?? '';
-        const cautionType = typeof cautionTypeRaw === 'string' && cautionTypeRaw.toLowerCase().includes('full')
-            ? 'fullCourse'
-            : cautionTypeRaw ? 'local' : 'none';
-
-        // Determine active session type and race laps
         let sessionLaps = 0;
-        let sessionType = '';
         if (parsed?.SessionInfo?.Sessions) {
-            // Find the active session (last one with ResultsPositions not yet populated, or last overall)
             for (const s of parsed.SessionInfo.Sessions) {
-                sessionType = s.SessionType ?? sessionType;
                 if (s.SessionType === 'Race' && typeof s.SessionLaps === 'number') {
                     sessionLaps = s.SessionLaps;
+                    break;
                 }
             }
         }
 
         lastSessionInfoUpdate = header.sessionInfoUpdate;
         director.log('info', `Parsed session info (update #${header.sessionInfoUpdate}): ${cameraGroups.length} cameras, ${drivers.length} drivers, track="${trackName}"`);
-        return { cameraGroups, drivers, trackName, sessionLaps, sessionType, cautionType, trackType, seriesName };
+        return { cameraGroups, drivers, trackName, sessionLaps };
     } catch (error: any) {
         director.log('error', `Failed to parse session info YAML: ${error.message}`);
         return null;
@@ -577,11 +641,62 @@ function buildRaceState(_director: ExtensionAPI): RaceState | null {
         leaderLap: cars.length > 0 ? cars[0].lapsCompleted : 0,
         totalSessionLaps: cachedSessionLaps,
         trackName: cachedTrackName,
-        sessionType: cachedSessionType,
-        cautionType: cachedCautionType,
-        trackType: cachedTrackType,
-        seriesName: cachedSeriesName,
     };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Telemetry frame assembly (full publisher field set)                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Reads all telemetry variables needed for the publisher pipeline and
+ * assembles them into a typed TelemetryFrame. Returns null if shared
+ * memory is not yet available.
+ */
+function buildTelemetryFrame(): TelemetryFrame | null {
+    if (!pBase || varHeaders.size === 0) return null;
+    const buf = getLatestBuffer();
+    if (!buf) return null;
+
+    const reads: RawTelemetryReads = {
+        sessionTick:     readVarInt('SessionTick',   buf.offset),
+        sessionTime:     readVarFloat('SessionTime', buf.offset),
+        sessionState:    readVarInt('SessionState',  buf.offset),
+        sessionFlags:    readVarInt('SessionFlags',  buf.offset),
+        sessionUniqueId: readVarInt('SessionUniqueID', buf.offset),
+
+        carIdxPosition:      readVarInt('CarIdxPosition',       buf.offset),
+        carIdxClassPosition: readVarInt('CarIdxClassPosition',  buf.offset),
+        carIdxOnPitRoad:     readVarBool('CarIdxOnPitRoad',     buf.offset),
+        carIdxTrackSurface:  readVarInt('CarIdxTrackSurface',   buf.offset),
+        carIdxLastLapTime:   readVarFloat('CarIdxLastLapTime',  buf.offset),
+        carIdxBestLapTime:   readVarFloat('CarIdxBestLapTime',  buf.offset),
+        carIdxLapCompleted:  readVarInt('CarIdxLapCompleted',   buf.offset),
+        carIdxLapDistPct:    readVarFloat('CarIdxLapDistPct',   buf.offset),
+        carIdxF2Time:        readVarFloat('CarIdxF2Time',       buf.offset),
+        carIdxSessionFlags:  readVarInt('CarIdxSessionFlags',   buf.offset),
+
+        fuelLevel:           readVarFloat('FuelLevel',                      buf.offset),
+        fuelLevelPct:        readVarFloat('FuelLevelPct',                   buf.offset),
+        playerIncidentCount: readVarInt('PlayerCarMyIncidentCount',          buf.offset),
+        teamIncidentCount:   readVarInt('PlayerCarTeamIncidentCount',        buf.offset),
+        incidentLimit:       readVarInt('IncidentLimit',                     buf.offset),
+
+        skies:       readVarInt('Skies',           buf.offset),
+        trackTemp:   readVarFloat('TrackTemp',     buf.offset),
+        windDir:     readVarFloat('WindDir',       buf.offset),
+        windVel:     readVarFloat('WindVel',       buf.offset),
+        airHumidity: readVarFloat('AirHumidity',   buf.offset),
+        fogLevel:    readVarFloat('FogLevel',      buf.offset),
+
+        speed:                  readVarFloat('Speed',                  buf.offset),
+        steeringWheelAngle:     readVarFloat('SteeringWheelAngle',     buf.offset),
+        steeringWheelPctTorque: readVarFloat('SteeringWheelPctTorque', buf.offset),
+        solarAltitude:          readVarFloat('SolarAltitude',          buf.offset),
+        carIdxSpeed:            readVarFloat('CarIdxSpeed',            buf.offset),
+    };
+
+    return assembleTelemetryFrame(reads);
 }
 
 /* ------------------------------------------------------------------ */
@@ -594,11 +709,14 @@ function startTelemetryPolling(director: ExtensionAPI) {
     // Parse variable headers on first connect
     parseVarHeaders(director);
 
+    const publisherEnabled = director.settings['publisher.enabled'] === true;
+    const intervalMs = getTelemetryIntervalMs(publisherEnabled);
+
     telemetryInterval = setInterval(() => {
         pollTelemetry(director);
-    }, 1000); // 1 Hz — sufficient for race tower updates
+    }, intervalMs);
 
-    director.log('info', 'Telemetry polling started (1000ms interval)');
+    director.log('info', `Telemetry polling started (${intervalMs}ms interval, ${publisherEnabled ? '5Hz publisher' : '4Hz standard'})`);
 }
 
 function stopTelemetryPolling(director: ExtensionAPI) {
@@ -624,6 +742,14 @@ function pollTelemetry(director: ExtensionAPI) {
     if (state) {
         director.emitEvent('iracing.raceStateChanged', state);
     }
+
+    // Feed the publisher pipeline if a callback is registered
+    if (telemetryFrameCallback) {
+        const frame = buildTelemetryFrame();
+        if (frame) {
+            telemetryFrameCallback(frame);
+        }
+    }
 }
 
 function startPolling(director: ExtensionAPI) {
@@ -643,6 +769,7 @@ function checkConnection(director: ExtensionAPI) {
             isConnected = running;
             director.log('info', `Sim Connection Status: ${isConnected ? 'Connected' : 'Disconnected'}`);
             director.emitEvent('iracing.connectionStateChanged', { connected: isConnected });
+            publisherOrchestrator?.onConnectionChange(isConnected);
 
             if (isConnected) {
                 // Attempt to open shared memory when iRacing connects
@@ -691,12 +818,19 @@ function pollSessionData(director: ExtensionAPI) {
             cachedDrivers = result.drivers;
             cachedTrackName = result.trackName;
             cachedSessionLaps = result.sessionLaps;
-            cachedSessionType = result.sessionType;
-            cachedCautionType = result.cautionType;
-            cachedTrackType = result.trackType;
-            cachedSeriesName = result.seriesName;
             director.emitEvent('iracing.cameraGroupsChanged', { groups: result.cameraGroups });
             director.emitEvent('iracing.driversChanged', { drivers: result.drivers });
+            // #108: keep publisher roster in sync whenever SessionInfo YAML changes
+            // so BEING_LAPPED / ROSTER_UPDATED events resolve carNumber correctly.
+            publisherOrchestrator?.updateRoster(
+                result.drivers.map(d => ({
+                    carIdx: d.carIdx,
+                    carNumber: d.carNumber,
+                    driverName: d.userName,
+                    teamName: d.teamName,
+                    carClassShortName: d.carClassName,
+                })),
+            );
         }
     }
 }
@@ -746,6 +880,11 @@ export function deactivate() {
         clearInterval(telemetryInterval);
         telemetryInterval = null;
     }
+    if (publisherOrchestrator) {
+        publisherOrchestrator.deactivate();
+        publisherOrchestrator = null;
+    }
+    registerTelemetryFrameCallback(null);
     if (directorAPI) {
         closeSharedMemory(directorAPI);
     }

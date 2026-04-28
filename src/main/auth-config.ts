@@ -51,5 +51,6 @@ export const apiConfig = {
     checkin: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/checkin`,
     refreshCheckin: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/checkin`,
     wrap: (sessionId: string) => `/api/director/v1/sessions/${sessionId}/checkin`,
+    publisherConfig: (publisherCode: string) => `/api/publisher-config/${encodeURIComponent(publisherCode)}`,
   },
 };
