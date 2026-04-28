@@ -29,6 +29,7 @@ import { ExtensionEventBus } from './extension-host/event-bus';
 import { configService } from './config-service';
 import { SessionManager } from './session-manager';
 import { SequenceLibraryService } from './sequence-library-service';
+import { RaceAnalyzer } from './race-analyzer';
 
 export type DirectorMode = 'stopped' | 'manual' | 'auto';
 
@@ -79,6 +80,8 @@ export class DirectorOrchestrator extends EventEmitter {
   private currentRaceSessionId: string | null = null;
   /** Last known iRacing state snapshot, updated from iracing.raceStateChanged events. */
   private lastIRacingState: any = null;
+  /** Synthesizes higher-order narrative events from raw race state history. */
+  private readonly raceAnalyzer = new RaceAnalyzer();
 
   constructor(
     private authService: AuthService,
@@ -124,6 +127,7 @@ export class DirectorOrchestrator extends EventEmitter {
       // Cache latest iRacing state for raceContext in sequences/next POST body
       this.eventBus.on('iracing.raceStateChanged', (data: { payload: any }) => {
         this.lastIRacingState = data.payload;
+        this.raceAnalyzer.update(data.payload);
       });
     }
 
@@ -212,9 +216,30 @@ export class DirectorOrchestrator extends EventEmitter {
       .filter((c: any) => c.onPitRoad)
       .map((c: any) => String(c.carNumber ?? ''));
 
+    // Active battles: pairs of cars within 1.0s of each other
+    const battles: Array<{ cars: string[]; gapSec: number }> = [];
+    for (let i = 1; i < cars.length; i++) {
+      const gap = cars[i].gapToCarAhead ?? 0;
+      if (gap > 0 && gap < 1.0) {
+        battles.push({
+          cars: [String(cars[i - 1].carNumber ?? ''), String(cars[i].carNumber ?? '')],
+          gapSec: Math.round(gap * 1000) / 1000,
+        });
+      }
+    }
+
     // Focused car
     const focusedIdx: number = state.focusedCarIdx ?? -1;
     const focusedCar = focusedIdx >= 0 ? cars.find((c: any) => c.carIdx === focusedIdx) : null;
+
+    // Synthesized narrative events since last request
+    const recentEvents = this.raceAnalyzer.consumeEvents();
+
+    // Stint laps for the focused driver
+    const focusedCarNum = focusedCar ? String(focusedCar.carNumber) : null;
+    const stintLaps = focusedCarNum
+      ? this.raceAnalyzer.getStintLaps(focusedCarNum, focusedCar?.lapsCompleted ?? 0) ?? undefined
+      : undefined;
 
     return {
       sessionType,
@@ -228,7 +253,10 @@ export class DirectorOrchestrator extends EventEmitter {
       ...(state.trackName ? { trackName: state.trackName } : {}),
       ...(focusedCar ? { focusedCarNumber: String(focusedCar.carNumber) } : {}),
       ...(pitting.length > 0 ? { pitting } : {}),
+      ...(battles.length > 0 ? { battles } : {}),
       ...(drivers ? { drivers } : {}),
+      ...(recentEvents.length > 0 ? { recentEvents } : {}),
+      ...(stintLaps !== undefined ? { stintLaps } : {}),
     };
   }
 
@@ -277,6 +305,7 @@ export class DirectorOrchestrator extends EventEmitter {
         await this.setMode('stopped');
       }
       this.currentRaceSessionId = null;
+      this.raceAnalyzer.reset();
     }
   }
 
@@ -415,7 +444,7 @@ export class DirectorOrchestrator extends EventEmitter {
       const entry = history.find((r: any) => r.sequenceId === sequence.id);
       if (entry) {
         console.log(`[DirectorOrchestrator] Sequence ${sequence.id} completed with status: ${entry.status}`);
-        if (this.cloudPoller) {
+        if (this.cloudPoller && this.mode === 'auto') {
           this.cloudPoller.onSequenceCompleted(sequence.id);
         }
         this.scheduler.off('historyChanged', completionListener);

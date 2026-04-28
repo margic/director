@@ -403,6 +403,25 @@ export interface RaceContext {
     /** Last completed lap time in seconds. From CarIdxLastLapTime[carIdx]. */
     lastLap?: number;
   }>;
+  /**
+   * Higher-order narrative events synthesized by the Director Agent since the
+   * previous sequences/next request. Derived entirely from local shared memory
+   * — no cloud round-trip required.
+   */
+  recentEvents?: Array<{
+    /** Event classifier. E.g. "LEADER_CHANGE", "LAPS_MILESTONE", "BATTLE_APPROACHING". */
+    type: string;
+    /** Plain-English description for the AI planner. */
+    description: string;
+    /** ISO-8601 timestamp when the event was detected. */
+    timestamp: string;
+    /** Car most directly relevant to this event, if applicable. */
+    carNumber?: string;
+    /** Structured data for programmatic use by the AI planner. */
+    data?: Record<string, unknown>;
+  }>;
+  /** Laps the focused driver has been on-track since their last pit stop (stint age). */
+  stintLaps?: number;
 }
 
 /**
