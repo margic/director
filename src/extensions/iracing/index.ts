@@ -820,6 +820,17 @@ function pollSessionData(director: ExtensionAPI) {
             cachedSessionLaps = result.sessionLaps;
             director.emitEvent('iracing.cameraGroupsChanged', { groups: result.cameraGroups });
             director.emitEvent('iracing.driversChanged', { drivers: result.drivers });
+            // #108: keep publisher roster in sync whenever SessionInfo YAML changes
+            // so BEING_LAPPED / ROSTER_UPDATED events resolve carNumber correctly.
+            publisherOrchestrator?.updateRoster(
+                result.drivers.map(d => ({
+                    carIdx: d.carIdx,
+                    carNumber: d.carNumber,
+                    driverName: d.userName,
+                    teamName: d.teamName,
+                    carClassShortName: d.carClassName,
+                })),
+            );
         }
     }
 }
