@@ -1,7 +1,8 @@
 # Feature: iRacing Publisher — Telemetry & Event Publishing
 
-> **Status: Proposed**
+> **Status: Implemented**
 > Based on RFC: *Publisher Integration into the Director App & Hybrid Telemetry* (Race Control team, 2025-07-14)
+> Implementation tracked across issues #82, #83, #92, #106.
 
 ---
 
@@ -63,12 +64,31 @@ The `director-iracing` extension gains a `publisherMode` setting in its configur
 
 ```
 src/extensions/iracing/
-├── index.ts                  (existing — connection, camera, overlays)
-├── telemetry-reader.ts       (NEW — reads iRacing telemetry var buffer at 5Hz)
-├── event-detector.ts         (NEW — detects OVERTAKE, BATTLE_STATE, PIT_ENTRY/EXIT, etc.)
-├── identity-override.ts      (NEW — maps carIdx → booked driver name from session config)
-├── publisher.ts              (NEW — batches & POSTs RaceEvent[] to Race Control)
-└── publisher-config.ts       (NEW — settings schema for publisher mode)
+├── index.ts                          (existing — connection, camera, overlays; wires publisher)
+├── telemetry-frame.ts                (RawTelemetryReads → TelemetryFrame assembly & iRacing var names)
+└── publisher/
+    ├── index.ts                      (barrel re-export for all publisher modules)
+    ├── orchestrator.ts               (PublisherOrchestrator — wires all detectors to extension lifecycle)
+    ├── transport.ts                  (PublisherTransport — batch queue, POST, retry, auto-config lookup)
+    ├── event-types.ts                (PublisherEvent envelope, 60+ PublisherEventType union, payload map)
+    ├── session-state.ts              (TelemetryFrame, CarState, SessionState, buildEvent, carRefFromRoster)
+    ├── identity-override.ts          (IdentityOverrideService — publisher.identityDisplayName → iRacing UserName)
+    ├── identity-event-builder.ts     (IDENTITY_RESOLVED / IDENTITY_OVERRIDE_CHANGED event constructors)
+    ├── lifecycle-event-detector.ts   (PUBLISHER_HELLO/HEARTBEAT/GOODBYE, IRACING_CONNECTED/DISCONNECTED)
+    ├── session-lifecycle-detector.ts (SESSION_LOADED, SESSION_STATE_CHANGE, RACE_GREEN, RACE_CHECKERED, SESSION_ENDED)
+    ├── session-type-detector.ts      (SESSION_TYPE_CHANGE)
+    ├── flag-detector.ts              (FLAG_GREEN/YELLOW_*/RED/WHITE/DEBRIS, per-car flag events)
+    ├── lap-completed-detector.ts     (LAP_COMPLETED)
+    ├── lap-performance-detector.ts   (PERSONAL_BEST_LAP, SESSION_BEST_LAP, CLASS_BEST_LAP, LAP_TIME_DEGRADATION, STINT_MILESTONE, STINT_BEST_LAP)
+    ├── overtake-battle-detector.ts   (OVERTAKE, OVERTAKE_FOR_LEAD, OVERTAKE_FOR_CLASS, POSITION_CHANGE, BATTLE_ENGAGED/CLOSING/BROKEN, LAPPED_TRAFFIC_AHEAD, BEING_LAPPED)
+    ├── pit-incident-detector.ts      (PIT_ENTRY, PIT_EXIT, OFF_TRACK, BACK_ON_TRACK, STOPPED_ON_TRACK, SLOW_CAR_AHEAD)
+    ├── pit-stop-detail-detector.ts   (PIT_STOP_BEGIN, PIT_STOP_END, FUEL_LEVEL_CHANGE, FUEL_LOW, OUT_LAP)
+    ├── incident-stint-detector.ts    (INCIDENT_POINT, TEAM_INCIDENT_POINT, INCIDENT_LIMIT_WARNING, BIG_HIT, SPIN_DETECTED, STINT_MILESTONE)
+    ├── driver-swap-roster-detector.ts(DRIVER_SWAP_INITIATED, DRIVER_SWAP_COMPLETED, ROSTER_UPDATED)
+    ├── environment-detector.ts       (WEATHER_CHANGE, TRACK_TEMP_DRIFT, WIND_SHIFT, TIME_OF_DAY_PHASE)
+    ├── polish-flag-detector.ts       (FLAG_BLUE_DRIVER, FLAG_BLACK_DRIVER, FLAG_MEATBALL_DRIVER, FLAG_DISQUALIFY)
+    ├── player-physics-detector.ts    (player-car physics events — speed, steering, spin)
+    └── __tests__/                    (one test file per detector + orchestrator + transport)
 ```
 
 ### 3.3 Data Flow
@@ -79,28 +99,33 @@ src/extensions/iracing/
 iRacing Shared Memory
         │
         ▼ (5Hz, telemetry var buffer — kernel32.dll, same handle as session reader)
-TelemetryReader
-        │  TelemetryFrame (8 key fields only — see §3.4)
+telemetry-frame.ts  (assembleTelemetryFrame — RawTelemetryReads → TelemetryFrame)
+        │  TelemetryFrame (25+ fields — see §3.4)
         ▼
-EventDetector  ◄──  SessionState (per-session in-memory cache)
-        │  RaceEvent[]
+PublisherOrchestrator.onTelemetryFrame()
+        │  runs 14 detector functions in dependency order:
+        │    detectSessionLifecycle → detectFlags → detectLapCompleted
+        │    detectPitAndIncidents → detectPitStopDetail → detectOvertakeAndBattle
+        │    detectLapPerformance → detectSessionTypeChange → detectIncidentsAndMilestones
+        │    detectDriverSwapAndRoster → detectEnvironment → detectPolishFlags
+        │    detectPlayerPhysics
+        │  PublisherEvent[]
         ▼
-IdentityOverride  ◄──  booked driver map (from local session config set at check-in)
-        │  RaceEvent[] with resolved driver names
-        ▼
-Publisher
-        │  POST /api/telemetry/events  (batched, Bearer token from MSAL)
+PublisherTransport.enqueue()  ◄──  HIGH_PRIORITY_EVENTS trigger immediate flush
+        │
+        ▼ (batch timer, default 2s, configurable)
+POST /api/telemetry/events  (max 20 events, Bearer token from MSAL)
         ▼  [internet — no LAN required]
 Race Control API  →  raceEvents Cosmos container
-        ↑
-        │  (no back-channel — publisher rig never receives anything)
+        │
+        ↑  (no back-channel — publisher rig never receives anything)
 ```
 
 #### Media/Director Rig (existing Director Loop — unchanged)
 
 ```
 Race Control API  (raceEvents Cosmos container)
-        │  GET /api/director/v1/sessions/{id}/next  (existing Director Loop)
+        │  GET /api/director/v1/sessions/{id}/sequences/next  (Director Loop)
         ▼
 Director Agent  →  SequenceExecutor  →  OBS / Discord / iRacing camera commands
 ```
@@ -109,226 +134,394 @@ The two rigs never communicate with each other. Race Control is the sole interme
 
 ### 3.4 Telemetry Fields Read
 
-The 8 fields the AI pipeline actually uses (from the RFC analysis):
+All fields are defined in `telemetry-frame.ts` and assembled into a `TelemetryFrame` by `assembleTelemetryFrame()`:
+
+**Session scalars**
 
 | iRacing Variable | Type | Purpose |
 | :--- | :--- | :--- |
-| `CarIdxPosition` | `int[64]` | Race position per car |
-| `CarIdxOnPitRoad` | `bool[64]` | Pit road detection |
-| `CarIdxTrackSurface` | `int[64]` | Track / pit / out-of-world |
-| `CarIdxLastLapTime` | `float[64]` | Last lap time per car |
-| `CarIdxBestLapTime` | `float[64]` | Best lap time per car |
-| `CarIdxLapCompleted` | `int[64]` | Laps completed per car |
-| `CarIdxClassPosition` | `int[64]` | Class position per car |
+| `SessionTick` | `number` | Deduplication key |
+| `SessionTime` | `number` | iRacing session clock in seconds |
+| `SessionState` | `enum` | Racing state machine value |
 | `SessionFlags` | `bitfield` | Yellow/red/green flag state |
+| `SessionUniqueID` | `number` | Changes on new session/subsession |
 
-No other fields are transmitted. This reduces payload from ~150 fields to 8 — approximately a 95% reduction in wire data.
+**Per-car arrays (CarIdx 0–63)**
+
+| iRacing Variable | Type | Purpose |
+| :--- | :--- | :--- |
+| `CarIdxPosition` | `Int32Array` | Race position per car |
+| `CarIdxClassPosition` | `Int32Array` | Class position per car |
+| `CarIdxOnPitRoad` | `Uint8Array` | Pit road detection |
+| `CarIdxTrackSurface` | `Int32Array` | Track / pit stall / approaching pits / off-track |
+| `CarIdxLastLapTime` | `Float32Array` | Last lap time per car |
+| `CarIdxBestLapTime` | `Float32Array` | Best lap time per car |
+| `CarIdxLapCompleted` | `Int32Array` | Laps completed per car |
+| `CarIdxLapDistPct` | `Float32Array` | 0.0–1.0 track position (sector detection) |
+| `CarIdxF2Time` | `Float32Array` | Gap to car ahead in seconds (battle detection) |
+| `CarIdxSessionFlags` | `Int32Array` | Per-car flag bitmask (blue/black/meatball flags) |
+| `CarIdxSpeed` | `Float32Array` | Per-car ground speed m/s |
+
+**Player car scalars**
+
+| iRacing Variable | Type | Purpose |
+| :--- | :--- | :--- |
+| `FuelLevel` | `number` | Fuel in litres |
+| `FuelLevelPct` | `number` | Fuel 0.0–1.0 |
+| `PlayerCarMyIncidentCount` | `number` | Player incident count |
+| `PlayerCarTeamIncidentCount` | `number` | Team incident count |
+| `IncidentLimit` | `number` | Session limit for warnings |
+
+**Environmental scalars**
+
+| iRacing Variable | Type | Purpose |
+| :--- | :--- | :--- |
+| `Skies` | `enum` | Sky condition |
+| `TrackTemp` | `number` | Track temperature (°C) |
+| `WindDir` | `number` | Wind direction (radians) |
+| `WindVel` | `number` | Wind speed (m/s) |
+| `AirHumidity` | `number` | Relative humidity 0.0–1.0 |
+| `FogLevel` | `number` | Fog 0.0–1.0 |
+
+**Player-car physics (single-car telemetry)**
+
+| iRacing Variable | Type | Purpose |
+| :--- | :--- | :--- |
+| `Speed` | `number` | Ground speed m/s |
+| `SteeringWheelAngle` | `number` | Radians, positive = left |
+| `SteeringWheelPctTorque` | `number` | 0.0–1.0 |
+| `SolarAltitude` | `number` | Radians from horizon |
 
 ---
 
 ## 4. Event Types
 
-These align with the Race Control Telemetry Gateway Spec:
+Defined in `publisher/event-types.ts`. Events are grouped into eight categories. Cloud-synthesised events are never emitted by the publisher; they are noted for documentation only.
 
-| Event Type | Trigger | Priority |
+### §1 Lifecycle & Session State
+
+| Event Type | Trigger | Detector |
 | :--- | :--- | :--- |
-| `OVERTAKE` | Position swap between consecutive frames, excluding pit cycles | High |
-| `BATTLE_STATE` | Gap crosses threshold: `ENGAGED` (< 1.0s), `CLOSING` (< 2.0s, shrinking), `BROKEN` (> 2.0s) | High |
-| `PIT_ENTRY` | `CarIdxOnPitRoad` transition false → true | Medium |
-| `PIT_EXIT` | `CarIdxOnPitRoad` transition true → false | Medium |
-| `INCIDENT` | Flag bitmask change + position/speed anomaly | High |
-| `LAP_COMPLETE` | `CarIdxLapCompleted` increment, with lap time captured | Low |
-| `POSITION_CHANGE` | `CarIdxPosition` change not caused by an overtake (e.g., pit cycle) | Medium |
-| `SECTOR_COMPLETE` | Lap distance crosses sector boundary | Low |
+| `PUBLISHER_HELLO` | Extension activate with publisher.enabled | `LifecycleEventDetector` |
+| `PUBLISHER_HEARTBEAT` | 30s idle (suppressed if any event was emitted within the window) | `LifecycleEventDetector` |
+| `PUBLISHER_GOODBYE` | Extension deactivate / app shutdown | `LifecycleEventDetector` |
+| `IRACING_CONNECTED` | iRacing shared memory becomes available | `LifecycleEventDetector` |
+| `IRACING_DISCONNECTED` | iRacing shared memory lost | `LifecycleEventDetector` |
+| `SESSION_LOADED` | `SessionUniqueID` changes (new subsession) | `session-lifecycle-detector` |
+| `SESSION_STATE_CHANGE` | `SessionState` enum transitions | `session-lifecycle-detector` |
+| `SESSION_TYPE_CHANGE` | Session type string changes in YAML | `session-type-detector` |
+| `RACE_GREEN` | SessionState transitions to Racing | `session-lifecycle-detector` |
+| `RACE_CHECKERED` | SessionState transitions to Checkered | `session-lifecycle-detector` |
+| `SESSION_ENDED` | SessionState transitions to CoolDown/Finished | `session-lifecycle-detector` |
+
+### §2 Race Control / Flags
+
+| Event Type | Trigger | Detector |
+| :--- | :--- | :--- |
+| `FLAG_GREEN` | `SessionFlags` green bit set | `flag-detector` |
+| `FLAG_YELLOW_LOCAL` | `SessionFlags` yellow bit, local caution | `flag-detector` |
+| `FLAG_YELLOW_FULL_COURSE` | `SessionFlags` full-course yellow | `flag-detector` |
+| `FLAG_RED` | `SessionFlags` red bit | `flag-detector` |
+| `FLAG_WHITE` | `SessionFlags` white (final lap) | `flag-detector` |
+| `FLAG_BLUE_DRIVER` | `CarIdxSessionFlags` blue bit for affected car | `polish-flag-detector` |
+| `FLAG_BLACK_DRIVER` | `CarIdxSessionFlags` black bit | `polish-flag-detector` |
+| `FLAG_MEATBALL_DRIVER` | `CarIdxSessionFlags` meatball bit | `polish-flag-detector` |
+| `FLAG_DEBRIS` | `SessionFlags` debris bit | `flag-detector` |
+| `FLAG_DISQUALIFY` | `CarIdxSessionFlags` disqualify bit | `polish-flag-detector` |
+
+### §3 Lap & Sector Performance
+
+| Event Type | Trigger | Detector |
+| :--- | :--- | :--- |
+| `LAP_COMPLETED` | `CarIdxLapCompleted` increment | `lap-completed-detector` |
+| `PERSONAL_BEST_LAP` | Player's `CarIdxBestLapTime` improves (requires `playerCarIdx` from YAML) | `lap-performance-detector` |
+| `SESSION_BEST_LAP` | Lowest `CarIdxBestLapTime` across all cars improves | `lap-performance-detector` |
+| `CLASS_BEST_LAP` | Best lap within a `CarClassID` group improves | `lap-performance-detector` |
+| `LAP_TIME_DEGRADATION` | Rolling avg `CarIdxLastLapTime` rises > threshold from stint best | `lap-performance-detector` |
+| `STINT_MILESTONE` | 25% / 50% / 75% of estimated stint laps completed | `incident-stint-detector` |
+| `STINT_BEST_LAP` | New best lap within current stint | `lap-performance-detector` |
+
+### §4 Position & Battle
+
+| Event Type | Trigger | Detector |
+| :--- | :--- | :--- |
+| `OVERTAKE` | On-track position swap, both cars off pit road | `overtake-battle-detector` |
+| `OVERTAKE_FOR_LEAD` | Overtake gains P1 overall | `overtake-battle-detector` |
+| `OVERTAKE_FOR_CLASS` | Overtake gains P1 in class | `overtake-battle-detector` |
+| `POSITION_CHANGE` | Position change via pit cycle (not an on-track pass) | `overtake-battle-detector` |
+| `BATTLE_ENGAGED` | `CarIdxF2Time` < 1.0s, sustained 2 frames | `overtake-battle-detector` |
+| `BATTLE_CLOSING` | Gap < 2.0s and shrinking | `overtake-battle-detector` |
+| `BATTLE_BROKEN` | Gap > 2.0s after engagement | `overtake-battle-detector` |
+| `LAPPED_TRAFFIC_AHEAD` | Lap-down car detected within gap threshold | `overtake-battle-detector` |
+| `BEING_LAPPED` | Player car being approached by lap-up traffic | `overtake-battle-detector` |
+
+### §5 Pit & Strategy
+
+| Event Type | Trigger | Detector |
+| :--- | :--- | :--- |
+| `PIT_ENTRY` | `CarIdxOnPitRoad` false → true | `pit-incident-detector` |
+| `PIT_STOP_BEGIN` | Car comes to a stop in pit stall (`CarIdxTrackSurface` = 2) | `pit-stop-detail-detector` |
+| `PIT_STOP_END` | Car leaves pit stall | `pit-stop-detail-detector` |
+| `PIT_EXIT` | `CarIdxOnPitRoad` true → false | `pit-incident-detector` |
+| `FUEL_LEVEL_CHANGE` | `FuelLevel` change during pit stop | `pit-stop-detail-detector` |
+| `FUEL_LOW` | `FuelLevelPct` crosses low-fuel threshold | `pit-stop-detail-detector` |
+| `OUT_LAP` | First lap off pit exit (post stop) | `pit-stop-detail-detector` |
+
+### §6 Incidents & Safety
+
+| Event Type | Trigger | Detector |
+| :--- | :--- | :--- |
+| `OFF_TRACK` | `CarIdxTrackSurface` transitions to off-track (-1) | `pit-incident-detector` |
+| `BACK_ON_TRACK` | `CarIdxTrackSurface` returns to on-track after off-track | `pit-incident-detector` |
+| `STOPPED_ON_TRACK` | Car speed near zero off pit road | `pit-incident-detector` |
+| `SLOW_CAR_AHEAD` | `CarIdxSpeed` of car ahead significantly below surrounding traffic | `pit-incident-detector` |
+| `INCIDENT_POINT` | `PlayerCarMyIncidentCount` increment | `incident-stint-detector` |
+| `TEAM_INCIDENT_POINT` | `PlayerCarTeamIncidentCount` increment | `incident-stint-detector` |
+| `INCIDENT_LIMIT_WARNING` | Incident count approaches `IncidentLimit` | `incident-stint-detector` |
+| `BIG_HIT` | Large sudden speed delta detected | `incident-stint-detector` |
+| `SPIN_DETECTED` | Rapid steering angle change with speed loss | `incident-stint-detector` |
+
+### §7 Identity & Roster
+
+| Event Type | Trigger | Detector |
+| :--- | :--- | :--- |
+| `IDENTITY_RESOLVED` | First resolution of player display name | `identity-event-builder` |
+| `IDENTITY_OVERRIDE_CHANGED` | `publisher.identityDisplayName` setting changed mid-session | `identity-event-builder` |
+| `DRIVER_SWAP_INITIATED` | Operator clicks "Initiate Driver Swap" in the UI while player car is in pits | `driver-swap-roster-detector` |
+| `DRIVER_SWAP_COMPLETED` | Car exits pits after a pending swap | `driver-swap-roster-detector` |
+| `ROSTER_UPDATED` | YAML driver roster changes (pit exit / new join) | `driver-swap-roster-detector` |
+
+### §8 Environment
+
+| Event Type | Trigger | Detector |
+| :--- | :--- | :--- |
+| `WEATHER_CHANGE` | `Skies` enum transitions | `environment-detector` |
+| `TRACK_TEMP_DRIFT` | `TrackTemp` crosses threshold from baseline | `environment-detector` |
+| `WIND_SHIFT` | `WindDir` or `WindVel` crosses change threshold | `environment-detector` |
+| `TIME_OF_DAY_PHASE` | `SolarAltitude` crosses dawn/dusk boundaries | `environment-detector` |
+
+> **Cloud-emitted only (never produced by publisher):** `FOCUS_VS_FOCUS_BATTLE`, `FOCUS_GROUP_ON_TRACK`, `FOCUS_GROUP_SPLIT`, `STINT_HANDOFF_HANDOVER`, `RIG_FAILOVER`, `STINT_BATON_PASS`, `UNDERCUT_DETECTED`, `IN_LAP_DECLARED`, `SESSION_LEADER_CHANGE`
 
 ---
 
 ## 5. Data Models
 
-### 5.1 RaceEvent (wire format to Race Control)
+### 5.1 PublisherEvent (wire format to Race Control)
+
+Defined in `publisher/event-types.ts`. The envelope changed from the proposed `RaceEvent` — the primary car reference is a flat `car` field (not `involvedCars[]`), and `publisherCode` identifies the sending rig.
 
 ```typescript
-interface RaceEvent {
-  id: string;                          // UUID v4
-  raceSessionId: string;               // Partition key (from Director session claim)
-  type: RaceEventType;                 // Enum from §4
-  timestamp: number;                   // Unix ms
-  lap: number;                         // Leader lap at time of event
-  involvedCars: {
-    carIdx: number;
-    carNumber: string;
-    driverName: string;                // Resolved via IdentityOverride (booked name)
-    position?: number;
-  }[];
-  payload: Record<string, unknown>;    // Event-specific data (gap, lapTime, etc.)
-  ttl: number;                         // 7776000 (90 days)
+interface PublisherEvent<T extends PublisherEventType = PublisherEventType> {
+  /** UUID v4 — idempotency key */
+  id: string;
+  /** Cloud-assigned session id (from check-in response or publisher.raceSessionId setting) */
+  raceSessionId: string;
+  /** Identifies the rig — set from publisher.publisherCode setting */
+  publisherCode: string;
+  /** Event type discriminator */
+  type: T;
+  /** Unix ms (publisher clock) */
+  timestamp: number;
+  /** iRacing SessionTime in seconds */
+  sessionTime: number;
+  /** iRacing SessionTick — used for deduplication */
+  sessionTick: number;
+  /** The car this event is primarily about */
+  car: PublisherCarRef;
+  /** Event-specific payload — typed per event via EventPayloadMap */
+  payload: EventPayloadMap[T];
+  /** Optional cheap context block attached to every event */
+  context?: PublisherEventContext;
 }
 
-type RaceEventType =
-  | 'OVERTAKE'
-  | 'BATTLE_STATE'
-  | 'PIT_ENTRY'
-  | 'PIT_EXIT'
-  | 'INCIDENT'
-  | 'LAP_COMPLETE'
-  | 'POSITION_CHANGE'
-  | 'SECTOR_COMPLETE';
+interface PublisherCarRef {
+  carIdx: number;       // iRacing CarIdx (0–63)
+  carNumber: string;    // iRacing CarNumberRaw
+  driverName: string;   // Display name with identity override applied
+  teamName?: string;
+  carClassShortName?: string;
+}
+
+interface PublisherEventContext {
+  leaderLap?: number;    // Leader lap at time of event
+  sessionState?: number; // iRacing SessionState enum
+  sessionFlags?: number; // iRacing SessionFlags bitmask snapshot
+  trackTemp?: number;    // °C
+}
 ```
 
-### 5.2 Per-Session State (in-memory, not persisted)
+### 5.2 PublisherConfigResponse (auto-discovery via GET /api/publisher-config/{publisherCode})
+
+```typescript
+interface PublisherConfigResponse {
+  gatewayUrl: string;
+  raceSessionId: string;
+  id: string;
+  driverId: string;
+  displayName: string;
+  nickname: string;
+  iracingName: string;
+  publisherCode: string;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+The driver only needs their `publisherCode` — the settings UI calls `fetchPublisherConfig()` (in `transport.ts`) to auto-populate `raceSessionId` and `displayName`.
+
+### 5.3 SessionState (in-memory, not transmitted)
+
+Defined in `publisher/session-state.ts`. A `SessionState` instance is created on the first telemetry frame and reset on `SESSION_LOADED`.
 
 ```typescript
 interface SessionState {
   raceSessionId: string;
-  previousFrame: TelemetryFrame | null;
-  carStates: Map<number, CarState>;
-  activeBattles: Map<string, BattleState>; // key: "carIdxA-carIdxB"
+  sessionUniqueId: number;
+  carStates: Map<number, CarState>;         // keyed by carIdx
+  sessionBestLapTime: number;
+  classBestLapTimes: Map<number, number>;   // keyed by carClassId
+  activeBattles: Map<string, BattleEntry>;  // keyed by 'carIdxA-carIdxB'
+  driverSwapPending: boolean;
+  pendingSwapOutgoingDriverId: string;
+  pendingSwapIncomingDriverId: string;
+  pendingSwapIncomingDriverName: string;
+  pendingSwapInitiatedSessionTime: number;
+  roster: Map<number, PublisherCarRef>;
 }
 
 interface CarState {
   position: number;
   classPosition: number;
   onPitRoad: boolean;
-  onTrack: boolean;
-  lastLapTime: number;
-  lapsCompleted: number;
   trackSurface: number;
-}
-
-interface BattleState {
-  status: 'ENGAGED' | 'CLOSING' | 'BROKEN';
-  gapSeconds: number;
-  since: number; // timestamp
-}
-```
-
-### 5.3 TelemetryFrame (internal — not transmitted)
-
-```typescript
-interface TelemetryFrame {
-  sessionTick: number;
+  lastLapTime: number;
+  bestLapTime: number;
+  lapsCompleted: number;
+  lapDistPct: number;
+  stintBestLapTime: number;
   sessionFlags: number;
-  carIdxPosition: Int32Array;     // [64]
-  carIdxOnPitRoad: Uint8Array;    // [64] (bool)
-  carIdxTrackSurface: Int32Array; // [64]
-  carIdxLastLapTime: Float32Array;// [64]
-  carIdxBestLapTime: Float32Array;// [64]
-  carIdxLapCompleted: Int32Array; // [64]
-  carIdxClassPosition: Int32Array;// [64]
+  lapEnteredPit: number;
+  // ... additional pit/stint tracking fields
 }
 ```
+
+### 5.4 TelemetryFrame (internal — not transmitted)
+
+Defined in `publisher/session-state.ts`. Assembled from raw koffi reads by `assembleTelemetryFrame()` in `telemetry-frame.ts`. Contains all 25+ fields listed in §3.4.
 
 ---
 
 ## 6. Identity Override
 
-The iRacing game identifies drivers by `CarIdx` (0–63). Race Control knows drivers by their booked name (e.g., "Lando Prost"). The `IdentityOverride` component resolves this at the edge before any data leaves the rig.
+Implemented in `publisher/identity-override.ts` — `IdentityOverrideService`.
 
-**Source of truth:** The Director's session config, populated at check-in time via the existing `POST /api/director/v1/sessions/{raceSessionId}/checkin` flow. The check-in response includes the rig's booked driver assignment.
+**Resolution priority:**
+1. `publisher.identityDisplayName` setting (non-empty string) — manually configured display name.
+2. iRacing YAML `UserName` for the player car — fallback when no override is set.
 
-**Override logic:**
-1. At session start, load `carIdx → bookedDriverName` map from session config.
-2. For every `RaceEvent` produced by `EventDetector`, replace the iRacing driver name with the booked name in `involvedCars[].driverName`.
-3. If no override is available for a `carIdx`, fall back to the iRacing driver name from session YAML.
+**Behaviour:**
+- `resolve(iracingUserName, overrideDisplayName)` returns a discriminated union: `first_resolution`, `override_changed`, or `unchanged`. The caller (`identity-event-builder.ts`) emits `IDENTITY_RESOLVED` on first resolution and `IDENTITY_OVERRIDE_CHANGED` when the display name changes mid-session.
+- `setRacecenterDriverId(driverId)` injects the Race Control driver ID once the check-in API provides it. This is currently not yet called — the check-in response does not yet include driver assignment (tracked as racecontrol#265). When that lands, this method is wired to the check-in handler.
+- `reset()` clears state on `SESSION_LOADED` with a new `SessionUniqueID`.
 
-This ensures the cloud's `raceEvents` container always contains real-world identities — no post-processing step needed in Race Control.
+> **Note:** The proposed approach of loading a `carIdx → bookedDriverName` map from the session check-in response has been deferred pending racecontrol#265. The current implementation uses the settings-based override instead.
 
 ---
 
 ## 7. Transport
 
-- **Endpoint:** `POST /api/telemetry/events` (new Race Control endpoint — see OpenAPI spec)
-- **Auth:** `Authorization: Bearer <token>` — reuses the MSAL token already managed by the Director's auth service. No additional credentials on the rig.
-- **Batching:** Events are buffered in-memory and flushed every 2 seconds or when the buffer reaches 20 events, whichever comes first.
-- **Retry:** Failed POSTs are retried up to 3 times with exponential backoff (1s, 2s, 4s). Events older than 30 seconds are discarded rather than retried.
-- **Offline:** If the rig loses internet connectivity, the buffer drains silently. No local persistence — the cloud state machine tolerates missing frames.
+Implemented in `publisher/transport.ts` — `PublisherTransport` and `fetchPublisherConfig`.
+
+- **Endpoint:** `POST /api/telemetry/events` — batches `PublisherEvent[]` in a `PublisherEventBatchRequest` envelope.
+- **Auth:** `Authorization: Bearer <token>` — reuses the MSAL token from the Director auth service via the `getAuthToken` callback.
+- **Endpoint derivation:** The endpoint URL is derived from `app.rcApiBaseUrl` (which reads `VITE_API_BASE_URL` at build time), ensuring all parts of the Director point at the same Race Control environment without per-extension hardcoding.
+- **Batch size:** Maximum 20 events per request (per OpenAPI spec `maxItems: 20`).
+- **Flush interval:** Configurable via `publisher.batchIntervalMs` (default 2000ms).
+- **High-priority bypass:** `OVERTAKE`, `OVERTAKE_FOR_LEAD`, `OVERTAKE_FOR_CLASS`, `BATTLE_ENGAGED`, and other events in `HIGH_PRIORITY_EVENTS` trigger an immediate flush without waiting for the next timer tick.
+- **Response handling:**
+  - `202 Accepted` — parse `PublisherEventBatchResponse`, log any `invalid` events. Reset backoff.
+  - `400 Bad Request` — drop batch; do not re-queue (would loop forever).
+  - `401 Unauthorized` — re-queue events, surface error (caller must refresh token).
+  - `429 Too Many Requests` — re-queue events, apply exponential backoff.
+  - `5xx / network error` — re-queue events, apply exponential backoff.
+- **Backoff:** Starts at 1s, doubles on each consecutive failure, caps at 30s.
+- **Reentrancy:** Concurrent `flush()` calls are dropped — only one flush in flight at a time.
+- **Session rebind:** `clearQueue()` discards all queued events when the `raceSessionId` changes, preventing stale events from leaking into the new session.
+
+**Auto-discovery:** `fetchPublisherConfig(publisherCode, getAuthToken, baseUrl)` calls `GET /api/publisher-config/{publisherCode}`. The driver only needs their `publisherCode` to auto-populate `raceSessionId` and `displayName` in the settings UI.
 
 ---
 
 ## 8. Configuration
 
-New settings added to the iRacing extension settings panel under a **"Publisher"** section:
+Publisher settings are stored in the iRacing extension settings alongside existing camera and overlay settings. They are read by `PublisherOrchestrator.start()` from `director.settings`.
 
 | Setting | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `publisher.enabled` | `boolean` | `false` | Enable telemetry publishing |
-| `publisher.pollRateHz` | `number` | `5` | Telemetry read rate (max 60Hz, iRacing cap) |
-| `publisher.batchIntervalMs` | `number` | `2000` | How often to flush the event buffer |
-| `publisher.maxBatchSize` | `number` | `20` | Max events per POST request |
+| `publisher.publisherCode` | `string` | `''` | Short code identifying this rig (e.g. `rig-01`) |
+| `publisher.raceSessionId` | `string` | `''` | Active Race Control session ID — auto-populated via publisher code lookup or set via `bindSession` intent |
+| `publisher.identityDisplayName` | `string` | `''` | Override display name (blank = use iRacing UserName) |
+| `publisher.batchIntervalMs` | `number` | `2000` | How often to flush the event buffer (ms) |
 
-These are stored in the iRacing extension's settings alongside existing camera and overlay settings. No separate config file.
+> **Removed from spec:** `publisher.pollRateHz` (telemetry poll rate is managed by the iRacing extension's unified polling loop) and `publisher.maxBatchSize` (hard-coded to 20 per the OpenAPI spec).
 
 ---
 
-## 9. Manifest Changes (`src/extensions/iracing/package.json`)
+## 9. IPC Signals & Intent Handlers
 
-New entries added to the existing manifest:
+The orchestrator communicates with the renderer via the extension `emitEvent` system.
 
-```json
-{
-  "events": [
-    {
-      "name": "iracing.publisherStateChanged",
-      "description": "Emitted when publisher connection state changes.",
-      "payload": {
-        "connected": "boolean",
-        "eventsPublishedTotal": "number",
-        "lastFlushAt": "number | null"
-      }
-    }
-  ],
-  "settings": [
-    {
-      "key": "publisher.enabled",
-      "type": "boolean",
-      "default": false,
-      "label": "Enable Telemetry Publisher",
-      "description": "Stream race events to Race Control when a session is active."
-    }
-  ]
-}
-```
+### Events emitted (Main → Renderer)
+
+| IPC Event | Payload | When |
+| :--- | :--- | :--- |
+| `iracing.publisherStateChanged` | `TransportStatus` (`status`, `message`, `eventsQueuedTotal`, `lastFlushAt`) | On every transport status transition |
+| `iracing.publisherEventEmitted` | `{ id, type, carIdx?, timestamp }` | After each individual event is dispatched |
+| `iracing.publisherOperatorState` | `{ playerOnPitRoad: boolean, driverSwapPending: boolean }` | When player pit-road state changes |
+
+### Intent handlers (Renderer → Main)
+
+| Intent | Handler | Description |
+| :--- | :--- | :--- |
+| `iracing.publisher.setEnabled` | `orchestrator.setEnabled(enabled)` | Hot-toggle publisher without restarting the extension |
+| `iracing.publisher.bindSession` | `orchestrator.setRaceSessionId(id)` | Hot-update `raceSessionId` after Director session check-in; queue is cleared to prevent cross-session events |
+| `iracing.publisher.initiateDriverSwap` | `orchestrator.initiateDriverSwap(out, in, name)` | Operator-initiated driver swap — emits `DRIVER_SWAP_INITIATED` immediately; `DRIVER_SWAP_COMPLETED` fires on next pit exit |
 
 ---
 
 ## 10. UI
 
-### 10.1 Extension Panel — Publisher Section
+### 10.1 PublisherSettings Component (`renderer/PublisherSettings.tsx`)
 
-The iRacing extension detail page gains a collapsible **"TELEMETRY PUBLISHER"** section below the existing camera and overlay controls:
+The iRacing extension Panel gains a **Publisher** tab alongside the existing Control Desk and Race View tabs. The `PublisherSettings` component is hosted there. Fields:
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ TELEMETRY PUBLISHER                              [toggle]│
-├─────────────────────────────────────────────────────────┤
-│ STATUS   ● STREAMING    Events: 1,284   Last: 0.4s ago  │
-│                                                         │
-│ Poll Rate   5 Hz        Batch Interval   2s             │
-│                                                         │
-│ RECENT EVENTS                                           │
-│  OVERTAKE    Martinez → P3    Lap 14    2s ago          │
-│  PIT_EXIT    Garcia            Lap 14    8s ago          │
-│  BATTLE_STATE  Johnson / Kim  ENGAGED   12s ago         │
-└─────────────────────────────────────────────────────────┘
-```
+- **Enable toggle** — maps to `publisher.enabled`, hot-toggles via `setEnabled` intent.
+- **Publisher Code** — the rig's short code (e.g. `rig-01`). A lookup button calls `GET /api/publisher-config/{publisherCode}` to auto-populate Session ID and Display Name.
+- **Session ID** — maps to `publisher.raceSessionId`. Can be manually set or auto-populated via the lookup.
+- **Display Name override** — maps to `publisher.identityDisplayName`.
+- **Batch Interval** — maps to `publisher.batchIntervalMs`.
 
-- Status indicator uses `--green-flag` (streaming), `--yellow-flag` (connecting / retrying), `--red-flag` (error).
-- Recent events list shows last 5 events — `font-jetbrains`, `text-xs`, auto-scrolling.
-- All labels uppercase `font-rajdhani`.
+**Status indicators:**
+- Status badge uses colour-coded icons: green (active), yellow (idle/connecting), red (error/disabled).
+- Shows `eventsQueuedTotal` and `lastFlushAt` timestamp from `TransportStatus`.
+- Error message surfaced from `publisherStatus.message`.
+
+**Recent Events feed:**
+- Displays last 5 events received via `iracing.publisherEventEmitted`.
+- Columns: event type, car number, timestamp delta.
+- Font: `font-jetbrains text-xs`, auto-FIFO scrolling.
+
+**Driver Swap panel** (shown when `operatorState.playerOnPitRoad === true`):
+- Fields: Outgoing Driver ID, Incoming Driver ID, Incoming Driver Name.
+- "Initiate Swap" button fires `iracing.publisher.initiateDriverSwap` intent.
+- Button is disabled while `operatorState.driverSwapPending === true`.
 
 ### 10.2 Dashboard Widget
 
-The existing iRacing dashboard widget gains a small publisher badge:
-
-```
-┌─────────────────────────┐
-│ iRACING          ● LIVE │
-│ Watkins Glen  Lap 14/20 │
-│ PUB ▲ 1,284 events      │
-└─────────────────────────┘
-```
-
-`PUB ▲` badge is shown only when `publisher.enabled` is true and the session is active. Uses `text-secondary` (Telemetry Blue).
+The existing iRacing `DashboardCard` shows a publisher badge when `publisher.enabled` is true:
+- Status dot using `--green-flag` / `--yellow-flag` / `--red-flag`.
+- Event count from `eventsQueuedTotal`.
 
 ---
 
@@ -340,33 +533,31 @@ If a future requirement arises to remotely enable/disable publishing, this must 
 
 ---
 
-## 12. Out of Scope (for this feature)
+## 12. Out of Scope (Race Control back-end)
 
-The following items from the RFC are owned by the Race Control backend team and are **not** part of this Director feature:
+The following items from the RFC are owned by the Race Control back-end team and are not part of this Director feature:
 
-- **Step 1 — Global Event Detector:** Cloud-side frame-comparison state machine that merges events from multiple rigs.
-- **Step 2 — Race Story Distiller:** Periodic AI consolidation of events into narrative chapter summaries.
-- The new `POST /api/telemetry/events` REST endpoint itself.
-
-This feature delivers only the **Director-side implementation** of Step 3 from the RFC.
+- **Global Event Detector:** Cloud-side frame-comparison state machine that merges events from multiple rigs.
+- **Race Story Distiller:** Periodic AI consolidation of events into narrative chapter summaries.
+- The `POST /api/telemetry/events` REST endpoint itself.
+- Cloud-synthesised events (`FOCUS_VS_FOCUS_BATTLE`, `UNDERCUT_DETECTED`, `SESSION_LEADER_CHANGE`, etc.).
 
 ---
 
-## 13. Open Questions
+## 13. Known Limitations / Deferred Items
 
-1. **Poll Rate vs. Existing Loop:** The iRacing extension's current session reader polls at 2s intervals (checking `sessionInfoUpdate` counter). The publisher needs 5Hz (200ms). Should the poll loop be unified at 200ms with session YAML re-read only when the update counter changes, or run two separate timers? A unified loop is cleaner.
-
-2. **Multi-Rig Identity:** In special events with multiple rigs, each Director instance will have its own session config with its rig's booked driver. The cloud merges streams by `raceSessionId`. Does each rig's `raceSessionId` need to be the same shared session, or can rigs join the same session independently via check-in?
-
-3. **API Endpoint Spec:** The `POST /api/telemetry/events` endpoint is referenced in the RFC but not yet in the OpenAPI spec at `https://simracecenter.com/api/openapi.yaml`. Implementation will be blocked until this is published. Track at [margic/racecontrol issues](https://github.com/margic/racecontrol/issues).
-
-4. ~~**Publisher Mode Only Config:**~~ **Resolved.** Driver rigs simply leave all extensions except iRacing disabled. No special launcher mode, no new config format — the existing extension enable/disable system is sufficient.
+| Item | Status |
+| :--- | :--- |
+| `PERSONAL_BEST_LAP` requires `playerCarIdx` sourced from session YAML | `playerCarIdx` wiring from YAML parse to `setSessionMetadata()` is pending — event does not fire until wired |
+| `SESSION_TYPE_CHANGE` requires `sessionType` from YAML | No-op until `setSessionMetadata({ sessionType })` is called from the iRacing extension YAML parse path |
+| `racecenterDriverId` in `IdentityOverrideService` | Not yet populated — blocked on racecontrol#265 (check-in response to include driver assignment) |
+| `STINT_MILESTONE` requires `estimatedStintLaps` | No-op until `setSessionMetadata({ estimatedStintLaps })` is called |
 
 ---
 
 ## 14. Related Documents
 
-- [feature_iracing_integration.md](feature_iracing_integration.md) — Existing iRacing extension architecture
+- [feature_iracing_extension.md](feature_iracing_extension.md) — Existing iRacing extension architecture
 - [feature_extension_system.md](feature_extension_system.md) — Extension system and contribution points
 - [feature_director_loop_v2.md](feature_director_loop_v2.md) — Director Loop v2 orchestrator (orthogonal; publisher is independent)
 - [feature_session_claim.md](feature_session_claim.md) — Session check-in and identity mapping
