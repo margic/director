@@ -299,17 +299,19 @@ interface PublisherEvent {
 }
 ```
 
-**Affected payload types** — secondary car references changed from `carIdx: number` to `secondaryCar: PublisherCarRef`:
+**Affected payload types** — secondary car references enriched from bare integers to `PublisherCarRef` objects:
 
 | Event type | Before | After |
 | :--- | :--- | :--- |
 | `OVERTAKE`, `OVERTAKE_FOR_LEAD`, `OVERTAKE_FOR_CLASS` | `overtakenCarIdx: number` | `overtakenCar: PublisherCarRef` |
-| `BATTLE_ENGAGED`, `BATTLE_CLOSING`, `BATTLE_BROKEN` | `otherCarIdx: number` | `otherCar: PublisherCarRef` |
-| `LAPPED_TRAFFIC_AHEAD` | `lapDownCarIdx: number` | `lapDownCar: PublisherCarRef` |
+| `BATTLE_ENGAGED`, `BATTLE_CLOSING`, `BATTLE_BROKEN` | `chaserCarIdx: number` + `leaderCarIdx: number` | `chaserCar: PublisherCarRef` + `leaderCar: PublisherCarRef` |
+| `LAPPED_TRAFFIC_AHEAD` | `lapDownCarIdx: number` | `lappedCar: PublisherCarRef` |
 | `BEING_LAPPED` | `lappingCarIdx: number` | `lappingCar: PublisherCarRef` |
 | `FLAG_BLUE_DRIVER`, `FLAG_BLACK_DRIVER`, etc. | *(car in envelope only)* | *(no change — envelope `car` is sufficient)* |
 
-`PublisherCarRef` already exists and carries `{ carIdx, carNumber, driverName, teamName?, carClassShortName? }`.
+`PublisherCarRef` exists in `event-types.ts` and carries `{ carIdx, carNumber?, driverName?, teamName?, carClassShortName? }`. On the Race Control side, the structurally identical type is `PublisherEventCar` in `publisher-events.ts`. The two must remain in sync; no duplicate type should be introduced on either side.
+
+**Battle payload semantics.** The RC `BattleEngagedPayload` uses two distinct roles (`chaserCarIdx`/`leaderCarIdx`) that the AI executor consumes separately. The Director must emit both as named `PublisherCarRef` objects (`chaserCar` + `leaderCar`). Convention: the envelope `car` field is always the chaser; `leaderCar` is the car being chased. This must hold for all three battle event types.
 
 **Roster-fallback rule.** The roster may not yet contain an entry for a `carIdx` (e.g. a car joins mid-session, or an event fires before the first YAML parse completes). The schema must tolerate this:
 
@@ -322,8 +324,10 @@ interface PublisherEvent {
 #### Acceptance criteria
 
 - [ ] All affected payload interfaces in `event-types.ts` updated; `carNumber` and `driverName` marked optional on `PublisherCarRef`
+- [ ] Battle events updated with **two** named refs (`chaserCar` + `leaderCar`); `otherCar` naming removed from all three battle types
+- [ ] `LAPPED_TRAFFIC_AHEAD` uses `lappedCar` (not `lapDownCar`); `BEING_LAPPED` uses `lappingCar`; field names match RC-3 exactly
 - [ ] All affected detector implementations updated to populate `PublisherCarRef` from roster, with `carIdx`-only fallback
-- [ ] During transition, both new (`*Car`) and legacy (`*CarIdx`) fields are emitted; tests assert both shapes are present
+- [ ] During transition, both new (`*Car`/`*Cars`) and legacy (`*CarIdx`) fields are emitted; tests assert both shapes are present
 - [ ] `publisherCode` removed from envelope; `rigId?: string` added
 - [ ] Existing tests updated to reflect new payload shapes
 - [ ] Follow-up issue filed to remove legacy `*CarIdx` fields after RC-3 lands
@@ -429,8 +433,8 @@ Response 200 OK:
 
 Response 404 Not Found:   session does not exist
 Response 409 Conflict:    session is not in a state that accepts registration
-                          (accepting states: SCHEDULED, OPEN_FOR_CHECKIN, IN_PROGRESS)
-                          (rejecting states: COMPLETED, CANCELLED, ARCHIVED)
+                          (accepting states: PLANNED, ACTIVE)
+                          (rejecting states: COMPLETED, CANCELED)
 Response 401:             unauthenticated
 ```
 
@@ -452,11 +456,12 @@ This is the clean replacement for the `publisherCode` lookup ceremony. Media rig
 - [ ] Endpoint exists at `POST /api/publisher/sessions/{raceSessionId}/register`
 - [ ] Requires valid Bearer token
 - [ ] Idempotent for same `rigId` + `raceSessionId`
-- [ ] Returns 404 for unknown session, 409 for non-accepting states (enumerated above)
+- [ ] Returns 404 for unknown session, 409 for non-accepting states (`COMPLETED`, `CANCELED`)
 - [ ] Multiple distinct `rigId`s may register against the same `raceSessionId` concurrently
-- [ ] `driverName` is stored, retrievable, and updatable; updates reflected in session roster reads
+- [ ] `driverName` is stored and updatable; re-registering with a new value overwrites the previous name
 - [ ] Registered `(rigId, raceSessionId, userId)` triple authorizes the Bearer-token user to POST driver events for that session, per S2
 - [ ] Checked-in users may POST session events for their checked-in `raceSessionId` without calling register, per S2
+- [ ] A `publisherRegistrations` Cosmos container is provisioned (partition key: `raceSessionId`, no TTL); `cosmos.tf` updated
 - [ ] OpenAPI spec updated
 
 ---
@@ -471,6 +476,12 @@ This is the clean replacement for the `publisherCode` lookup ceremony. Media rig
 The current `PublisherEvent` schema requires `publisherCode` — a string that operators manually configure. Under the revised Director design, `publisherCode` is removed and replaced by an auto-generated `rigId` UUID. The API schema needs to reflect this.
 
 Additionally, for session-level events published from a media rig operating as an observer (no dedicated driver car), there is no meaningful per-car rig identifier at all. The field should be optional.
+
+**This issue also covers two tightly coupled pieces of work:**
+
+1. **`publisher-checkin-service.ts` migration.** `handleLifecycleEvent` in `telemetry-events.ts` calls `removePublisherCheckin(event.raceSessionId, event.publisherCode)`. `PublisherCheckinDocument` keys documents as `${raceSessionId}::${publisherCode}`, and all service methods take `publisherCode` as a parameter. These must be migrated to use `rigId` in lock-step with the envelope change — otherwise lifecycle events from a new Director will fail silently.
+
+2. **Authorization enforcement (S2).** The current `postTelemetryEvents` checks only that a `principal` exists (is the request authenticated?). It does **not** verify the sender is authorized for the claimed `raceSessionId`. Implementing S2 — checking active check-ins for session-scope events, checking `publisherRegistrations` for driver-scope events — is new enforcement behaviour that ships in this issue. This is the primary work item; the schema rename is secondary.
 
 #### Proposed Schema Change
 
@@ -493,6 +504,14 @@ rigId:
   required: false
 ```
 
+#### Dual-field validation rule (transition window)
+
+The following rule governs `validateEvent` during the transition period:
+
+> Accept the event if **either** `publisherCode` (non-empty string) **or** `rigId` (UUID string) is present. Reject with **400** if both are absent. When both are present, prefer `rigId` for auth lookup; `publisherCode` is silently discarded. Once the RC-4 removal milestone is reached, drop the `publisherCode` branch entirely.
+
+This supersedes the current validation which rejects any event without `publisherCode`.
+
 #### Authorization
 
 Per S2 (Shared Conventions), authorization for `POST /api/telemetry/events` is keyed on the **Bearer-token identity + `raceSessionId`**, not on `rigId`. Specifically:
@@ -511,9 +530,12 @@ Per S2 (Shared Conventions), authorization for `POST /api/telemetry/events` is k
 
 - [ ] `rigId` accepted as optional UUID field on `PublisherEvent`
 - [ ] `publisherCode` continues to be accepted (not a breaking change) but marked deprecated in the spec
-- [ ] Authorization implemented per S2 — events accepted/rejected based on Bearer-token identity + `raceSessionId`, not on `rigId` presence
+- [ ] Dual-field validation rule implemented: 400 if both fields absent; `rigId` preferred when both present
+- [ ] **Authorization enforcement:** `postTelemetryEvents` queries active check-ins (session-scope events) or `publisherRegistrations` (driver-scope events) against the Bearer-token identity and `raceSessionId`; returns 403 when neither is satisfied
 - [ ] Session-scope events from a checked-in media rig are accepted with `rigId` absent
 - [ ] Driver-scope events without an active registration or check-in are rejected with 403
+- [ ] `publisher-checkin-service.ts` migrated: document key and all method signatures use `rigId` in place of `publisherCode`
+- [ ] Lifecycle events from a new Director (carrying `rigId`, no `publisherCode`) are correctly processed by `handleLifecycleEvent`
 - [ ] OpenAPI spec updated
 
 ---
@@ -529,41 +551,30 @@ Events like `OVERTAKE` and `BATTLE_ENGAGED` reference the secondary car (the car
 
 #### Proposed Schema Change
 
-For all multi-car event payloads, replace bare integer car references with a `PublisherCarRef` object:
-
-```typescript
-interface PublisherCarRef {
-  carIdx: number;
-  carNumber: string;
-  driverName: string;
-  teamName?: string;
-  carClassShortName?: string;
-}
-```
+For all multi-car event payloads, replace bare integer car references with the existing `PublisherEventCar` type. **Do not introduce a duplicate type** — `PublisherEventCar` in `publisher-events.ts` already carries `{ carIdx, carNumber?, driverName?, teamName?, carClassShortName? }` and is the correct type to reuse (optionally exported under the alias `PublisherCarRef` for cross-codebase consistency with the Director).
 
 Affected event payload schemas:
 
-| Event | Field change |
-| :--- | :--- |
-| `OVERTAKE`, `OVERTAKE_FOR_LEAD`, `OVERTAKE_FOR_CLASS` | `overtakenCarIdx: int` → `overtakenCar: CarRef` |
-| `BATTLE_ENGAGED`, `BATTLE_CLOSING`, `BATTLE_BROKEN` | `otherCarIdx: int` → `otherCar: CarRef` |
-| `LAPPED_TRAFFIC_AHEAD` | `lapDownCarIdx: int` → `lapDownCar: CarRef` |
-| `BEING_LAPPED` | `lappingCarIdx: int` → `lappingCar: CarRef` |
+| Event | Current fields | After |
+| :--- | :--- | :--- |
+| `OVERTAKE`, `OVERTAKE_FOR_LEAD`, `OVERTAKE_FOR_CLASS` | `overtakenCarIdx: int` | `overtakenCar: PublisherEventCar` |
+| `BATTLE_ENGAGED`, `BATTLE_CLOSING`, `BATTLE_BROKEN` | `chaserCarIdx: int` + `leaderCarIdx: int` | `chaserCar: PublisherEventCar` + `leaderCar: PublisherEventCar` |
+| `LAPPED_TRAFFIC_AHEAD` | `lappedCarIdx: int` + `lappedCarNumber: string` | `lappedCar: PublisherEventCar` |
+| `BEING_LAPPED` | `leaderCarIdx: int` + `leaderCarNumber: string` | `lappingCar: PublisherEventCar` |
 
-**Field requirements on `CarRef`** (matches DIR-4 roster-fallback rule):
+**Battle payload semantics.** `BattleEngagedPayload` tracks two distinct roles — the chaser and the leader — which the AI executor uses separately. Collapsing to a single `otherCar` would lose this distinction. The solution is two named refs: `chaserCar` (the closing car) and `leaderCar` (the car being chased). Convention: the envelope `car` field is always the chaser; `leaderCar` is the other participant. This convention must hold consistently across `BATTLE_ENGAGED`, `BATTLE_CLOSING`, and `BATTLE_BROKEN`.
 
-- `carIdx`: required
-- `carNumber`, `driverName`: optional (roster lookup may not yet have resolved)
-- `teamName`, `carClassShortName`: optional
+**Field requirements.** All fields on `PublisherEventCar` except `carIdx` are optional — the roster lookup may not yet have resolved a new entrant. Consumers must tolerate `carIdx`-only objects as a degraded-but-valid state.
 
-**Transitional dual-emit window.** During the rollout, both the legacy `*CarIdx` integer field *and* the new `*Car` object will be present on the same event. Consumers should prefer the object when present. The legacy field is removed in a follow-up release once Director consumers have migrated.
+**Transitional dual-emit window.** During the rollout, both the legacy integer fields *and* the new `PublisherEventCar` objects will be present on the same event. Consumers should prefer the object when present. Legacy fields are removed in a follow-up release once Director consumers have migrated.
 
 #### Acceptance criteria
 
-- [ ] OpenAPI spec updated for all affected event payload schemas
-- [ ] `CarRef` object defined as a reusable component in the spec, with `carIdx` required and other fields optional
-- [ ] Validation accepts both the new object shape and the legacy integer field during the dual-emit window
-- [ ] Validation accepts `CarRef` objects containing only `carIdx` (degraded roster case)
+- [ ] OpenAPI spec updated for all affected event payload schemas using the existing `PublisherEventCar` component (no new type introduced)
+- [ ] Battle payloads updated with **two** named refs (`chaserCar` + `leaderCar`); the `envelope car = chaser` convention is documented in the spec
+- [ ] `lappedCar` used for `LAPPED_TRAFFIC_AHEAD`; `lappingCar` used for `BEING_LAPPED`; field names match DIR-4 exactly
+- [ ] Validation accepts both the new object shapes and the legacy integer fields during the dual-emit window
+- [ ] Validation accepts `PublisherEventCar` objects containing only `carIdx` (degraded roster case)
 - [ ] Old integer fields marked deprecated (not immediately removed for migration tolerance)
 
 ---
@@ -587,6 +598,8 @@ Affected event payload schemas:
 
 - [ ] Endpoint marked `deprecated: true` in OpenAPI spec
 - [ ] Deprecation notice added to API docs
+- [ ] `Deprecation: true` response header added to `getPublisherConfig.ts` response
+- [ ] `Sunset` (or `Link` with `rel="sunset"`) header added indicating the planned removal milestone
 - [ ] Endpoint continues to function (no breaking change)
 
 ---
