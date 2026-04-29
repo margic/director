@@ -16,6 +16,8 @@ These rules cut across the dual-pipeline design. Implementers of any issue must 
 
 `PUBLISHER_HELLO`, `PUBLISHER_HEARTBEAT`, `PUBLISHER_GOODBYE`, `IRACING_CONNECTED`, `IRACING_DISCONNECTED` describe the **extension** and the **shared iRacing connection**, not a per-pipeline concern. They are emitted by the **top-level orchestrator** (the same component that owns `PublisherTransport`), regardless of which sub-pipelines are active. They appear in DIR-1's pipeline assignment table under "Top-level", not under Driver.
 
+**`rigId` is required on lifecycle events** (not just recommended). Race Control's `event-synthesizer.ts` uses `rigId` to discriminate events from different physical rigs when synthesizing `STINT_BATON_PASS`, `RIG_FAILOVER`, and `STINT_HANDOFF_HANDOVER` cloud events. If `IRACING_CONNECTED` or `IRACING_DISCONNECTED` arrives without `rigId`, cross-rig synthesis goes silent with no error. The top-level orchestrator always generates `rigId` at startup, so this costs nothing — it just must be specified as required on these event types in the envelope, not merely "optional for debugging".
+
 ### S2 — Authorization model after `publisherCode` removal
 
 Race Control authorizes `POST /api/telemetry/events` per envelope as follows:
@@ -25,7 +27,7 @@ Race Control authorizes `POST /api/telemetry/events` per envelope as follows:
 | Bound via Director check-in (Session Publisher, and Driver Publisher on a media rig) | The Bearer-token user must hold the active check-in for that `raceSessionId`. |
 | Bound via `POST /api/publisher/sessions/{id}/register` (Driver Publisher on a driver-only rig) | The Bearer-token user must have an active registration for `(rigId, raceSessionId)`. |
 
-`rigId` is **optional** on the envelope (debugging annotation only). Authorization is keyed on the Bearer-token identity plus the `raceSessionId`, not on `rigId`. This is what allows session-only events from a media rig (no per-car rig identifier) to be accepted. RC-1 and RC-2 must both encode this rule.
+`rigId` is **optional** on the envelope for most event types. Exception: lifecycle events (`PUBLISHER_HELLO`, `PUBLISHER_HEARTBEAT`, `PUBLISHER_GOODBYE`, `IRACING_CONNECTED`, `IRACING_DISCONNECTED`) must carry `rigId` — the synthesizer requires it for multi-rig correlation (see S1). Authorization is keyed on the Bearer-token identity plus `raceSessionId`, not on `rigId`. Session-only events from a media rig are accepted with `rigId` absent on non-lifecycle event types. RC-1 and RC-2 must both encode this rule.
 
 ### S3 — Config migration on upgrade
 
@@ -151,6 +153,7 @@ Lifecycle events use whichever `raceSessionId` is currently bound (preferring th
 - [ ] Both orchestrators enqueue events into the same `PublisherTransport` instance
 - [ ] Test asserts only one `PublisherTransport` is constructed even when both pipelines activate (single-transport invariant)
 - [ ] Lifecycle events (`PUBLISHER_HELLO`/`HEARTBEAT`/`GOODBYE`, `IRACING_*`) are emitted on a media rig running only the Session Publisher
+- [ ] Lifecycle events always include `rigId` in the envelope (required per S1 for synthesizer)
 - [ ] Telemetry loop runs at 200 ms when either pipeline is active, 250 ms otherwise (per S4)
 - [ ] Roster cache is owned by the top-level orchestrator and pushed to both sub-orchestrators (per S5)
 - [ ] Existing tests migrate to the new file structure with no loss of coverage
@@ -328,7 +331,8 @@ interface PublisherEvent {
 - [ ] `LAPPED_TRAFFIC_AHEAD` uses `lappedCar` (not `lapDownCar`); `BEING_LAPPED` uses `lappingCar`; field names match RC-3 exactly
 - [ ] All affected detector implementations updated to populate `PublisherCarRef` from roster, with `carIdx`-only fallback
 - [ ] During transition, both new (`*Car`/`*Cars`) and legacy (`*CarIdx`) fields are emitted; tests assert both shapes are present
-- [ ] `publisherCode` removed from envelope; `rigId?: string` added
+- [ ] `publisherCode` removed from envelope; `rigId?: string` added (clean cut — no transition window)
+- [ ] `rigId` is populated on all lifecycle events (`PUBLISHER_HELLO/HEARTBEAT/GOODBYE`, `IRACING_CONNECTED/DISCONNECTED`) per S1
 - [ ] Existing tests updated to reflect new payload shapes
 - [ ] Follow-up issue filed to remove legacy `*CarIdx` fields after RC-3 lands
 
@@ -477,11 +481,21 @@ The current `PublisherEvent` schema requires `publisherCode` — a string that o
 
 Additionally, for session-level events published from a media rig operating as an observer (no dedicated driver car), there is no meaningful per-car rig identifier at all. The field should be optional.
 
-**This issue also covers two tightly coupled pieces of work:**
+**This issue covers three tightly coupled pieces of work:**
 
-1. **`publisher-checkin-service.ts` migration.** `handleLifecycleEvent` in `telemetry-events.ts` calls `removePublisherCheckin(event.raceSessionId, event.publisherCode)`. `PublisherCheckinDocument` keys documents as `${raceSessionId}::${publisherCode}`, and all service methods take `publisherCode` as a parameter. These must be migrated to use `rigId` in lock-step with the envelope change — otherwise lifecycle events from a new Director will fail silently.
+1. **Clean-cut removal of `publisherCode`.** There is no transition window: `publisherCode` is dropped outright from `validateEvent`, the `PublisherEvent` wire type, and all downstream services. This is feasible because there are no older Director versions in the field; all rigs are on the pre-release branch.
 
-2. **Authorization enforcement (S2).** The current `postTelemetryEvents` checks only that a `principal` exists (is the request authenticated?). It does **not** verify the sender is authorized for the claimed `raceSessionId`. Implementing S2 — checking active check-ins for session-scope events, checking `publisherRegistrations` for driver-scope events — is new enforcement behaviour that ships in this issue. This is the primary work item; the schema rename is secondary.
+2. **`publisher-checkin-service.ts` migration.** `handleLifecycleEvent` in `telemetry-events.ts` calls `removePublisherCheckin(event.raceSessionId, event.publisherCode)`. `PublisherCheckinDocument` keys documents as `${raceSessionId}::${publisherCode}`, and all service methods take `publisherCode` as a parameter. These must be rekeyed to `${raceSessionId}::${rigId}`. Lifecycle events always carry `rigId` per S1, so this holds without a fallback.
+
+3. **`event-synthesizer.ts` migration (13 references).** The synthesizer uses `publisherCode` as the rig-identity discriminator for three cloud-event algorithms:
+   - `STINT_BATON_PASS` — `IRACING_DISCONNECTED` from rig-A followed by `IRACING_CONNECTED` from rig-B within a 60s–10min window.
+   - `RIG_FAILOVER` — same pattern, under 60s.
+   - `STINT_HANDOFF_HANDOVER` — most recent `LAP_COMPLETED` from a different rig before a `DRIVER_SWAP_COMPLETED`.
+   All 13 `publisherCode` references become `rigId`. Cross-rig filter `e.publisherCode !== other.publisherCode` → `e.rigId !== other.rigId`. Add a defensive guard: if both sides lack `rigId`, skip synthesis rather than false-matching. Synthesized event payloads rename `outgoingPublisherCode`/`incomingPublisherCode`/`triggerPublisherCode` → `outgoingRigId`/`incomingRigId`/`triggerRigId`.
+
+4. **`makeCloudEvent` sentinel.** The current `publisherCode: 'cloud'` sentinel on RC-synthesized events is dropped. Cloud events simply have no `rigId`. Any filtering that previously used the `'cloud'` sentinel should use the existing `source: 'cloud'` document field instead.
+
+5. **Authorization enforcement (S2).** The current `postTelemetryEvents` checks only that a `principal` exists (is the request authenticated?). It does **not** verify the sender is authorized for the claimed `raceSessionId`. Implementing S2 — checking active check-ins for session-scope events, checking `publisherRegistrations` for driver-scope events — is new enforcement behaviour that ships in this issue. This is the most important correctness item.
 
 #### Proposed Schema Change
 
@@ -504,13 +518,9 @@ rigId:
   required: false
 ```
 
-#### Dual-field validation rule (transition window)
+#### Validation change
 
-The following rule governs `validateEvent` during the transition period:
-
-> Accept the event if **either** `publisherCode` (non-empty string) **or** `rigId` (UUID string) is present. Reject with **400** if both are absent. When both are present, prefer `rigId` for auth lookup; `publisherCode` is silently discarded. Once the RC-4 removal milestone is reached, drop the `publisherCode` branch entirely.
-
-This supersedes the current validation which rejects any event without `publisherCode`.
+`validateEvent` removes the `publisherCode` check entirely. The field no longer exists in the wire contract. `rigId` is accepted as an optional UUID on non-lifecycle events and is treated as a required field semantically on lifecycle events (per S1). Events are authorized based on Bearer-token identity + `raceSessionId`; `rigId` is used downstream by the synthesizer, not as an authorization gate.
 
 #### Authorization
 
@@ -522,20 +532,19 @@ Per S2 (Shared Conventions), authorization for `POST /api/telemetry/events` is k
 
 #### Migration
 
-- Events carrying `publisherCode` (from older Director versions) continue to be accepted during a transition period. Race Control maps them internally.
-- New Director versions send `rigId` only.
-- Target removal of `publisherCode` field: one minor release after the deprecated `publisher-config` endpoint (RC-4) is removed.
+No transition window required — there are no older Director versions in the field. `publisherCode` is removed in the same release as this change ships.
 
 #### Acceptance criteria
 
-- [ ] `rigId` accepted as optional UUID field on `PublisherEvent`
-- [ ] `publisherCode` continues to be accepted (not a breaking change) but marked deprecated in the spec
-- [ ] Dual-field validation rule implemented: 400 if both fields absent; `rigId` preferred when both present
+- [ ] `publisherCode` removed from `validateEvent`, `PublisherEvent` wire type, and `PublisherCheckinDocument`; no fallback accepted
+- [ ] `rigId?: string` (UUID) added as optional on `PublisherEvent`; lifecycle events must carry it (per S1)
+- [ ] `publisher-checkin-service.ts` rekeyed: `${raceSessionId}::${publisherCode}` → `${raceSessionId}::${rigId}`; all method signatures updated
+- [ ] `event-synthesizer.ts`: all 13 `publisherCode` references replaced with `rigId`; defensive guard added for events without `rigId` on both sides of a cross-rig comparison
+- [ ] Synthesized event payloads use `outgoingRigId`/`incomingRigId`/`triggerRigId` (replacing `outgoing/incoming/triggerPublisherCode`)
+- [ ] `makeCloudEvent` no longer sets `publisherCode: 'cloud'`; existing `source: 'cloud'` field used for cloud-event filtering
 - [ ] **Authorization enforcement:** `postTelemetryEvents` queries active check-ins (session-scope events) or `publisherRegistrations` (driver-scope events) against the Bearer-token identity and `raceSessionId`; returns 403 when neither is satisfied
 - [ ] Session-scope events from a checked-in media rig are accepted with `rigId` absent
 - [ ] Driver-scope events without an active registration or check-in are rejected with 403
-- [ ] `publisher-checkin-service.ts` migrated: document key and all method signatures use `rigId` in place of `publisherCode`
-- [ ] Lifecycle events from a new Director (carrying `rigId`, no `publisherCode`) are correctly processed by `handleLifecycleEvent`
 - [ ] OpenAPI spec updated
 
 ---
@@ -579,28 +588,34 @@ Affected event payload schemas:
 
 ---
 
-### RC-4 — Deprecate `GET /api/publisher-config/{publisherCode}`
+### RC-4 — Delete `GET /api/publisher-config/{publisherCode}` and remove `publisherCode` from driver documents
 
 **Repository:** margic/racecontrol  
-**Labels:** deprecation, api, publisher
+**Labels:** cleanup, api, publisher
 
 #### Problem
 
-`GET /api/publisher-config/{publisherCode}` was the primary mechanism for driver rigs to discover their `raceSessionId` from a short human-readable code. Under the new design this is replaced by `POST /api/publisher/sessions/{raceSessionId}/register` (RC-1), which is simpler and does not require Race Control to pre-assign `publisherCode` values to rigs.
+`GET /api/publisher-config/{publisherCode}` exists solely to resolve a `publisherCode` string → `raceSessionId`. With `publisherCode` removed entirely (RC-2) and driver-only rigs using the `register` flow (RC-1), the endpoint has no valid callers and no concept to serve.
+
+Additionally, `publisherCode` is stored on `Driver` documents in Cosmos and referenced in `driver-service.ts` (at lines 44, 64, 73). The `getDriverByPublisherCode` method and its Cosmos index have no remaining callers after RC-2.
 
 #### Proposed Change
 
-- Mark `GET /api/publisher-config/{publisherCode}` as **deprecated** in the OpenAPI spec.
-- Endpoint remains functional for the current Python prototype and any older Director versions still in the field.
-- Target for removal: when `publisherCode` support is formally dropped (a separate future milestone).
+Delete in the same release as RC-2 (no deprecation window — no older Director versions in the field):
+
+- `getPublisherConfig.ts` — file deleted.
+- `GET /api/publisher-config/{publisherCode}` — removed from router and OpenAPI spec.
+- `driver-service.ts` — `publisherCode` field removed from `Driver` documents and `CreateDriverInput`. `getDriverByPublisherCode` method deleted. Cosmos query index on `publisherCode` dropped.
+- Any remaining `publisherCode` references in `driver-service.ts` (lines 44, 64, 73) removed.
 
 #### Acceptance criteria
 
-- [ ] Endpoint marked `deprecated: true` in OpenAPI spec
-- [ ] Deprecation notice added to API docs
-- [ ] `Deprecation: true` response header added to `getPublisherConfig.ts` response
-- [ ] `Sunset` (or `Link` with `rel="sunset"`) header added indicating the planned removal milestone
-- [ ] Endpoint continues to function (no breaking change)
+- [ ] `getPublisherConfig.ts` deleted; route removed from router
+- [ ] `GET /api/publisher-config/{publisherCode}` removed from OpenAPI spec
+- [ ] `publisherCode` field removed from `Driver` document schema and `CreateDriverInput`
+- [ ] `getDriverByPublisherCode` deleted; no remaining callers
+- [ ] Cosmos `publisherCode` index dropped (infra / `cosmos.tf` or index policy updated)
+- [ ] No remaining references to `publisherCode` in codebase (verified by grep/CI)
 
 ---
 
@@ -623,6 +638,5 @@ Minimum viable sequence:
 1. **RC-1** — unblocks driver-only rigs immediately
 2. **DIR-1 + DIR-2** in the same PR — split + auto-start
 3. **DIR-3** — once RC-1 is merged or behind a feature flag
-4. **DIR-4 + RC-2 + RC-3** — together (wire format change, coordinate with Race Control)
+4. **DIR-4 + RC-2 + RC-3 + RC-4** — together in one coordinated release (wire format change + synthesizer migration + driver-service cleanup; RC-4 is now a deletion not a deprecation and ships with RC-2)
 5. **DIR-5** — after DIR-2 and DIR-3
-6. **RC-4** — any time after RC-1 is stable
