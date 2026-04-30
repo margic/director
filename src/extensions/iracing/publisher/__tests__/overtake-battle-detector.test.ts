@@ -70,7 +70,7 @@ describe('OVERTAKE', () => {
     expect(events.find(e => e.type === 'OVERTAKE')).toBeDefined();
   });
 
-  it('OVERTAKE payload has correct overtakingCarIdx and overtakenCarIdx', () => {
+  it('OVERTAKE payload has correct overtakingCarIdx and overtakenCar', () => {
     const base  = makeFrame({ cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }] });
     const state = prime(base);
     const next  = cloneFrame(base);
@@ -79,7 +79,7 @@ describe('OVERTAKE', () => {
     const events = detect(base, next, state);
     const ev = events.find(e => e.type === 'OVERTAKE')!;
     expect((ev.payload as any).overtakingCarIdx).toBe(1);
-    expect((ev.payload as any).overtakenCarIdx).toBe(0);
+    expect((ev.payload as any).overtakenCar.carIdx).toBe(0);
     expect((ev.payload as any).newPosition).toBe(1);
   });
 
@@ -204,7 +204,7 @@ describe('BATTLE_ENGAGED', () => {
     expect(events.find(e => e.type === 'BATTLE_ENGAGED')).toBeUndefined();
   });
 
-  it('BATTLE_ENGAGED payload has chaserCarIdx, leaderCarIdx, gapSec', () => {
+  it('BATTLE_ENGAGED payload has chaserCar, leaderCar, gapSec', () => {
     const state = makeState();
     const base  = makeFrame({ cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }] });
     detect(null, base, state);
@@ -215,8 +215,8 @@ describe('BATTLE_ENGAGED', () => {
     f2.carIdxF2Time[1] = 0.7;
     const events = detect(f1, f2, state);
     const ev = events.find(e => e.type === 'BATTLE_ENGAGED')!;
-    expect((ev.payload as any).chaserCarIdx).toBe(1);
-    expect((ev.payload as any).leaderCarIdx).toBe(0);
+    expect((ev.payload as any).chaserCar.carIdx).toBe(1);
+    expect((ev.payload as any).leaderCar.carIdx).toBe(0);
     expect((ev.payload as any).gapSec).toBeCloseTo(0.7, 2);
   });
 
@@ -344,7 +344,7 @@ describe('BATTLE_BROKEN', () => {
     }
   });
 
-  it('BATTLE_BROKEN payload has chaserCarIdx and leaderCarIdx', () => {
+  it('BATTLE_BROKEN payload has chaserCar and leaderCar', () => {
     const { state, lastFrame } = engageBattle();
     let prev = lastFrame;
     let brokenEvent: any;
@@ -355,8 +355,8 @@ describe('BATTLE_BROKEN', () => {
       brokenEvent = events.find(e => e.type === 'BATTLE_BROKEN') ?? brokenEvent;
       prev = curr;
     }
-    expect((brokenEvent.payload as any).chaserCarIdx).toBe(1);
-    expect((brokenEvent.payload as any).leaderCarIdx).toBe(0);
+    expect((brokenEvent.payload as any).chaserCar.carIdx).toBe(1);
+    expect((brokenEvent.payload as any).leaderCar.carIdx).toBe(0);
     expect((brokenEvent.payload as any).status).toBe('BROKEN');
   });
 

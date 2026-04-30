@@ -354,9 +354,8 @@ export interface StintBestLapPayload {
 
 export interface OvertakePayload {
   overtakingCarIdx: number;
-  overtakenCarIdx: number;
-  /** DIR-4: self-describing ref for the overtaken car. Dual-emitted alongside overtakenCarIdx during transition window. */
-  overtakenCar?: PublisherCarRef;
+  /** Self-describing ref for the overtaken car. */
+  overtakenCar: PublisherCarRef;
   newPosition: number;
   lap: number;
   /** Fraction of lap where pass occurred — iRacing: CarIdxLapDistPct */
@@ -370,12 +369,10 @@ export interface PositionChangePayload {
 }
 
 export interface BattlePayload {
-  chaserCarIdx: number;
-  leaderCarIdx: number;
-  /** DIR-4: self-describing ref for the chaser car. Dual-emitted alongside chaserCarIdx during transition window. */
-  chaserCar?: PublisherCarRef;
-  /** DIR-4: self-describing ref for the leader car. Dual-emitted alongside leaderCarIdx during transition window. */
-  leaderCar?: PublisherCarRef;
+  /** Self-describing ref for the chaser car (also the envelope car). */
+  chaserCar: PublisherCarRef;
+  /** Self-describing ref for the leader car being chased. */
+  leaderCar: PublisherCarRef;
   /** Gap in seconds — iRacing: CarIdxF2Time */
   gapSec: number;
   closingRateSecPerLap: number;
@@ -383,12 +380,10 @@ export interface BattlePayload {
 }
 
 export interface TrafficPayload {
-  targetCarIdx: number;
-  targetCarNumber: string;
   distanceMeters: number;
-  /** DIR-4: self-describing ref for the lapped car — populated on LAPPED_TRAFFIC_AHEAD only. */
+  /** Self-describing ref for the lapped car — populated on LAPPED_TRAFFIC_AHEAD only. */
   lappedCar?: PublisherCarRef;
-  /** DIR-4: self-describing ref for the lapping car — populated on BEING_LAPPED only. */
+  /** Self-describing ref for the lapping car — populated on BEING_LAPPED only. */
   lappingCar?: PublisherCarRef;
 }
 

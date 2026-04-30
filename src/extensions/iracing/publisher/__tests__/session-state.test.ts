@@ -151,7 +151,7 @@ describe('buildEvent', () => {
   const opts = { raceSessionId: TEST_SESSION_ID, rigId: TEST_PUBLISHER_CODE, frame, leaderLap: 5 };
 
   it('assigns a UUID id', () => {
-    const event = buildEvent('OVERTAKE', car, { overtakingCarIdx: 1, overtakenCarIdx: 2, newPosition: 3, lap: 5, lapDistPct: 0.45 }, opts);
+    const event = buildEvent('OVERTAKE', car, { overtakingCarIdx: 1, overtakenCar: { carIdx: 2 }, newPosition: 3, lap: 5, lapDistPct: 0.45 }, opts);
     expect(event.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
