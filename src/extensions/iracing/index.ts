@@ -200,9 +200,9 @@ export async function activate(director: ExtensionAPI) {
         broadcastMessage(IRSDK_REPLAY_SETSTATE, payload.state, 0, 0);
     });
 
-    // Publisher orchestrator (issue #106) — starts internally only if
-    // publisher.enabled === true. Registering the telemetry frame callback is
-    // safe regardless of publisher state; the orchestrator no-ops when not running.
+    // Publisher orchestrator (DIR-2) — starts transport infrastructure
+    // immediately on activate(). The Session Publisher pipeline starts
+    // automatically when bindSession() receives a raceSessionId.
     publisherOrchestrator = new PublisherOrchestrator({
         director,
         version: EXTENSION_VERSION,
@@ -212,13 +212,15 @@ export async function activate(director: ExtensionAPI) {
         publisherOrchestrator?.onTelemetryFrame(frame);
     });
 
-    // Publisher hot-toggle — fired by the settings UI switch without restarting the app.
+    // Session binding — internal directive fired by DirectorOrchestrator once
+    // check-in confirms the raceSessionId (issue #109, DIR-2). Not advertised
+    // as a capability; never appears in the AI planner's intent list.
     director.registerIntentHandler(
-        'iracing.publisher.setEnabled',
-        async (payload: { enabled: boolean }) => {
-            publisherOrchestrator?.setEnabled(payload.enabled);
-            // Restart the telemetry polling loop so the interval matches the
-            // new state (200ms / 5Hz with publisher, 250ms / 4Hz without).
+        'iracing.publisher.bindSession',
+        async (payload: { raceSessionId: string }) => {
+            publisherOrchestrator?.bindSession(payload?.raceSessionId ?? null);
+            // Restart the telemetry polling loop so the interval reflects
+            // the new pipeline active state (200ms / 5Hz vs 250ms / 4Hz).
             if (pBase) {
                 if (telemetryInterval) {
                     clearInterval(telemetryInterval);
@@ -229,25 +231,19 @@ export async function activate(director: ExtensionAPI) {
         },
     );
 
-    // Session binding — internal directive fired by DirectorOrchestrator once
-    // check-in confirms the raceSessionId (issue #109). Not advertised as a
-    // capability; never appears in the AI planner's intent list.
-    // Also auto-enables the publisher so the operator doesn't need to toggle it
-    // manually — if the Director has checked into a session, telemetry should flow.
+    // Session release — fired by SessionManager on check-out / session expiry.
     director.registerIntentHandler(
-        'iracing.publisher.bindSession',
-        async (payload: { raceSessionId: string }) => {
-            if (payload?.raceSessionId) {
-                publisherOrchestrator?.setRaceSessionId(payload.raceSessionId);
-                publisherOrchestrator?.setEnabled(true);
-                // Restart the telemetry polling loop at the publisher rate (200ms / 5Hz).
-                if (pBase) {
-                    if (telemetryInterval) {
-                        clearInterval(telemetryInterval);
-                        telemetryInterval = null;
-                    }
-                    startTelemetryPolling(director);
+        'iracing.publisher.releaseSession',
+        async () => {
+            publisherOrchestrator?.releaseSession();
+            // Restart the polling loop so the interval drops back to 4Hz
+            // now that the session publisher is no longer active.
+            if (pBase) {
+                if (telemetryInterval) {
+                    clearInterval(telemetryInterval);
+                    telemetryInterval = null;
                 }
+                startTelemetryPolling(director);
             }
         },
     );
@@ -709,14 +705,15 @@ function startTelemetryPolling(director: ExtensionAPI) {
     // Parse variable headers on first connect
     parseVarHeaders(director);
 
-    const publisherEnabled = director.settings['publisher.enabled'] === true;
-    const intervalMs = getTelemetryIntervalMs(publisherEnabled);
+    // S4 — 200ms when either pipeline is active, 250ms otherwise.
+    const pipelineActive = publisherOrchestrator?.isAnyPipelineActive ?? false;
+    const intervalMs = getTelemetryIntervalMs(pipelineActive);
 
     telemetryInterval = setInterval(() => {
         pollTelemetry(director);
     }, intervalMs);
 
-    director.log('info', `Telemetry polling started (${intervalMs}ms interval, ${publisherEnabled ? '5Hz publisher' : '4Hz standard'})`);
+    director.log('info', `Telemetry polling started (${intervalMs}ms interval, ${pipelineActive ? '5Hz publisher' : '4Hz standard'})`);
 }
 
 function stopTelemetryPolling(director: ExtensionAPI) {

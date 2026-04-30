@@ -63,6 +63,9 @@ export class SessionPublisherOrchestrator {
   /** Player carIdx — needed for the roster event car-ref. */
   private playerCarIdx: number | undefined = undefined;
 
+  /** Running count of events enqueued by this pipeline (for status reporting). */
+  private _eventsEnqueued = 0;
+
   constructor(private readonly cfg: SessionPublisherConfig) {}
 
   // -------------------------------------------------------------------------
@@ -100,6 +103,11 @@ export class SessionPublisherOrchestrator {
   /** True when the session publisher is processing frames. */
   get isActive(): boolean {
     return this.active;
+  }
+
+  /** Running count of events this pipeline has enqueued into the transport. */
+  get eventsEnqueued(): number {
+    return this._eventsEnqueued;
   }
 
   /**
@@ -186,6 +194,7 @@ export class SessionPublisherOrchestrator {
     if (events.length === 0) return;
     for (const ev of events) {
       this.cfg.transport.enqueue(ev);
+      this._eventsEnqueued++;
       this.cfg.emitEvent('iracing.publisherEventEmitted', {
         type:      ev.type,
         carIdx:    ev.car?.carIdx,

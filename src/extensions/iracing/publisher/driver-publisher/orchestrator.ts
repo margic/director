@@ -75,6 +75,9 @@ export class DriverPublisherOrchestrator {
   /** Last-emitted pit road state — for operator state change events. */
   private lastPlayerOnPitRoad = false;
 
+  /** Running count of events enqueued by this pipeline (for status reporting). */
+  private _eventsEnqueued = 0;
+
   constructor(private readonly cfg: DriverPublisherConfig) {}
 
   // -------------------------------------------------------------------------
@@ -114,6 +117,11 @@ export class DriverPublisherOrchestrator {
   /** True when the driver publisher is processing frames. */
   get isActive(): boolean {
     return this.active;
+  }
+
+  /** Running count of events this pipeline has enqueued into the transport. */
+  get eventsEnqueued(): number {
+    return this._eventsEnqueued;
   }
 
   /**
@@ -256,6 +264,7 @@ export class DriverPublisherOrchestrator {
     if (events.length === 0) return;
     for (const ev of events) {
       this.cfg.transport.enqueue(ev);
+      this._eventsEnqueued++;
       this.cfg.emitEvent('iracing.publisherEventEmitted', {
         type:      ev.type,
         carIdx:    ev.car?.carIdx,

@@ -1,17 +1,26 @@
 /**
- * orchestrator.ts — DIR-1
+ * orchestrator.ts — DIR-2
  *
  * Top-level publisher orchestrator. Owns:
  *   - The single PublisherTransport instance (shared by both pipelines)
  *   - Lifecycle events (PUBLISHER_HELLO / HEARTBEAT / GOODBYE,
  *     IRACING_CONNECTED / IRACING_DISCONNECTED)
- *   - Roster cache (pushed to both sub-orchestrators)
+ *   - Roster cache (pushed to both sub-orchestrators on update — S5)
  *   - Routing of telemetry frames to SessionPublisherOrchestrator and
  *     DriverPublisherOrchestrator
+ *   - Session bind / release lifecycle (DIR-2)
+ *   - Config migration of legacy keys on startup (DIR-2 / S3)
  *
- * Sub-orchestrators are constructed lazily on first activation (start()) and
- * torn down on deactivation (stop()). Neither sub-orchestrator creates its own
- * transport or sends HTTP requests — they call transport.enqueue() only.
+ * Activation model (DIR-2):
+ *   - activate()         → starts transport, heartbeat, lifecycle infra.
+ *                          Does NOT start either sub-pipeline on its own.
+ *   - bindSession(id)    → starts Session Publisher pipeline. If iRacing is
+ *                          not yet connected, the id is "armed" and the
+ *                          pipeline starts automatically when the connection
+ *                          arrives.
+ *   - releaseSession()   → stops Session Publisher, sends PUBLISHER_GOODBYE,
+ *                          flushes remaining events. Transport stays live.
+ *   - deactivate()       → stops everything (both pipelines + transport).
  *
  * Single-transport invariant: exactly one PublisherTransport instance exists
  * for the lifetime of this orchestrator. Tests must assert this.
@@ -33,6 +42,10 @@ export interface OrchestratorDirector {
   getAuthToken(): Promise<string | null>;
   emitEvent(event: string, payload: any): void;
   log(level: 'info' | 'warn' | 'error', message: string): void;
+  /** Persist a settings change (used for config migration). Optional — no-op if absent. */
+  saveSetting?(key: string, value: any): void;
+  /** Delete a persisted setting (used for config migration). Optional — no-op if absent. */
+  deleteSetting?(key: string): void;
 }
 
 export interface PublisherOrchestratorConfig {
@@ -53,12 +66,19 @@ const DEFAULT_RC_BASE_URL       = 'https://simracecenter.com';
 const DEFAULT_BATCH_INTERVAL_MS = 2000;
 const HEARTBEAT_INTERVAL_MS     = 1_000;
 
+/** Legacy config keys removed in DIR-2 (S3 migration). publisher.publisherCode is removed in DIR-3. */
+const LEGACY_KEYS = [
+  'publisher.enabled',
+  'publisher.raceSessionId',
+  'publisher.identityDisplayName',
+] as const;
+
 // ---------------------------------------------------------------------------
 // PublisherOrchestrator
 // ---------------------------------------------------------------------------
 
 export class PublisherOrchestrator {
-  /** Single transport instance — shared by both pipelines. Never null while running. */
+  /** Single transport instance — shared by both pipelines. Non-null while running. */
   private transport: PublisherTransport | null = null;
 
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -66,17 +86,34 @@ export class PublisherOrchestrator {
   private readonly lifecycleDetector: LifecycleEventDetector;
   private readonly nowFn: () => number;
 
-  private running   = false;
+  /** True once startInfrastructure() has run and stop() has not. */
+  private running = false;
+
+  /** Whether iRacing is currently connected. */
   private connected = false;
 
-  // Cached settings snapshot — read once at start()
-  private publisherCode = '';
+  /**
+   * raceSessionId set by the most recent successful bindSession() call.
+   * Empty string means no session is bound.
+   */
   private raceSessionId = '';
+
+  /**
+   * publisherCode — read from settings at startup. Retained until DIR-3
+   * replaces it with an auto-generated rigId.
+   */
+  private publisherCode = '';
+
+  /**
+   * "Armed" session id: set when bindSession() fires before iRacing is
+   * connected. Cleared and activated when onConnectionChange(true) fires.
+   */
+  private armedSessionId: string | null = null;
 
   // Roster — owned here, pushed to both sub-orchestrators on update (S5)
   private currentRoster: Map<number, PublisherCarRef> = new Map();
 
-  // Sub-orchestrators — constructed lazily at start(), torn down at stop()
+  // Sub-orchestrators — constructed in startInfrastructure(), never null while running
   private sessionPublisher: SessionPublisherOrchestrator | null = null;
   private driverPublisher:  DriverPublisherOrchestrator  | null = null;
 
@@ -90,25 +127,87 @@ export class PublisherOrchestrator {
   // -------------------------------------------------------------------------
 
   /**
-   * Called from the extension's activate(). Starts the publisher pipeline
-   * if publisher.enabled === true; otherwise no-op.
+   * Called from the extension's activate(). Performs S3 config migration then
+   * starts the transport infrastructure. Does NOT activate either pipeline —
+   * the Session Publisher starts via bindSession(); the Driver Publisher starts
+   * via DIR-3 opt-in.
    */
   activate(): void {
-    if (this.cfg.director.settings['publisher.enabled'] === true) {
-      this.start();
-    }
+    this.migrateConfig();
+    this.startInfrastructure();
   }
 
-  /** Called from the extension's deactivate(). */
+  /** Called from the extension's deactivate(). Stops everything. */
   deactivate(): void {
     if (this.running) {
-      this.stop();
+      this.stopAll();
     }
   }
 
   /**
+   * Called from the internal `iracing.publisher.bindSession` intent handler.
+   * Starts (or rebinds) the Session Publisher pipeline.
+   *
+   * Pass null or empty string to release the session (identical semantics to
+   * releaseSession()).
+   */
+  bindSession(raceSessionId: string | null): void {
+    if (!raceSessionId) {
+      this.releaseSession();
+      return;
+    }
+
+    if (this.raceSessionId === raceSessionId) return;
+
+    // Clear any previous session data from the queue before rebinding.
+    if (this.raceSessionId !== '') {
+      this.transport?.clearQueue();
+    }
+
+    this.raceSessionId = raceSessionId;
+
+    if (!this.running) return; // infrastructure not up yet; will activate on connect
+
+    if (this.connected) {
+      this.startSessionPipeline();
+    } else {
+      // Arm for auto-start when iRacing connects.
+      this.armedSessionId = raceSessionId;
+      this.cfg.director.log('info', `Publisher armed — will start when iRacing connects (raceSessionId=${raceSessionId})`);
+    }
+  }
+
+  /**
+   * Called from the internal `iracing.publisher.releaseSession` intent handler,
+   * or by SessionManager on check-out / session expiry.
+   *
+   * Stops the Session Publisher, sends PUBLISHER_GOODBYE, and flushes the
+   * transport. The transport itself stays live (Driver Publisher may still be
+   * active after DIR-3).
+   */
+  releaseSession(): void {
+    this.armedSessionId = null;
+    if (!this.sessionPublisher?.isActive && !this.driverPublisher?.isActive) return;
+
+    // PUBLISHER_GOODBYE — enqueue before flush so it ships in the final batch.
+    this.dispatchLifecycleEvents(this.lifecycleDetector.onDeactivate(this.lifecycleCtx()));
+
+    this.sessionPublisher?.deactivate();
+    this.driverPublisher?.deactivate();
+
+    // Flush remaining events asynchronously. The transport stays live.
+    if (this.transport) {
+      void this.transport.flush();
+    }
+
+    this.raceSessionId = '';
+    this.cfg.director.log('info', 'Publisher session released');
+  }
+
+  /**
    * Called from the iRacing connection-state path in index.ts.
-   * Fires IRACING_CONNECTED / IRACING_DISCONNECTED when the publisher is running.
+   * Always fires IRACING_CONNECTED / IRACING_DISCONNECTED when the transport
+   * is live. On connect, triggers any armed session pipeline.
    */
   onConnectionChange(connected: boolean): void {
     if (this.connected === connected) return;
@@ -116,6 +215,11 @@ export class PublisherOrchestrator {
     if (this.running) {
       const events = this.lifecycleDetector.onConnectionChange(connected, this.lifecycleCtx());
       this.dispatchLifecycleEvents(events);
+    }
+    if (connected && this.armedSessionId !== null) {
+      this.raceSessionId = this.armedSessionId;
+      this.armedSessionId = null;
+      this.startSessionPipeline();
     }
   }
 
@@ -180,43 +284,8 @@ export class PublisherOrchestrator {
   }
 
   /**
-   * Hot-update the raceSessionId. Discards cross-session events from the
-   * transport queue and notifies both sub-orchestrators to reset their state.
-   */
-  setRaceSessionId(raceSessionId: string): void {
-    if (this.raceSessionId === raceSessionId) return;
-    this.raceSessionId = raceSessionId;
-
-    // Discard any pending events from the previous session.
-    this.transport?.clearQueue();
-
-    // Re-activate both sub-orchestrators so they reset their detector caches
-    // and carry the new raceSessionId on all subsequent events.
-    if (this.sessionPublisher?.isActive) {
-      this.sessionPublisher.activate(raceSessionId, this.publisherCode);
-    }
-    if (this.driverPublisher?.isActive) {
-      this.driverPublisher.activate(raceSessionId, this.publisherCode);
-    }
-
-    this.cfg.director.log('info', `Publisher session bound to raceSessionId=${raceSessionId}`);
-  }
-
-  /**
-   * Hot-toggle the publisher without restarting the extension.
-   * Called from the iracing.publisher.setEnabled intent handler.
-   */
-  setEnabled(enabled: boolean): void {
-    if (enabled && !this.running) {
-      this.start();
-    } else if (!enabled && this.running) {
-      this.stop();
-    }
-  }
-
-  /**
    * Manually advance the heartbeat detector. Production code drives this from
-   * a 1Hz setInterval started in start(). Exposed for tests.
+   * a 1Hz setInterval started in startInfrastructure(). Exposed for tests.
    */
   tickHeartbeat(): void {
     if (!this.running) return;
@@ -229,7 +298,7 @@ export class PublisherOrchestrator {
     return (this.sessionPublisher?.isActive ?? false) || (this.driverPublisher?.isActive ?? false);
   }
 
-  /** True once start() has run and stop() has not. */
+  /** True once startInfrastructure() has run and stopAll() has not. */
   get isRunning(): boolean {
     return this.running;
   }
@@ -238,11 +307,41 @@ export class PublisherOrchestrator {
   // Lifecycle
   // -------------------------------------------------------------------------
 
-  private start(): void {
+  /**
+   * S3 config migration — runs once at startup.
+   * Drops legacy keys and migrates identityDisplayName if the new key is unset.
+   */
+  private migrateConfig(): void {
+    const settings = this.cfg.director.settings;
+    const legacyDisplayName = settings['publisher.identityDisplayName'];
+    if (legacyDisplayName !== undefined) {
+      if (!settings['publisher.driver.displayName']) {
+        this.cfg.director.saveSetting?.('publisher.driver.displayName', legacyDisplayName);
+      }
+    }
+    for (const key of LEGACY_KEYS) {
+      if (settings[key] !== undefined) {
+        this.cfg.director.deleteSetting?.(key);
+        this.cfg.director.log('info', `Publisher config migration: removed legacy key '${key}'`);
+      }
+    }
+  }
+
+  /**
+   * Start transport infrastructure and sub-orchestrator instances.
+   * Does NOT activate either pipeline.
+   */
+  private startInfrastructure(): void {
     if (this.running) return;
 
     this.publisherCode = String(this.cfg.director.settings['publisher.publisherCode'] ?? '');
-    this.raceSessionId = String(this.cfg.director.settings['publisher.raceSessionId'] ?? '');
+
+    if (!this.publisherCode) {
+      this.cfg.director.log(
+        'warn',
+        'Publisher started without publisher.publisherCode — events will be tagged with empty publisherCode',
+      );
+    }
 
     const rcBaseUrl = String(
       this.cfg.director.settings['app.rcApiBaseUrl'] ?? DEFAULT_RC_BASE_URL,
@@ -251,19 +350,6 @@ export class PublisherOrchestrator {
     const batchIntervalMs = Number(
       this.cfg.director.settings['publisher.batchIntervalMs'] ?? DEFAULT_BATCH_INTERVAL_MS,
     );
-
-    if (!this.publisherCode) {
-      this.cfg.director.log(
-        'warn',
-        'Publisher started without publisher.publisherCode — events will be tagged with empty publisherCode',
-      );
-    }
-    if (!this.raceSessionId) {
-      this.cfg.director.log(
-        'warn',
-        'Publisher started without publisher.raceSessionId — events will be tagged with empty raceSessionId',
-      );
-    }
 
     // Single transport — shared by both sub-orchestrators (hard architectural constraint).
     this.transport = new PublisherTransport({
@@ -280,7 +366,7 @@ export class PublisherOrchestrator {
     const log = (level: 'info' | 'warn' | 'error', msg: string) =>
       this.cfg.director.log(level, msg);
 
-    // Lazy construction of sub-orchestrators.
+    // Construct sub-orchestrators but do NOT activate them yet.
     this.sessionPublisher = new SessionPublisherOrchestrator({
       transport: this.transport,
       emitEvent,
@@ -292,9 +378,6 @@ export class PublisherOrchestrator {
       log,
     });
 
-    this.sessionPublisher.activate(this.raceSessionId, this.publisherCode);
-    this.driverPublisher.activate(this.raceSessionId, this.publisherCode);
-
     // Seed the roster into both pipelines if it was set before start().
     if (this.currentRoster.size > 0) {
       const drivers = Array.from(this.currentRoster.values());
@@ -303,9 +386,6 @@ export class PublisherOrchestrator {
     }
 
     this.running = true;
-
-    // PUBLISHER_HELLO
-    this.dispatchLifecycleEvents(this.lifecycleDetector.onActivate(this.lifecycleCtx()));
 
     // If iRacing was already connected before we started, fire IRACING_CONNECTED.
     if (this.connected) {
@@ -317,14 +397,44 @@ export class PublisherOrchestrator {
     // 1Hz heartbeat
     this.heartbeatTimer = setInterval(() => this.tickHeartbeat(), HEARTBEAT_INTERVAL_MS);
 
-    this.cfg.director.log('info', 'Publisher orchestrator started');
+    this.cfg.director.log('info', 'Publisher infrastructure started');
   }
 
-  private stop(): void {
+  /**
+   * Activate both pipelines with the current raceSessionId.
+   * Called when bindSession fires and we are connected, or when we connect
+   * after being armed.
+   *
+   * Note: Driver Publisher activation will be separated from Session Publisher
+   * in DIR-3 (opt-in flow). For DIR-2 both pipelines start together on bind.
+   */
+  private startSessionPipeline(): void {
+    if (!this.running || !this.sessionPublisher || !this.driverPublisher) return;
+
+    this.sessionPublisher.activate(this.raceSessionId, this.publisherCode);
+    this.driverPublisher.activate(this.raceSessionId, this.publisherCode);
+
+    // Seed roster into both pipelines.
+    if (this.currentRoster.size > 0) {
+      const drivers = Array.from(this.currentRoster.values());
+      this.sessionPublisher.updateRoster(drivers);
+      this.driverPublisher.updateRoster(drivers);
+    }
+
+    // PUBLISHER_HELLO — signals RC to create the checkin record.
+    this.dispatchLifecycleEvents(this.lifecycleDetector.onActivate(this.lifecycleCtx()));
+
+    this.cfg.director.log('info', `Publisher pipelines started for raceSessionId=${this.raceSessionId}`);
+  }
+
+  /** Stop both pipelines and the transport. Called by deactivate(). */
+  private stopAll(): void {
     if (this.heartbeatTimer !== null) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
+
+    this.armedSessionId = null;
 
     // Deactivate sub-orchestrators so they stop processing frames.
     this.sessionPublisher?.deactivate();
@@ -334,17 +444,20 @@ export class PublisherOrchestrator {
 
     if (this.transport) {
       // PUBLISHER_GOODBYE — enqueue before stopping so it ships in the final flush.
-      this.dispatchLifecycleEvents(this.lifecycleDetector.onDeactivate(this.lifecycleCtx()));
+      if (this.raceSessionId !== '') {
+        this.dispatchLifecycleEvents(this.lifecycleDetector.onDeactivate(this.lifecycleCtx()));
+      }
       void this.transport.stop();
       this.transport = null;
     }
 
     this.running = false;
+    this.raceSessionId = '';
     this.cfg.director.log('info', 'Publisher orchestrator stopped');
   }
 
   // -------------------------------------------------------------------------
-  // Internal
+  // Internal helpers
   // -------------------------------------------------------------------------
 
   /**
@@ -370,6 +483,16 @@ export class PublisherOrchestrator {
       ...status,
       raceSessionId: this.raceSessionId,
       publisherCode: this.publisherCode,
+      pipelines: {
+        session: {
+          active:         this.sessionPublisher?.isActive       ?? false,
+          eventsEnqueued: this.sessionPublisher?.eventsEnqueued ?? 0,
+        },
+        driver: {
+          active:         this.driverPublisher?.isActive        ?? false,
+          eventsEnqueued: this.driverPublisher?.eventsEnqueued  ?? 0,
+        },
+      },
     });
   }
 

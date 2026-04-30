@@ -34,9 +34,7 @@ function makeFakeDirector(settings: Record<string, any> = {}): FakeDirector {
   const logs: { level: string; message: string }[] = [];
   return {
     settings: {
-      'publisher.enabled': true,
       'publisher.publisherCode': 'rig-01',
-      'publisher.raceSessionId': 'session-abc',
       'publisher.endpointUrl': 'https://example.test/api/telemetry/events',
       'publisher.batchIntervalMs': 1000,
       ...settings,
@@ -101,33 +99,53 @@ function makeOrchestrator(directorOverrides: Record<string, any> = {}) {
   return { orch, director, batches };
 }
 
+/**
+ * Creates an orchestrator that is fully active: infrastructure started,
+ * iRacing connected, and a session bound — both pipelines active.
+ */
+function makeActiveOrchestrator(directorOverrides: Record<string, any> = {}) {
+  const result = makeOrchestrator(directorOverrides);
+  result.orch.activate();
+  result.orch.onConnectionChange(true);
+  result.orch.bindSession('session-abc');
+  return result;
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle
 // ---------------------------------------------------------------------------
 
 describe('activate/deactivate', () => {
-  it('does NOT start when publisher.enabled is false', () => {
-    const { orch, director } = makeOrchestrator({ 'publisher.enabled': false });
-    orch.activate();
-    expect(orch.isRunning).toBe(false);
-    // No PUBLISHER_HELLO should have been emitted
-    expect(director.emittedEvents.find((e) => e.payload?.type === 'PUBLISHER_HELLO')).toBeUndefined();
-  });
-
-  it('starts and emits PUBLISHER_HELLO when publisher.enabled is true', async () => {
-    const { orch, director } = makeOrchestrator();
+  it('always starts infrastructure regardless of settings (DIR-2)', () => {
+    // DIR-2: publisher.enabled is removed — activate() always starts infra.
+    const { orch } = makeOrchestrator();
     orch.activate();
     expect(orch.isRunning).toBe(true);
-    const helloEmitted = director.emittedEvents.find(
-      (e) => e.event === 'iracing.publisherEventEmitted' && e.payload?.type === 'PUBLISHER_HELLO',
-    );
-    expect(helloEmitted).toBeDefined();
   });
 
-  it('emits PUBLISHER_GOODBYE on deactivate', () => {
+  it('does NOT emit PUBLISHER_HELLO on activate() alone — requires bindSession (DIR-2)', () => {
     const { orch, director } = makeOrchestrator();
     orch.activate();
-    director.emittedEvents.length = 0; // clear
+    // No HELLO until a session is bound
+    expect(
+      director.emittedEvents.find((e) => e.payload?.type === 'PUBLISHER_HELLO'),
+    ).toBeUndefined();
+  });
+
+  it('emits PUBLISHER_HELLO when bindSession fires and iRacing is connected', () => {
+    const { orch, director } = makeOrchestrator();
+    orch.activate();
+    orch.onConnectionChange(true);
+    orch.bindSession('session-abc');
+    const hello = director.emittedEvents.find(
+      (e) => e.event === 'iracing.publisherEventEmitted' && e.payload?.type === 'PUBLISHER_HELLO',
+    );
+    expect(hello).toBeDefined();
+  });
+
+  it('emits PUBLISHER_GOODBYE on deactivate when a session is bound', () => {
+    const { orch, director } = makeActiveOrchestrator();
+    director.emittedEvents.length = 0;
     orch.deactivate();
     expect(orch.isRunning).toBe(false);
     const goodbye = director.emittedEvents.find(
@@ -136,15 +154,22 @@ describe('activate/deactivate', () => {
     expect(goodbye).toBeDefined();
   });
 
-  it('logs warnings when publisherCode or raceSessionId are blank', () => {
-    const { orch, director } = makeOrchestrator({
-      'publisher.publisherCode': '',
-      'publisher.raceSessionId': '',
-    });
+  it('does NOT emit PUBLISHER_GOODBYE on deactivate when no session is bound', () => {
+    // Infra only — no bindSession called
+    const { orch, director } = makeOrchestrator();
+    orch.activate();
+    director.emittedEvents.length = 0;
+    orch.deactivate();
+    expect(
+      director.emittedEvents.find((e) => e.payload?.type === 'PUBLISHER_GOODBYE'),
+    ).toBeUndefined();
+  });
+
+  it('logs a warning when publisherCode is blank', () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.publisherCode': '' });
     orch.activate();
     const warns = director.logs.filter((l) => l.level === 'warn').map((l) => l.message);
     expect(warns.some((m) => m.includes('publisherCode'))).toBe(true);
-    expect(warns.some((m) => m.includes('raceSessionId'))).toBe(true);
   });
 });
 
@@ -186,9 +211,9 @@ describe('onConnectionChange', () => {
     expect(director.emittedEvents.find((e) => e.payload?.type === 'IRACING_CONNECTED')).toBeUndefined();
   });
 
-  it('is a no-op when publisher is not running', () => {
-    const { orch, director } = makeOrchestrator({ 'publisher.enabled': false });
-    orch.activate();
+  it('is a no-op when publisher infrastructure is not running', () => {
+    const { orch, director } = makeOrchestrator();
+    // Do NOT call activate() — infrastructure not started.
     orch.onConnectionChange(true);
     expect(director.emittedEvents.find((e) => e.payload?.type === 'IRACING_CONNECTED')).toBeUndefined();
   });
@@ -200,8 +225,7 @@ describe('onConnectionChange', () => {
 
 describe('onTelemetryFrame — detector pipeline', () => {
   it('runs all detectors and forwards events to the transport', async () => {
-    const { orch, director, batches } = makeOrchestrator();
-    orch.activate();
+    const { orch, director, batches } = makeActiveOrchestrator();
 
     // Frame 1: baseline race state — no events expected from frame transitions
     const f1 = makeFrame({
@@ -226,8 +250,7 @@ describe('onTelemetryFrame — detector pipeline', () => {
   });
 
   it('emits iracing.publisherEventEmitted once per detector event', () => {
-    const { orch, director } = makeOrchestrator();
-    orch.activate();
+    const { orch, director } = makeActiveOrchestrator();
     const f1 = makeFrame({ playerIncidentCount: 0 });
     orch.onTelemetryFrame(f1);
     director.emittedEvents.length = 0;
@@ -242,8 +265,7 @@ describe('onTelemetryFrame — detector pipeline', () => {
   });
 
   it('resets state on SESSION_LOADED (new sessionUniqueId)', () => {
-    const { orch } = makeOrchestrator();
-    orch.activate();
+    const { orch } = makeActiveOrchestrator();
     // Frame 1: session 100
     const f1 = makeFrame({ sessionUniqueId: 100, cars: [{ carIdx: 0, position: 1 }] });
     orch.onTelemetryFrame(f1);
@@ -252,26 +274,24 @@ describe('onTelemetryFrame — detector pipeline', () => {
     const f2 = makeFrame({ sessionUniqueId: 200, cars: [{ carIdx: 0, position: 1 }] });
     orch.onTelemetryFrame(f2);
 
-    // Frame 3: car position changes — should NOT fire OVERTAKE because state was reset
-    // (i.e. there's no prevFrame to diff against from before f2). This tests that
-    // the orchestrator clears prevFrame on session change.
-    // We don't assert explicit events here — just verify no crash and that
-    // subsequent frames work.
+    // Frame 3: car position changes — should NOT fire OVERTAKE because state was reset.
     const f3 = makeFrame({ sessionUniqueId: 200, cars: [{ carIdx: 0, position: 2 }] });
     expect(() => orch.onTelemetryFrame(f3)).not.toThrow();
   });
 
-  it('is a no-op when publisher is not running', () => {
-    const { orch, director } = makeOrchestrator({ 'publisher.enabled': false });
+  it('is a no-op when pipelines are not yet activated (no bindSession)', () => {
+    // Infrastructure is up but no session bound — no pipeline events should fire.
+    const { orch, director } = makeOrchestrator();
     orch.activate();
+    orch.onConnectionChange(true);
+    director.emittedEvents.length = 0; // discard IRACING_CONNECTED (lifecycle event)
     const f1 = makeFrame();
     orch.onTelemetryFrame(f1);
     expect(director.emittedEvents.filter((e) => e.event === 'iracing.publisherEventEmitted')).toHaveLength(0);
   });
 
   it('forwards FLAG_GREEN when SessionFlags transitions', () => {
-    const { orch, director } = makeOrchestrator();
-    orch.activate();
+    const { orch, director } = makeActiveOrchestrator();
     const f1 = makeFrame({ sessionState: SessionStateEnum.Racing, sessionFlags: 0 });
     orch.onTelemetryFrame(f1);
     director.emittedEvents.length = 0;
@@ -292,20 +312,34 @@ describe('onTelemetryFrame — detector pipeline', () => {
 // ---------------------------------------------------------------------------
 
 describe('iracing.publisherStateChanged', () => {
-  it('emits status updates with raceSessionId and publisherCode envelope fields', () => {
-    const { orch, director } = makeOrchestrator();
-    orch.activate();
+  it('emits status updates with raceSessionId and publisherCode envelope fields', async () => {
+    const { orch, director } = makeActiveOrchestrator();
+    // Advance timers to flush PUBLISHER_HELLO and get a status event
+    // that reflects the bound session id.
+    await vi.advanceTimersByTimeAsync(1100);
     const statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
     expect(statusEvents.length).toBeGreaterThan(0);
     const last = statusEvents[statusEvents.length - 1];
     expect(last.payload.raceSessionId).toBe('session-abc');
     expect(last.payload.publisherCode).toBe('rig-01');
-    expect(last.payload.status).toBe('idle'); // initial state from transport.start()
+    expect(last.payload.status).toBe('idle'); // back to idle after flush
+  });
+
+  it('includes pipeline discriminator with active state and event counts (DIR-2)', async () => {
+    const { orch, director } = makeActiveOrchestrator();
+    await vi.advanceTimersByTimeAsync(1100);
+    const statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    expect(statusEvents.length).toBeGreaterThan(0);
+    const last = statusEvents[statusEvents.length - 1];
+    expect(last.payload.pipelines).toBeDefined();
+    expect(last.payload.pipelines.session.active).toBe(true);
+    expect(typeof last.payload.pipelines.session.eventsEnqueued).toBe('number');
+    expect(last.payload.pipelines.driver.active).toBe(true);
+    expect(typeof last.payload.pipelines.driver.eventsEnqueued).toBe('number');
   });
 
   it('emits status=active during a flush and back to idle after', async () => {
-    const { orch, director } = makeOrchestrator();
-    orch.activate();
+    const { orch, director } = makeActiveOrchestrator();
 
     // Generate one event so the transport has something to send
     const f1 = makeFrame({ playerIncidentCount: 0 });
@@ -329,8 +363,7 @@ describe('iracing.publisherStateChanged', () => {
 
 describe('heartbeat', () => {
   it('fires PUBLISHER_HEARTBEAT after 1s of inactivity', () => {
-    const { orch, director } = makeOrchestrator();
-    orch.activate();
+    const { orch, director } = makeActiveOrchestrator();
     director.emittedEvents.length = 0;
 
     // Advance time so heartbeat detector considers it idle, then tick
@@ -344,8 +377,7 @@ describe('heartbeat', () => {
   });
 
   it('is suppressed when other events flow through', () => {
-    const { orch, director } = makeOrchestrator();
-    orch.activate();
+    const { orch, director } = makeActiveOrchestrator();
 
     // Emit an event right now via the detector pipeline
     const f1 = makeFrame({ playerIncidentCount: 0 });
@@ -363,8 +395,7 @@ describe('heartbeat', () => {
   });
 
   it('automatic 1Hz timer drives heartbeats while running', async () => {
-    const { orch, director } = makeOrchestrator();
-    orch.activate();
+    const { orch, director } = makeActiveOrchestrator();
     director.emittedEvents.length = 0;
 
     // Advance fake time by 3s — should produce ~3 heartbeats
@@ -378,55 +409,138 @@ describe('heartbeat', () => {
 });
 
 // ---------------------------------------------------------------------------
-// setRaceSessionId — issue #109
+// bindSession / releaseSession — DIR-2
 // ---------------------------------------------------------------------------
 
-describe('setRaceSessionId', () => {
-  it('updates the session ID carried on subsequent events', async () => {
-    const { orch, batches } = makeOrchestrator({
-      'publisher.raceSessionId': 'stale-session-id',
-    });
+describe('bindSession (DIR-2)', () => {
+  it('starts session publisher when called after activate() + connected', () => {
+    const { orch } = makeOrchestrator();
     orch.activate();
+    orch.onConnectionChange(true);
+    expect(orch.isAnyPipelineActive).toBe(false);
 
-    // Flush initial PUBLISHER_HELLO (tagged with stale ID) before the rebind
+    orch.bindSession('session-xyz');
+    expect(orch.isAnyPipelineActive).toBe(true);
+  });
+
+  it('emits PUBLISHER_HELLO on bindSession when connected', () => {
+    const { orch, director } = makeOrchestrator();
+    orch.activate();
+    orch.onConnectionChange(true);
+    director.emittedEvents.length = 0;
+
+    orch.bindSession('session-xyz');
+
+    const hello = director.emittedEvents.find(
+      (e) => e.event === 'iracing.publisherEventEmitted' && e.payload?.type === 'PUBLISHER_HELLO',
+    );
+    expect(hello).toBeDefined();
+  });
+
+  it('arms when called before iRacing connects, activates on connect', () => {
+    const { orch, director } = makeOrchestrator();
+    orch.activate();
+    // iRacing NOT connected
+    orch.bindSession('armed-session');
+    expect(orch.isAnyPipelineActive).toBe(false); // armed, not active yet
+
+    // iRacing connects
+    orch.onConnectionChange(true);
+    expect(orch.isAnyPipelineActive).toBe(true);
+    const hello = director.emittedEvents.find(
+      (e) => e.event === 'iracing.publisherEventEmitted' && e.payload?.type === 'PUBLISHER_HELLO',
+    );
+    expect(hello).toBeDefined();
+  });
+
+  it('logs arming message when not yet connected', () => {
+    const { orch, director } = makeOrchestrator();
+    orch.activate();
+    orch.bindSession('armed-session');
+    expect(director.logs.some((l) => l.message.includes('armed'))).toBe(true);
+  });
+
+  it('is a no-op when the session ID is already the same value', () => {
+    const { orch, director } = makeActiveOrchestrator();
+    director.logs.length = 0;
+    orch.bindSession('session-abc'); // same value — no-op
+    expect(director.logs.filter((l) => l.message.includes('Publisher pipelines'))).toHaveLength(0);
+  });
+
+  it('clears transport queue and rebinds on a different raceSessionId', async () => {
+    const { orch, batches } = makeOrchestrator();
+    orch.activate();
+    orch.onConnectionChange(true);
+    orch.bindSession('session-first');
+
+    // Flush initial events from first session
     await vi.advanceTimersByTimeAsync(1100);
-    batches.length = 0; // discard pre-bind events
+    batches.length = 0;
 
-    // Bind to the real (checked-in) session
-    orch.setRaceSessionId('d2f3e1c4-b4b8-416b-93c0-ccdc8604a502');
+    // Rebind to a second session
+    orch.bindSession('session-second');
 
-    // Trigger a telemetry event — this fires AFTER the session rebind
+    // Generate a telemetry event after rebind
     const f1 = makeFrame({ sessionState: SessionStateEnum.Racing, sessionFlags: 0 });
     orch.onTelemetryFrame(f1);
     const f2 = cloneFrame(f1);
     f2.sessionFlags = FlagBits.Green;
-    orch.onTelemetryFrame(f2); // FLAG_GREEN fires here
+    orch.onTelemetryFrame(f2);
 
     await vi.advanceTimersByTimeAsync(1100);
-
-    const allPostBindEvents = batches.flat();
-    expect(allPostBindEvents.length).toBeGreaterThan(0);
-    // Every event emitted after the rebind must carry the new session ID
-    expect(allPostBindEvents.every((e) => e.raceSessionId === 'd2f3e1c4-b4b8-416b-93c0-ccdc8604a502')).toBe(true);
+    const postRebind = batches.flat();
+    expect(postRebind.length).toBeGreaterThan(0);
+    expect(postRebind.every((e) => e.raceSessionId === 'session-second')).toBe(true);
   });
 
-  it('is a no-op when the session ID is already the same value', () => {
-    const { orch, director } = makeOrchestrator({
-      'publisher.raceSessionId': 'session-abc',
-    });
+  it('treats bindSession(null) as releaseSession()', () => {
+    const { orch } = makeActiveOrchestrator();
+    expect(orch.isAnyPipelineActive).toBe(true);
+    orch.bindSession(null);
+    expect(orch.isAnyPipelineActive).toBe(false);
+  });
+});
+
+describe('releaseSession (DIR-2)', () => {
+  it('stops both pipelines and emits PUBLISHER_GOODBYE', () => {
+    const { orch, director } = makeActiveOrchestrator();
+    director.emittedEvents.length = 0;
+
+    orch.releaseSession();
+
+    expect(orch.isAnyPipelineActive).toBe(false);
+    const goodbye = director.emittedEvents.find(
+      (e) => e.event === 'iracing.publisherEventEmitted' && e.payload?.type === 'PUBLISHER_GOODBYE',
+    );
+    expect(goodbye).toBeDefined();
+  });
+
+  it('is a no-op when no session is bound', () => {
+    const { orch, director } = makeOrchestrator();
     orch.activate();
-    director.logs.length = 0;
-
-    orch.setRaceSessionId('session-abc'); // same value
-
-    // No log should be emitted for a no-op bind
-    expect(director.logs.filter((l) => l.message.includes('bound'))).toHaveLength(0);
+    director.emittedEvents.length = 0;
+    expect(() => orch.releaseSession()).not.toThrow();
+    expect(director.emittedEvents.find((e) => e.payload?.type === 'PUBLISHER_GOODBYE')).toBeUndefined();
   });
 
-  it('works when called before the publisher is started', () => {
-    const { orch } = makeOrchestrator({ 'publisher.enabled': false });
-    // No throw — safe to call regardless of running state
-    expect(() => orch.setRaceSessionId('new-session-id')).not.toThrow();
+  it('does not stop the transport — infrastructure stays live', () => {
+    const { orch } = makeActiveOrchestrator();
+    orch.releaseSession();
+    expect(orch.isRunning).toBe(true); // transport still live
+    expect(orch.isAnyPipelineActive).toBe(false);
+  });
+
+  it('can rebind after release', () => {
+    const { orch, director } = makeActiveOrchestrator();
+    orch.releaseSession();
+    expect(orch.isAnyPipelineActive).toBe(false);
+
+    director.emittedEvents.length = 0;
+    orch.bindSession('new-session-after-release');
+    expect(orch.isAnyPipelineActive).toBe(true);
+    expect(
+      director.emittedEvents.find((e) => e.payload?.type === 'PUBLISHER_HELLO'),
+    ).toBeDefined();
   });
 });
 
@@ -436,41 +550,34 @@ describe('setRaceSessionId', () => {
 
 describe('single-transport invariant (DIR-1)', () => {
   it('constructs exactly one PublisherTransport when both pipelines activate', () => {
-    // This test verifies the hard architectural constraint from DIR-1:
-    // no second transport instance is ever created even when both sub-orchestrators
-    // are active. We confirm this by checking that both pipelines enqueue into the
-    // same underlying request stream — i.e., events from both pipelines appear in
-    // the same fetch batches (not separate sets of requests).
+    const { orch, batches } = makeActiveOrchestrator();
 
-    const { orch, batches } = makeOrchestrator();
-    orch.activate();
-
-    // Both pipelines are active after start.
     expect(orch.isAnyPipelineActive).toBe(true);
     expect(orch.isRunning).toBe(true);
 
     // Flush
     void vi.advanceTimersByTimeAsync(2000);
 
-    // Exactly one set of batches — not two separate fetch streams.
-    // If two transports existed, there would be two independent fetch call series.
-    // With one transport, all events go through a single queue and flush together.
+    // Single set of batches — not two separate fetch streams.
     expect(batches).toBeDefined();
 
-    // Stop and restart — still only one transport at a time.
-    orch.setEnabled(false);
-    expect(orch.isRunning).toBe(false);
-    orch.setEnabled(true);
+    // Release and rebind — still only one transport.
+    orch.releaseSession();
     expect(orch.isRunning).toBe(true);
+    orch.bindSession('new-session');
     expect(orch.isAnyPipelineActive).toBe(true);
   });
 
-  it('isAnyPipelineActive returns false when publisher is stopped', () => {
+  it('isAnyPipelineActive returns false when no session is bound', () => {
     const { orch } = makeOrchestrator();
     orch.activate();
+    orch.onConnectionChange(true);
+    expect(orch.isAnyPipelineActive).toBe(false);
+
+    orch.bindSession('a-session');
     expect(orch.isAnyPipelineActive).toBe(true);
 
-    orch.setEnabled(false);
+    orch.releaseSession();
     expect(orch.isAnyPipelineActive).toBe(false);
   });
 });
