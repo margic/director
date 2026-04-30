@@ -346,7 +346,7 @@ export interface CarRefInput {
 
 export interface EventBuilderOptions {
   raceSessionId: string;
-  publisherCode: string;
+  rigId: string;
   frame: TelemetryFrame;
   leaderLap?: number;
 }
@@ -360,7 +360,7 @@ export function buildEvent<T extends PublisherEventType>(
   return {
     id: randomUUID(),
     raceSessionId: opts.raceSessionId,
-    publisherCode: opts.publisherCode,
+    rigId: opts.rigId,
     type,
     timestamp: Date.now(),
     sessionTime: opts.frame.sessionTime,

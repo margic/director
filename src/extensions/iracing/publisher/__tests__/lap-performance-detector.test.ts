@@ -43,7 +43,7 @@ function detectLapPerformance(
 }
 
 const ctx: LapPerformanceContext = {
-  publisherCode: 'TEST',
+  rigId: 'TEST',
   raceSessionId: 'rs-1',
   playerCarIdx:  0,
 };

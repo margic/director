@@ -14,7 +14,7 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const CTX = { publisherCode: 'rig-01', raceSessionId: 'session-abc' };
+const CTX = { rigId: 'rig-01', raceSessionId: 'session-abc' };
 
 function makeState() {
   return createSessionState('session-abc', 1);
@@ -364,7 +364,7 @@ describe('event envelope', () => {
     const events = detect(frames[0], frames[1], state);
     const ev = events.find(e => e.type === 'OVERTAKE')!;
     expect(ev.raceSessionId).toBe('session-abc');
-    expect(ev.publisherCode).toBe('rig-01');
+    expect(ev.rigId).toBe('rig-01');
   });
 });
 

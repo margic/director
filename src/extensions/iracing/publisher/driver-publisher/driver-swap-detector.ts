@@ -23,7 +23,7 @@ import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-st
 import type { PublisherEvent } from '../event-types';
 
 export interface DriverSwapDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** iRacing DriverInfo.DriverCarIdx — required for swap completion detection. */
   playerCarIdx?: number;
@@ -43,7 +43,7 @@ export function detectDriverSwap(
   if (prev === null) return events;
   if (!state.driverSwapPending) return events;
 
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const playerCarIdx = ctx.playerCarIdx ?? 0;
 
   const prevOnPit = prev.carIdxOnPitRoad[playerCarIdx] !== 0;

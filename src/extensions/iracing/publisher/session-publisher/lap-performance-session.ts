@@ -20,7 +20,7 @@ import type { PublisherEvent } from '../event-types';
 const CAR_COUNT = 64;
 
 export interface SessionLapPerformanceContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** Map of carIdx → CarClassID (from session YAML DriverInfo). */
   carClassByCarIdx?: Map<number, number>;
@@ -53,7 +53,7 @@ export function detectSessionLapPerformance(
     return events;
   }
 
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const carClassByCarIdx   = ctx.carClassByCarIdx   ?? new Map<number, number>();
   const carClassShortNames = ctx.carClassShortNames ?? new Map<number, string>();
 

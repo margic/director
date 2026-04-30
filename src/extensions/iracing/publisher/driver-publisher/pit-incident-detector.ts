@@ -28,7 +28,7 @@ const CAR_COUNT = 64;
 const TRACK_OFF_TRACK = -1;
 
 export interface PitIncidentDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** Optional: display name for the player car (identity override) */
   playerDisplayName?: string;
@@ -47,7 +47,7 @@ export function detectPitAndIncidents(
   ctx: PitIncidentDetectorContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
 
   // -------------------------------------------------------------------------
   // Per-car scan

@@ -7,7 +7,7 @@ import { makeFrame } from './frame-fixtures';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const CTX = { publisherCode: 'rig-01', raceSessionId: 'session-abc' };
+const CTX = { rigId: 'rig-01', raceSessionId: 'session-abc' };
 
 function makeState() {
   return createSessionState('session-abc', 1);
@@ -191,7 +191,7 @@ describe('LAP_COMPLETED envelope', () => {
     const prev = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 1 }] });
     const curr = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 2 }] });
     const [ev] = detect(prev, curr);
-    expect(ev.publisherCode).toBe('rig-01');
+    expect(ev.rigId).toBe('rig-01');
   });
 
   it('sessionTick and sessionTime are taken from the current frame', () => {

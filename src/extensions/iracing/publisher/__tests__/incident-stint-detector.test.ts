@@ -16,7 +16,7 @@ import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame, cloneFrame, withPitExit } from './frame-fixtures';
 
 const CTX: IncidentStintContext = {
-  publisherCode: 'rig-01',
+  rigId: 'rig-01',
   raceSessionId: 'rs-1',
   playerCarIdx:  0,
 };

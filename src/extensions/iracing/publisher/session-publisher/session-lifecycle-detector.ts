@@ -46,7 +46,7 @@ export const FLAG_CAUTION     = 0x4000; // full-course caution
 // ---------------------------------------------------------------------------
 
 export interface SessionLifecycleContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** trackName from session YAML (cached by extension) */
   trackName?: string;
@@ -79,7 +79,7 @@ export function detectSessionLifecycle(
 
   const opts = {
     raceSessionId: ctx.raceSessionId,
-    publisherCode: ctx.publisherCode,
+    rigId: ctx.rigId,
     frame: curr,
   };
 

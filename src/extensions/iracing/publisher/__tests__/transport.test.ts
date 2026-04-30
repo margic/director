@@ -11,7 +11,7 @@ function makeEvent(type = 'PUBLISHER_HEARTBEAT', id = 'evt-1'): PublisherEvent {
   return {
     id,
     raceSessionId: 'session-1',
-    publisherCode: 'rig-01',
+    rigId: 'rig-01',
     type: type as PublisherEvent['type'],
     timestamp: 1000,
     sessionTime: 120,

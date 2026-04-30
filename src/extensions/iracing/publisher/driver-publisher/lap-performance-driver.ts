@@ -25,7 +25,7 @@ export const LAP_DEGRADATION_BUFFER_SIZE = 3;
 export const DEFAULT_LAP_DEGRADATION_THRESHOLD = 0.03;
 
 export interface DriverLapPerformanceContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** iRacing DriverInfo.DriverCarIdx — required for player-specific events. */
   playerCarIdx?: number;
@@ -56,7 +56,7 @@ export function detectDriverLapPerformance(
     return events;
   }
 
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const threshold    = ctx.degradationThreshold ?? DEFAULT_LAP_DEGRADATION_THRESHOLD;
   const playerCarIdx = ctx.playerCarIdx;
 

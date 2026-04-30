@@ -28,7 +28,7 @@ import { makeFrame, cloneFrame } from './frame-fixtures';
 const PLAYER = 0;
 
 const CTX: PlayerPhysicsDetectorContext = {
-  publisherCode: 'rig-01',
+  rigId: 'rig-01',
   raceSessionId: 'rs-1',
   playerCarIdx:  PLAYER,
 };
@@ -57,7 +57,7 @@ describe('detectPlayerPhysics — guards', () => {
   });
 
   it('returns no events when playerCarIdx is not provided', () => {
-    const ctx: PlayerPhysicsDetectorContext = { publisherCode: 'rig-01', raceSessionId: 'rs-1' };
+    const ctx: PlayerPhysicsDetectorContext = { rigId: 'rig-01', raceSessionId: 'rs-1' };
     const f = makeFrame();
     expect(detect(f, cloneFrame(f), state, ctx)).toEqual([]);
   });

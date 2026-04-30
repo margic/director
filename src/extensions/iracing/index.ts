@@ -260,6 +260,28 @@ export async function activate(director: ExtensionAPI) {
         },
     );
 
+    // Driver-only rig registration (DIR-3) — called from the publisher settings UI
+    // when the operator pastes a raceSessionId and clicks Register.
+    director.registerIntentHandler(
+        'iracing.publisher.registerDriver',
+        async (payload: { raceSessionId: string }) => {
+            const sessionId = payload?.raceSessionId ?? '';
+            if (!sessionId) {
+                director.log('warn', 'iracing.publisher.registerDriver: raceSessionId is required');
+                return;
+            }
+            await publisherOrchestrator?.registerDriver(sessionId);
+            // Restart the polling loop so the interval reflects the new pipeline state.
+            if (pBase) {
+                if (telemetryInterval) {
+                    clearInterval(telemetryInterval);
+                    telemetryInterval = null;
+                }
+                startTelemetryPolling(director);
+            }
+        },
+    );
+
     // Start Polling (if on Windows)
     startPolling(director);
 }

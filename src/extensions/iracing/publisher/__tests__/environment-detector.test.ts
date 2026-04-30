@@ -20,7 +20,7 @@ import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame, cloneFrame } from './frame-fixtures';
 
 const CTX: EnvironmentDetectorContext = {
-  publisherCode: 'rig-01',
+  rigId: 'rig-01',
   raceSessionId: 'rs-1',
 };
 

@@ -49,7 +49,7 @@ export class SessionPublisherOrchestrator {
   private active = false;
 
   // Session context — set at activate() / resetForSession()
-  private publisherCode = '';
+  private rigId = '';
   private raceSessionId = '';
 
   // YAML-sourced metadata
@@ -76,10 +76,10 @@ export class SessionPublisherOrchestrator {
    * Activate the session publisher for a given session.
    * Safe to call when already active — resets state to the new session.
    */
-  activate(raceSessionId: string, publisherCode: string): void {
+  activate(raceSessionId: string, rigId: string): void {
     if (this.active && this.raceSessionId === raceSessionId) return;
     this.raceSessionId = raceSessionId;
-    this.publisherCode = publisherCode;
+    this.rigId = rigId;
     this.resetState();
     this.active = true;
     this.cfg.log('info', `SessionPublisher activated for raceSessionId=${raceSessionId}`);
@@ -123,7 +123,7 @@ export class SessionPublisherOrchestrator {
       this.state.knownRoster = new Map(this.currentRoster);
     }
 
-    const ctx = { publisherCode: this.publisherCode, raceSessionId: this.raceSessionId };
+    const ctx = { rigId: this.rigId, raceSessionId: this.raceSessionId };
     const events: PublisherEvent[] = [];
 
     events.push(...detectSessionLifecycle(this.prevFrame, frame, this.state, ctx));

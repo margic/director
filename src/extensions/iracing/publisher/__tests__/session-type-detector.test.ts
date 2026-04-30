@@ -9,7 +9,7 @@ import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame } from './frame-fixtures';
 
 const baseCtx: Omit<SessionTypeContext, 'sessionType'> = {
-  publisherCode: 'TEST',
+  rigId: 'TEST',
   raceSessionId: 'rs-1',
 };
 

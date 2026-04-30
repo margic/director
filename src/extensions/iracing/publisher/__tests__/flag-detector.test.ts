@@ -7,7 +7,7 @@ import { makeFrame, FlagBits } from './frame-fixtures';
 // Helpers
 // ---------------------------------------------------------------------------
 
-const CTX = { publisherCode: 'rig-01', raceSessionId: 'session-abc' };
+const CTX = { rigId: 'rig-01', raceSessionId: 'session-abc' };
 
 function makeState() {
   return createSessionState('session-abc', 1);
@@ -92,7 +92,7 @@ describe('FLAG_WHITE', () => {
     const events = detect(prev, curr);
     const ev = events.find(e => e.type === 'FLAG_WHITE')!;
     expect(ev.raceSessionId).toBe('session-abc');
-    expect(ev.publisherCode).toBe('rig-01');
+    expect(ev.rigId).toBe('rig-01');
   });
 });
 

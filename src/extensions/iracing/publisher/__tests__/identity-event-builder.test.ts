@@ -10,7 +10,7 @@ import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame } from './frame-fixtures';
 
 const ctx: IdentityEventContext = {
-  publisherCode: 'TEST',
+  rigId: 'TEST',
   raceSessionId: 'rs-1',
   playerCarIdx:  0,
 };

@@ -54,7 +54,7 @@ export class DriverPublisherOrchestrator {
   private active = false;
 
   // Session context — set at activate() / reset
-  private publisherCode = '';
+  private rigId = '';
   private raceSessionId = '';
 
   // YAML-sourced metadata
@@ -88,10 +88,10 @@ export class DriverPublisherOrchestrator {
    * Activate the driver publisher for a given session.
    * Safe to call when already active — resets state to the new session.
    */
-  activate(raceSessionId: string, publisherCode: string): void {
+  activate(raceSessionId: string, rigId: string): void {
     if (this.active && this.raceSessionId === raceSessionId) return;
     this.raceSessionId = raceSessionId;
-    this.publisherCode = publisherCode;
+    this.rigId = rigId;
     this.resetState();
     this.active = true;
     this.cfg.log('info', `DriverPublisher activated for raceSessionId=${raceSessionId}`);
@@ -136,7 +136,7 @@ export class DriverPublisherOrchestrator {
       this.state.knownRoster = new Map(this.currentRoster);
     }
 
-    const ctx = { publisherCode: this.publisherCode, raceSessionId: this.raceSessionId };
+    const ctx = { rigId: this.rigId, raceSessionId: this.raceSessionId };
     const events: PublisherEvent[] = [];
 
     // Identity — resolve on every frame; only emits on first resolve or change.

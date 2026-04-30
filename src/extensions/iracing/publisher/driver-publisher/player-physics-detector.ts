@@ -67,7 +67,7 @@ export const SLOW_CAR_COOLDOWN_TICKS     = 1800;
 // ---------------------------------------------------------------------------
 
 export interface PlayerPhysicsDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   playerCarIdx?: number;
   /** Car number strings for SLOW_CAR_AHEAD targetCarNumber payload. */
@@ -90,7 +90,7 @@ export function detectPlayerPhysics(
   if (playerCarIdx === undefined || playerCarIdx < 0) return [];
 
   const events: PublisherEvent[] = [];
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const playerRef = carRefFromRoster(state, playerCarIdx);
 
   const tick = curr.sessionTick;

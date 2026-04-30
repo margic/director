@@ -19,7 +19,7 @@ import type { PublisherEvent } from '../event-types';
 import type { IdentityResolutionResult } from './identity-override';
 
 export interface IdentityEventContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** Player car index — used as the `car` ref on the emitted events. */
   playerCarIdx: number;
@@ -31,7 +31,7 @@ export function buildIdentityEvents(
   state: SessionState,
   ctx: IdentityEventContext,
 ): PublisherEvent[] {
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const car = { carIdx: ctx.playerCarIdx, carNumber: '', driverName: result.identity.displayName };
 
   if (result.kind === 'first_resolution') {

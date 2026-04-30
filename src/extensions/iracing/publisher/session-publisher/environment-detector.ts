@@ -20,7 +20,7 @@ import { buildEvent } from '../session-state';
 import type { PublisherEvent, TimeOfDayPhase } from '../event-types';
 
 export interface EnvironmentDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   playerCarIdx?: number;
 }
@@ -79,7 +79,7 @@ export function detectEnvironment(
   ctx: EnvironmentDetectorContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const nocar = { carIdx: ctx.playerCarIdx ?? -1, carNumber: '', driverName: '' };
 
   // -------------------------------------------------------------------------

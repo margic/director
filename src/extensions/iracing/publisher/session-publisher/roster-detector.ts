@@ -18,7 +18,7 @@ import { carRefFromRoster, buildEvent } from '../session-state';
 import type { PublisherEvent, PublisherCarRef } from '../event-types';
 
 export interface RosterDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /**
    * Current full roster as parsed from the latest SessionInfo YAML.
@@ -42,7 +42,7 @@ export function detectRosterUpdate(
   const events: PublisherEvent[] = [];
   if (ctx.currentRoster === undefined) return events;
 
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const current  = ctx.currentRoster;
   const previous = state.knownRoster;
   const playerCarIdx = ctx.playerCarIdx ?? 0;

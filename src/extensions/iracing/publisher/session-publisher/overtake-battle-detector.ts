@@ -53,7 +53,7 @@ const STATUS_CLOSING  = 'CLOSING' as const;
 const STATUS_ENGAGED  = 'ENGAGED' as const;
 
 export interface OvertakeBattleDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
 }
 
@@ -77,7 +77,7 @@ export function detectOvertakeAndBattle(
     return events;
   }
 
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
 
   // -------------------------------------------------------------------------
   // Step 1: Build reverse-lookup from position → carIdx for BOTH frames.

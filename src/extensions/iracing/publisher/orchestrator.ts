@@ -1,5 +1,5 @@
 /**
- * orchestrator.ts — DIR-2
+ * orchestrator.ts — DIR-3
  *
  * Top-level publisher orchestrator. Owns:
  *   - The single PublisherTransport instance (shared by both pipelines)
@@ -9,23 +9,30 @@
  *   - Routing of telemetry frames to SessionPublisherOrchestrator and
  *     DriverPublisherOrchestrator
  *   - Session bind / release lifecycle (DIR-2)
- *   - Config migration of legacy keys on startup (DIR-2 / S3)
+ *   - Config migration of legacy keys on startup (DIR-2+3 / S3)
+ *   - Auto-generated rigId (DIR-3)
  *
- * Activation model (DIR-2):
- *   - activate()         → starts transport, heartbeat, lifecycle infra.
+ * Activation model (DIR-2/3):
+ *   - activate()         → starts transport, heartbeat, lifecycle infra;
+ *                          generates rigId if absent.
  *                          Does NOT start either sub-pipeline on its own.
- *   - bindSession(id)    → starts Session Publisher pipeline. If iRacing is
- *                          not yet connected, the id is "armed" and the
- *                          pipeline starts automatically when the connection
- *                          arrives.
- *   - releaseSession()   → stops Session Publisher, sends PUBLISHER_GOODBYE,
+ *   - bindSession(id)    → starts Session Publisher pipeline. If
+ *                          publisher.driver.enabled is true, also starts
+ *                          the Driver Publisher. If iRacing is not yet
+ *                          connected, the id is "armed" and the pipelines
+ *                          start automatically when the connection arrives.
+ *   - releaseSession()   → stops both pipelines, sends PUBLISHER_GOODBYE,
  *                          flushes remaining events. Transport stays live.
+ *   - registerDriver(id) → Driver-only rig flow: calls the Race Control
+ *                          register endpoint and activates the Driver
+ *                          Publisher on success.
  *   - deactivate()       → stops everything (both pipelines + transport).
  *
  * Single-transport invariant: exactly one PublisherTransport instance exists
  * for the lifetime of this orchestrator. Tests must assert this.
  */
 
+import { randomUUID } from 'crypto';
 import { PublisherTransport, type TransportStatus } from './transport';
 import { LifecycleEventDetector, type LifecycleDetectorContext } from './shared/lifecycle-event-detector';
 import { SessionPublisherOrchestrator } from './session-publisher/orchestrator';
@@ -56,6 +63,8 @@ export interface PublisherOrchestratorConfig {
   fetchFn?: typeof fetch;
   /** Test injection — defaults to Date.now */
   nowFn?: () => number;
+  /** Test injection — defaults to crypto.randomUUID */
+  uuidFn?: () => string;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,9 +75,10 @@ const DEFAULT_RC_BASE_URL       = 'https://simracecenter.com';
 const DEFAULT_BATCH_INTERVAL_MS = 2000;
 const HEARTBEAT_INTERVAL_MS     = 1_000;
 
-/** Legacy config keys removed in DIR-2 (S3 migration). publisher.publisherCode is removed in DIR-3. */
+/** Legacy config keys removed in DIR-2 and DIR-3 (S3 migration). */
 const LEGACY_KEYS = [
   'publisher.enabled',
+  'publisher.publisherCode',
   'publisher.raceSessionId',
   'publisher.identityDisplayName',
 ] as const;
@@ -99,10 +109,10 @@ export class PublisherOrchestrator {
   private raceSessionId = '';
 
   /**
-   * publisherCode — read from settings at startup. Retained until DIR-3
-   * replaces it with an auto-generated rigId.
+   * rigId — auto-generated UUID stored in publisher.rigId config on first launch.
+   * Never user-visible beyond a read-only display. Tags every outbound event.
    */
-  private publisherCode = '';
+  private rigId = '';
 
   /**
    * "Armed" session id: set when bindSession() fires before iRacing is
@@ -146,7 +156,8 @@ export class PublisherOrchestrator {
 
   /**
    * Called from the internal `iracing.publisher.bindSession` intent handler.
-   * Starts (or rebinds) the Session Publisher pipeline.
+   * Starts (or rebinds) the Session Publisher pipeline. If
+   * publisher.driver.enabled is true, also starts the Driver Publisher.
    *
    * Pass null or empty string to release the session (identical semantics to
    * releaseSession()).
@@ -284,6 +295,99 @@ export class PublisherOrchestrator {
   }
 
   /**
+   * Driver-only rig registration flow (DIR-3).
+   *
+   * Calls POST /api/publisher/sessions/{raceSessionId}/register and activates
+   * the Driver Publisher on success. Emits iracing.publisher.registerDriverResult
+   * with the outcome.
+   *
+   * For Director Loop rigs the driver publisher starts automatically via
+   * bindSession() when publisher.driver.enabled is true — no register call
+   * is needed or made.
+   */
+  async registerDriver(raceSessionId: string): Promise<void> {
+    if (!this.running) {
+      this.cfg.director.log('warn', 'registerDriver called before activate()');
+      return;
+    }
+
+    const token = await this.cfg.director.getAuthToken();
+    if (!token) {
+      const msg = 'Not authenticated — sign in first';
+      this.cfg.director.log('warn', `DriverPublisher register skipped: ${msg}`);
+      this.cfg.director.emitEvent('iracing.publisher.registerDriverResult', {
+        success: false, errorCode: 401, message: msg, raceSessionId,
+      });
+      return;
+    }
+
+    const driverName = (
+      String(this.cfg.director.settings['publisher.driver.displayName'] ?? '').trim() ||
+      String(this.cfg.director.settings['iracing.userName'] ?? '').trim() ||
+      'Unknown Driver'
+    );
+
+    const rcBaseUrl = String(
+      this.cfg.director.settings['app.rcApiBaseUrl'] ?? DEFAULT_RC_BASE_URL,
+    ).replace(/\/$/, '');
+    const url = `${rcBaseUrl}/api/publisher/sessions/${encodeURIComponent(raceSessionId)}/register`;
+    const fetchFn = this.cfg.fetchFn ?? fetch;
+
+    try {
+      const resp = await fetchFn(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ rigId: this.rigId, driverName }),
+      });
+
+      if (resp.status === 200) {
+        this.cfg.director.saveSetting?.('publisher.driver.sessionId', raceSessionId);
+        this.driverPublisher?.activate(raceSessionId, this.rigId);
+        if (this.currentRoster.size > 0) {
+          this.driverPublisher?.updateRoster(Array.from(this.currentRoster.values()));
+        }
+        // Fire PUBLISHER_HELLO for lifecycle tracking if no session pipeline is active.
+        if (!this.sessionPublisher?.isActive) {
+          this.raceSessionId = raceSessionId;
+          this.dispatchLifecycleEvents(this.lifecycleDetector.onActivate(this.lifecycleCtx()));
+        }
+        this.cfg.director.log('info', `DriverPublisher registered for raceSessionId=${raceSessionId}`);
+        this.cfg.director.emitEvent('iracing.publisher.registerDriverResult', {
+          success: true, raceSessionId,
+        });
+        return;
+      }
+
+      const body: any = await resp.json().catch(() => ({}));
+      let message: string;
+      switch (resp.status) {
+        case 400: message = 'Registration failed — missing or invalid fields'; break;
+        case 401: message = 'Not authenticated — sign in first'; break;
+        case 404: message = 'Session ID not found — check the ID and try again'; break;
+        case 409: {
+          const sessionStatus = (body as any)?.status ?? 'unknown';
+          message = `Session not accepting registrations (status: ${sessionStatus})`;
+          break;
+        }
+        default: message = `Server error (${resp.status}) — please retry`;
+      }
+      this.cfg.director.log('warn', `DriverPublisher register failed (${resp.status}): ${message}`);
+      this.cfg.director.emitEvent('iracing.publisher.registerDriverResult', {
+        success: false, errorCode: resp.status, message, raceSessionId,
+      });
+    } catch (err: any) {
+      const message = `Network error: ${(err as Error)?.message ?? 'unknown'}`;
+      this.cfg.director.log('error', `DriverPublisher register error: ${message}`);
+      this.cfg.director.emitEvent('iracing.publisher.registerDriverResult', {
+        success: false, message, raceSessionId,
+      });
+    }
+  }
+
+  /**
    * Manually advance the heartbeat detector. Production code drives this from
    * a 1Hz setInterval started in startInfrastructure(). Exposed for tests.
    */
@@ -334,14 +438,15 @@ export class PublisherOrchestrator {
   private startInfrastructure(): void {
     if (this.running) return;
 
-    this.publisherCode = String(this.cfg.director.settings['publisher.publisherCode'] ?? '');
-
-    if (!this.publisherCode) {
-      this.cfg.director.log(
-        'warn',
-        'Publisher started without publisher.publisherCode — events will be tagged with empty publisherCode',
-      );
+    // rigId — auto-generated on first launch, then read from settings (DIR-3 / S3).
+    const stored = String(this.cfg.director.settings['publisher.rigId'] ?? '').trim();
+    const savedRigId = stored || (this.cfg.uuidFn ?? randomUUID)();
+    if (!stored) {
+      this.cfg.director.saveSetting?.('publisher.rigId', savedRigId);
+      this.cfg.director.log('info', `Publisher generated new rigId: ${savedRigId}`);
     }
+
+    this.rigId = savedRigId;
 
     const rcBaseUrl = String(
       this.cfg.director.settings['app.rcApiBaseUrl'] ?? DEFAULT_RC_BASE_URL,
@@ -411,8 +516,14 @@ export class PublisherOrchestrator {
   private startSessionPipeline(): void {
     if (!this.running || !this.sessionPublisher || !this.driverPublisher) return;
 
-    this.sessionPublisher.activate(this.raceSessionId, this.publisherCode);
-    this.driverPublisher.activate(this.raceSessionId, this.publisherCode);
+    this.sessionPublisher.activate(this.raceSessionId, this.rigId);
+
+    // Driver Publisher only activates via bindSession on Director Loop rigs
+    // when the operator has opted in (publisher.driver.enabled = true).
+    // On driver-only rigs it activates via registerDriver() instead.
+    if (this.cfg.director.settings['publisher.driver.enabled'] === true) {
+      this.driverPublisher.activate(this.raceSessionId, this.rigId);
+    }
 
     // Seed roster into both pipelines.
     if (this.currentRoster.size > 0) {
@@ -482,7 +593,7 @@ export class PublisherOrchestrator {
     this.cfg.director.emitEvent('iracing.publisherStateChanged', {
       ...status,
       raceSessionId: this.raceSessionId,
-      publisherCode: this.publisherCode,
+      rigId: this.rigId,
       pipelines: {
         session: {
           active:         this.sessionPublisher?.isActive       ?? false,
@@ -498,7 +609,7 @@ export class PublisherOrchestrator {
 
   private lifecycleCtx(): LifecycleDetectorContext {
     return {
-      publisherCode: this.publisherCode,
+      rigId:         this.rigId,
       raceSessionId: this.raceSessionId,
       version:       this.cfg.version,
     };

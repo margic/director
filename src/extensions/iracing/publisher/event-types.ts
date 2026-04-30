@@ -19,8 +19,8 @@ export interface PublisherEvent<T extends PublisherEventType = PublisherEventTyp
   id: string;
   /** Cloud-assigned session id (from check-in response) */
   raceSessionId: string;
-  /** Identifies the rig — set from publisher.publisherCode setting */
-  publisherCode: string;
+  /** Auto-generated UUID for this rig; set from publisher.rigId setting. Optional annotation for debugging. */
+  rigId?: string;
   /** Event type discriminator */
   type: T;
   /** ms since epoch (publisher clock) */

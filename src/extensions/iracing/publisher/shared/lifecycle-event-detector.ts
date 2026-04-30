@@ -21,7 +21,7 @@ import type { PublisherEvent, PublisherEventType, EventPayloadMap } from '../eve
 // ---------------------------------------------------------------------------
 
 export interface LifecycleDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** Semver version string from the extension manifest */
   version: string;
@@ -123,7 +123,7 @@ export class LifecycleEventDetector {
     return {
       id: randomUUID(),
       raceSessionId: ctx.raceSessionId,
-      publisherCode: ctx.publisherCode,
+      rigId: ctx.rigId,
       type,
       timestamp: this.getNow(),
       sessionTime: 0,

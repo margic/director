@@ -16,7 +16,7 @@ import { buildEvent, carRefFromRoster } from '../session-state';
 const CAR_COUNT = 64;
 
 export interface LapDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
 }
 
@@ -40,7 +40,7 @@ export function detectLapCompleted(
   if (prev === null) return [];
 
   const events: PublisherEvent[] = [];
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
 
   for (let i = 0; i < CAR_COUNT; i++) {
     const prevLaps = prev.carIdxLapCompleted[i];

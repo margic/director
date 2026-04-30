@@ -31,13 +31,13 @@ import type { PublisherCarRef } from '../event-types';
 import { makeFrame, cloneFrame, withPitExit } from './frame-fixtures';
 
 const SWAP_CTX: DriverSwapDetectorContext = {
-  publisherCode: 'rig-01',
+  rigId: 'rig-01',
   raceSessionId: 'rs-1',
   playerCarIdx:  0,
 };
 
 const ROSTER_CTX: RosterDetectorContext = {
-  publisherCode: 'rig-01',
+  rigId: 'rig-01',
   raceSessionId: 'rs-1',
   playerCarIdx:  0,
 };
