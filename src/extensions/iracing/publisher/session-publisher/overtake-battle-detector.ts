@@ -131,6 +131,7 @@ export function detectOvertakeAndBattle(
     const overtakePayload = {
       overtakingCarIdx: i,
       overtakenCarIdx:  displaced,
+      overtakenCar:     carRefFromRoster(state, displaced),
       newPosition:      currPos,
       lap:              curr.carIdxLapCompleted[i],
       lapDistPct:       curr.carIdxLapDistPct[i],
@@ -209,6 +210,8 @@ export function detectOvertakeAndBattle(
             {
               chaserCarIdx:          i,
               leaderCarIdx:          leaderIdx,
+              chaserCar:             carRefFromRoster(state, i),
+              leaderCar:             carRefFromRoster(state, leaderIdx),
               gapSec:                gap,
               closingRateSecPerLap:  closingRate,
               status:                STATUS_ENGAGED,
@@ -245,6 +248,8 @@ export function detectOvertakeAndBattle(
               {
                 chaserCarIdx:          i,
                 leaderCarIdx:          leaderIdx,
+                chaserCar:             carRefFromRoster(state, i),
+                leaderCar:             carRefFromRoster(state, leaderIdx),
                 gapSec:                gap,
                 closingRateSecPerLap:  closingRatePerLap,
                 status:                'CLOSING',
@@ -276,6 +281,8 @@ export function detectOvertakeAndBattle(
             {
               chaserCarIdx:          battle.chaserCarIdx,
               leaderCarIdx:          battle.leaderCarIdx,
+              chaserCar:             carRefFromRoster(state, battle.chaserCarIdx),
+              leaderCar:             carRefFromRoster(state, battle.leaderCarIdx),
               gapSec:                gap,
               closingRateSecPerLap:  battle.closingRateSecPerLap,
               status:                'BROKEN',
@@ -334,7 +341,8 @@ export function detectOvertakeAndBattle(
           car,
           {
             targetCarIdx:    leaderIdx,
-            targetCarNumber: targetRef.carNumber,
+            targetCarNumber: targetRef.carNumber ?? '',
+            lappedCar:       carRefFromRoster(state, leaderIdx),
             distanceMeters:  approxDistanceMeters,
           },
           opts,
@@ -351,7 +359,8 @@ export function detectOvertakeAndBattle(
           car,
           {
             targetCarIdx:    leaderIdx,
-            targetCarNumber: targetRef.carNumber,
+            targetCarNumber: targetRef.carNumber ?? '',
+            lappingCar:      carRefFromRoster(state, leaderIdx),
             distanceMeters:  approxDistanceMeters,
           },
           opts,

@@ -40,10 +40,10 @@ export interface PublisherEvent<T extends PublisherEventType = PublisherEventTyp
 export interface PublisherCarRef {
   /** iRacing CarIdx (0–63) */
   carIdx: number;
-  /** iRacing CarNumberRaw */
-  carNumber: string;
-  /** Display name with edge identity override applied */
-  driverName: string;
+  /** iRacing CarNumberRaw — optional when roster is not yet resolved for this carIdx */
+  carNumber?: string;
+  /** Display name with edge identity override applied — optional when roster is not yet resolved */
+  driverName?: string;
   teamName?: string;
   carClassShortName?: string;
 }
@@ -355,6 +355,8 @@ export interface StintBestLapPayload {
 export interface OvertakePayload {
   overtakingCarIdx: number;
   overtakenCarIdx: number;
+  /** DIR-4: self-describing ref for the overtaken car. Dual-emitted alongside overtakenCarIdx during transition window. */
+  overtakenCar?: PublisherCarRef;
   newPosition: number;
   lap: number;
   /** Fraction of lap where pass occurred — iRacing: CarIdxLapDistPct */
@@ -370,6 +372,10 @@ export interface PositionChangePayload {
 export interface BattlePayload {
   chaserCarIdx: number;
   leaderCarIdx: number;
+  /** DIR-4: self-describing ref for the chaser car. Dual-emitted alongside chaserCarIdx during transition window. */
+  chaserCar?: PublisherCarRef;
+  /** DIR-4: self-describing ref for the leader car. Dual-emitted alongside leaderCarIdx during transition window. */
+  leaderCar?: PublisherCarRef;
   /** Gap in seconds — iRacing: CarIdxF2Time */
   gapSec: number;
   closingRateSecPerLap: number;
@@ -380,6 +386,10 @@ export interface TrafficPayload {
   targetCarIdx: number;
   targetCarNumber: string;
   distanceMeters: number;
+  /** DIR-4: self-describing ref for the lapped car — populated on LAPPED_TRAFFIC_AHEAD only. */
+  lappedCar?: PublisherCarRef;
+  /** DIR-4: self-describing ref for the lapping car — populated on BEING_LAPPED only. */
+  lappingCar?: PublisherCarRef;
 }
 
 export interface StoppedOnTrackPayload {

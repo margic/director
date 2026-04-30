@@ -83,6 +83,19 @@ describe('OVERTAKE', () => {
     expect((ev.payload as any).newPosition).toBe(1);
   });
 
+  it('OVERTAKE payload includes overtakenCar PublisherCarRef (DIR-4)', () => {
+    const base  = makeFrame({ cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }] });
+    const state = prime(base);
+    const next  = cloneFrame(base);
+    next.carIdxPosition[0] = 2;
+    next.carIdxPosition[1] = 1;
+    const events = detect(base, next, state);
+    const ev = events.find(e => e.type === 'OVERTAKE')!;
+    // overtakenCar must have carIdx populated (carIdx-only when no roster)
+    expect((ev.payload as any).overtakenCar).toBeDefined();
+    expect((ev.payload as any).overtakenCar.carIdx).toBe(0);
+  });
+
   it('does NOT fire when one car is on pit road', () => {
     const base  = makeFrame({ cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }] });
     const state = prime(base);
@@ -207,6 +220,23 @@ describe('BATTLE_ENGAGED', () => {
     expect((ev.payload as any).gapSec).toBeCloseTo(0.7, 2);
   });
 
+  it('BATTLE_ENGAGED payload includes chaserCar and leaderCar PublisherCarRef (DIR-4)', () => {
+    const state = makeState();
+    const base  = makeFrame({ cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }] });
+    detect(null, base, state);
+    const f1 = cloneFrame(base);
+    f1.carIdxF2Time[1] = 0.8;
+    detect(base, f1, state);
+    const f2 = cloneFrame(f1);
+    f2.carIdxF2Time[1] = 0.7;
+    const events = detect(f1, f2, state);
+    const ev = events.find(e => e.type === 'BATTLE_ENGAGED')!;
+    expect((ev.payload as any).chaserCar).toBeDefined();
+    expect((ev.payload as any).chaserCar.carIdx).toBe(1);
+    expect((ev.payload as any).leaderCar).toBeDefined();
+    expect((ev.payload as any).leaderCar.carIdx).toBe(0);
+  });
+
   it('uses withBattleGap transition helper', () => {
     const state = makeState();
     const base  = scenarioA(); // car 0 P1, car 1 P2, car 1 already at 0.8s gap
@@ -328,6 +358,23 @@ describe('BATTLE_BROKEN', () => {
     expect((brokenEvent.payload as any).chaserCarIdx).toBe(1);
     expect((brokenEvent.payload as any).leaderCarIdx).toBe(0);
     expect((brokenEvent.payload as any).status).toBe('BROKEN');
+  });
+
+  it('BATTLE_BROKEN payload includes chaserCar and leaderCar PublisherCarRef (DIR-4)', () => {
+    const { state, lastFrame } = engageBattle();
+    let prev = lastFrame;
+    let brokenEvent: any;
+    for (let i = 0; i < 3; i++) {
+      const curr = cloneFrame(prev);
+      curr.carIdxF2Time[1] = 2.5;
+      const events = detect(prev, curr, state);
+      brokenEvent = events.find(e => e.type === 'BATTLE_BROKEN') ?? brokenEvent;
+      prev = curr;
+    }
+    expect((brokenEvent.payload as any).chaserCar).toBeDefined();
+    expect((brokenEvent.payload as any).chaserCar.carIdx).toBe(1);
+    expect((brokenEvent.payload as any).leaderCar).toBeDefined();
+    expect((brokenEvent.payload as any).leaderCar.carIdx).toBe(0);
   });
 });
 
@@ -487,6 +534,31 @@ describe('BATTLE_CLOSING', () => {
     expect((closing!.payload as any).gapSec).toBeCloseTo(1.5, 5);
   });
 
+  it('BATTLE_CLOSING payload includes chaserCar and leaderCar PublisherCarRef (DIR-4)', () => {
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [
+        { carIdx: 0, position: 1, lastLapTime: 90 },
+        { carIdx: 1, position: 2, lastLapTime: 90, f2Time: 1.8 },
+      ],
+    });
+    const state = prime(base);
+    state.activeBattles.set('0-1', {
+      chaserCarIdx: 1, leaderCarIdx: 0, status: 'CLOSING',
+      gapSec: 1.8, previousGapSec: 1.8, closingRateSecPerLap: 0,
+      engagedAt: 100, brokenFrames: 0, closingAnnounced: false,
+    });
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 102;
+    f1.carIdxF2Time[1] = 1.5;
+    const events = detect(base, f1, state);
+    const ev = events.find(e => e.type === 'BATTLE_CLOSING')!;
+    expect((ev.payload as any).chaserCar).toBeDefined();
+    expect((ev.payload as any).chaserCar.carIdx).toBe(1);
+    expect((ev.payload as any).leaderCar).toBeDefined();
+    expect((ev.payload as any).leaderCar.carIdx).toBe(0);
+  });
+
   it('only fires once per closing trend', () => {
     const base = makeFrame({
       sessionTime: 100,
@@ -554,6 +626,19 @@ describe('LAPPED_TRAFFIC_AHEAD', () => {
     expect(events.find(e => e.type === 'LAPPED_TRAFFIC_AHEAD')).toBeDefined();
   });
 
+  it('LAPPED_TRAFFIC_AHEAD payload includes lappedCar PublisherCarRef (DIR-4)', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, lapsCompleted: 10, f2Time: 0 },
+      { carIdx: 1, position: 2, lapsCompleted: 11, f2Time: 1.5 },
+    ] });
+    const state = prime(base);
+    const events = detect(base, cloneFrame(base), state);
+    const ev = events.find(e => e.type === 'LAPPED_TRAFFIC_AHEAD')!;
+    expect((ev.payload as any).lappedCar).toBeDefined();
+    expect((ev.payload as any).lappedCar.carIdx).toBe(0); // the lapped car is carIdx 0
+    expect((ev.payload as any).lappingCar).toBeUndefined(); // not present on this event
+  });
+
   it('does NOT fire twice for the same pair while still close', () => {
     const base = makeFrame({ cars: [
       { carIdx: 0, position: 1, lapsCompleted: 10, f2Time: 0 },
@@ -596,6 +681,19 @@ describe('BEING_LAPPED', () => {
     const state = prime(base);
     const events = detect(base, cloneFrame(base), state);
     expect(events.find(e => e.type === 'BEING_LAPPED')).toBeDefined();
+  });
+
+  it('BEING_LAPPED payload includes lappingCar PublisherCarRef (DIR-4)', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, lapsCompleted: 11, f2Time: 0 },
+      { carIdx: 1, position: 2, lapsCompleted: 10, f2Time: 1.5 },
+    ] });
+    const state = prime(base);
+    const events = detect(base, cloneFrame(base), state);
+    const ev = events.find(e => e.type === 'BEING_LAPPED')!;
+    expect((ev.payload as any).lappingCar).toBeDefined();
+    expect((ev.payload as any).lappingCar.carIdx).toBe(0); // the lapping car is carIdx 0
+    expect((ev.payload as any).lappedCar).toBeUndefined(); // not present on this event
   });
 });
 
