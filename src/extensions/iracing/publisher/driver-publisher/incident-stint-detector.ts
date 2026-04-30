@@ -20,9 +20,9 @@
  * reset at that moment so subsequent laps count from the fresh pit exit.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
-import type { PublisherEvent } from './event-types';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
+import type { PublisherEvent } from '../event-types';
 
 /** Team incident thresholds for INCIDENT_LIMIT_WARNING (in percent). */
 export const INCIDENT_LIMIT_THRESHOLDS = [50, 75, 90] as const;

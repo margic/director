@@ -88,9 +88,6 @@ export class IdentityOverrideService {
   /**
    * Inject the Race Control driver ID once the check-in response provides it.
    * The next call to resolve() will include it in the returned identity.
-   *
-   * TODO: Call this from the session check-in handler once racecontrol#265 is resolved
-   * and the check-in response includes `bookedDriverName` / driver assignment.
    */
   setRacecenterDriverId(driverId: string): void {
     this.racecenterDriverId = driverId;

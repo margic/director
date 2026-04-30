@@ -9,13 +9,38 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
-  detectLapPerformance,
+  detectSessionLapPerformance,
+  type SessionLapPerformanceContext,
+} from '../session-publisher/lap-performance-session';
+import {
+  detectDriverLapPerformance,
   LAP_DEGRADATION_BUFFER_SIZE,
   DEFAULT_LAP_DEGRADATION_THRESHOLD,
-  type LapPerformanceContext,
-} from '../lap-performance-detector';
+} from '../driver-publisher/lap-performance-driver';
 import { createSessionState, type SessionState } from '../session-state';
+import type { TelemetryFrame } from '../session-state';
 import { makeFrame, cloneFrame, CAR_COUNT } from './frame-fixtures';
+
+// Combined context — covers both session and driver slices
+interface LapPerformanceContext extends SessionLapPerformanceContext {
+  playerCarIdx?: number;
+  degradationThreshold?: number;
+}
+
+// Local wrapper that mirrors the old detectLapPerformance API.
+// Calls both split functions and merges the results so all existing
+// tests continue to work without modification.
+function detectLapPerformance(
+  prev: TelemetryFrame | null,
+  curr: TelemetryFrame,
+  state: SessionState,
+  ctx: LapPerformanceContext,
+) {
+  return [
+    ...detectSessionLapPerformance(prev, curr, state, ctx),
+    ...detectDriverLapPerformance(prev, curr, state, ctx),
+  ];
+}
 
 const ctx: LapPerformanceContext = {
   publisherCode: 'TEST',

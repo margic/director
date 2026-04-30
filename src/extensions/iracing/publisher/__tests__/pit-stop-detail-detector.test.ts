@@ -11,7 +11,7 @@ import {
   detectPitStopDetail,
   DEFAULT_FUEL_JUMP_THRESHOLD_L,
   type PitStopDetailContext,
-} from '../pit-stop-detail-detector';
+} from '../driver-publisher/pit-stop-detail-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import {
   makeFrame,

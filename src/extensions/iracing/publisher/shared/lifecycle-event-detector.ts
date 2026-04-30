@@ -14,7 +14,7 @@
  */
 
 import { randomUUID } from 'crypto';
-import type { PublisherEvent, PublisherEventType, EventPayloadMap } from './event-types';
+import type { PublisherEvent, PublisherEventType, EventPayloadMap } from '../event-types';
 
 // ---------------------------------------------------------------------------
 // Context passed by the orchestrator

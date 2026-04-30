@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectPitAndIncidents } from '../pit-incident-detector';
+import { detectPitAndIncidents } from '../driver-publisher/pit-incident-detector';
 import { createSessionState } from '../session-state';
 import {
   makeFrame,

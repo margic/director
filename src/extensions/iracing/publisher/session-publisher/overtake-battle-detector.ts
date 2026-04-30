@@ -22,10 +22,10 @@
  * Caller is responsible for resetting state on SESSION_LOADED.
  */
 
-import type { TelemetryFrame, SessionState, BattleState } from './session-state';
-import { getOrCreateCarState, battleKey, carRefFromRoster } from './session-state';
-import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
+import type { TelemetryFrame, SessionState, BattleState } from '../session-state';
+import { getOrCreateCarState, battleKey, carRefFromRoster } from '../session-state';
+import type { PublisherEvent } from '../event-types';
+import { buildEvent } from '../session-state';
 
 const CAR_COUNT = 64;
 

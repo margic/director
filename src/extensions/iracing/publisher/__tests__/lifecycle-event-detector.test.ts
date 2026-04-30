@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { LifecycleEventDetector } from '../lifecycle-event-detector';
-import type { LifecycleDetectorContext } from '../lifecycle-event-detector';
+import { LifecycleEventDetector } from '../shared/lifecycle-event-detector';
+import type { LifecycleDetectorContext } from '../shared/lifecycle-event-detector';
 
 // ---------------------------------------------------------------------------
 // Helpers

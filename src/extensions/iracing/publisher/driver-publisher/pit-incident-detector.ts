@@ -18,9 +18,9 @@
  * across sessions.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
-import type { PublisherEvent } from './event-types';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
+import type { PublisherEvent } from '../event-types';
 
 const CAR_COUNT = 64;
 

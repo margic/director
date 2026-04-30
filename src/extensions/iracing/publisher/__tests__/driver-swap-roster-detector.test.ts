@@ -1,11 +1,15 @@
 /**
- * driver-swap-roster-detector.test.ts — Issue #101
+ * driver-swap-roster-detector.test.ts — DIR-1
  *
- * Unit tests for detectDriverSwapAndRoster:
+ * Tests for the two functions that replaced detectDriverSwapAndRoster:
+ *
+ * detectDriverSwap (driver-publisher/driver-swap-detector):
  *   - DRIVER_SWAP_COMPLETED fires on pit exit while swap is pending
  *   - DRIVER_SWAP_COMPLETED does NOT fire when no swap is pending
  *   - DRIVER_SWAP_COMPLETED includes correct payload (duration, names, stintNumber)
  *   - Swap state is cleared after completion
+ *
+ * detectRosterUpdate (session-publisher/roster-detector):
  *   - ROSTER_UPDATED fires when cars are added/removed
  *   - ROSTER_UPDATED does NOT fire on first-call seed
  *   - ROSTER_UPDATED does NOT fire when roster is unchanged
@@ -15,18 +19,31 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
-  detectDriverSwapAndRoster,
-  type DriverSwapRosterContext,
-} from '../driver-swap-roster-detector';
+  detectDriverSwap,
+  type DriverSwapDetectorContext,
+} from '../driver-publisher/driver-swap-detector';
+import {
+  detectRosterUpdate,
+  type RosterDetectorContext,
+} from '../session-publisher/roster-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import type { PublisherCarRef } from '../event-types';
 import { makeFrame, cloneFrame, withPitExit } from './frame-fixtures';
 
-const CTX: DriverSwapRosterContext = {
+const SWAP_CTX: DriverSwapDetectorContext = {
   publisherCode: 'rig-01',
   raceSessionId: 'rs-1',
   playerCarIdx:  0,
 };
+
+const ROSTER_CTX: RosterDetectorContext = {
+  publisherCode: 'rig-01',
+  raceSessionId: 'rs-1',
+  playerCarIdx:  0,
+};
+
+// Keep old CTX alias for ROSTER tests that spread it
+const CTX = ROSTER_CTX;
 
 let state: SessionState;
 beforeEach(() => { state = createSessionState('rs-1', 1); });
@@ -35,9 +52,18 @@ function detect(
   prev: ReturnType<typeof makeFrame> | null,
   curr: ReturnType<typeof makeFrame>,
   s = state,
-  ctx = CTX,
+  ctx: DriverSwapDetectorContext = SWAP_CTX,
 ) {
-  return detectDriverSwapAndRoster(prev, curr, s, ctx);
+  return detectDriverSwap(prev, curr, s, ctx);
+}
+
+function detectRoster(
+  prev: ReturnType<typeof makeFrame> | null,
+  curr: ReturnType<typeof makeFrame>,
+  s = state,
+  ctx: RosterDetectorContext = ROSTER_CTX,
+) {
+  return detectRosterUpdate(prev, curr, s, ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -178,7 +204,7 @@ describe('ROSTER_UPDATED', () => {
     const roster = new Map([[0, ref(0)], [1, ref(1)]]);
     const f0 = makeFrame();
     const f1 = cloneFrame(f0);
-    const events = detect(f0, f1, state, { ...CTX, currentRoster: roster });
+    const events = detectRoster(f0, f1, state, { ...CTX, currentRoster: roster });
     expect(events.find(e => e.type === 'ROSTER_UPDATED')).toBeUndefined();
     expect(state.knownRoster.size).toBe(2);
   });
@@ -186,21 +212,21 @@ describe('ROSTER_UPDATED', () => {
   it('does NOT emit when roster is unchanged', () => {
     const roster = new Map([[0, ref(0)], [1, ref(1)]]);
     const f0 = makeFrame(); const f1 = cloneFrame(f0);
-    detect(f0, f1, state, { ...CTX, currentRoster: roster }); // seed
+    detectRoster(f0, f1, state, { ...CTX, currentRoster: roster }); // seed
 
     const f2 = cloneFrame(f1); const f3 = cloneFrame(f2);
-    const events = detect(f2, f3, state, { ...CTX, currentRoster: new Map(roster) });
+    const events = detectRoster(f2, f3, state, { ...CTX, currentRoster: new Map(roster) });
     expect(events.find(e => e.type === 'ROSTER_UPDATED')).toBeUndefined();
   });
 
   it('fires when a new car is added', () => {
     const initial = new Map([[0, ref(0)]]);
     const f0 = makeFrame(); const f1 = cloneFrame(f0);
-    detect(f0, f1, state, { ...CTX, currentRoster: initial }); // seed
+    detectRoster(f0, f1, state, { ...CTX, currentRoster: initial }); // seed
 
     const updated = new Map([[0, ref(0)], [5, ref(5)]]);
     const f2 = cloneFrame(f1); const f3 = cloneFrame(f2);
-    const events = detect(f2, f3, state, { ...CTX, currentRoster: updated });
+    const events = detectRoster(f2, f3, state, { ...CTX, currentRoster: updated });
     const ev = events.find(e => e.type === 'ROSTER_UPDATED');
     expect(ev).toBeDefined();
     expect((ev!.payload as any).added).toHaveLength(1);
@@ -211,11 +237,11 @@ describe('ROSTER_UPDATED', () => {
   it('fires when a car is removed', () => {
     const initial = new Map([[0, ref(0)], [3, ref(3)]]);
     const f0 = makeFrame(); const f1 = cloneFrame(f0);
-    detect(f0, f1, state, { ...CTX, currentRoster: initial }); // seed
+    detectRoster(f0, f1, state, { ...CTX, currentRoster: initial }); // seed
 
     const updated = new Map([[0, ref(0)]]); // car 3 dropped
     const f2 = cloneFrame(f1); const f3 = cloneFrame(f2);
-    const events = detect(f2, f3, state, { ...CTX, currentRoster: updated });
+    const events = detectRoster(f2, f3, state, { ...CTX, currentRoster: updated });
     const ev = events.find(e => e.type === 'ROSTER_UPDATED');
     expect(ev).toBeDefined();
     expect((ev!.payload as any).removed[0].carIdx).toBe(3);
@@ -225,11 +251,11 @@ describe('ROSTER_UPDATED', () => {
   it('fires with both added and removed in a single diff', () => {
     const initial = new Map([[1, ref(1)], [2, ref(2)]]);
     const f0 = makeFrame(); const f1 = cloneFrame(f0);
-    detect(f0, f1, state, { ...CTX, currentRoster: initial });
+    detectRoster(f0, f1, state, { ...CTX, currentRoster: initial });
 
     const updated = new Map([[2, ref(2)], [7, ref(7)]]); // 1 removed, 7 added
     const f2 = cloneFrame(f1); const f3 = cloneFrame(f2);
-    const events = detect(f2, f3, state, { ...CTX, currentRoster: updated });
+    const events = detectRoster(f2, f3, state, { ...CTX, currentRoster: updated });
     const ev = events.find(e => e.type === 'ROSTER_UPDATED');
     expect((ev!.payload as any).added.map((r: PublisherCarRef) => r.carIdx)).toContain(7);
     expect((ev!.payload as any).removed.map((r: PublisherCarRef) => r.carIdx)).toContain(1);
@@ -238,22 +264,22 @@ describe('ROSTER_UPDATED', () => {
   it('updates knownRoster snapshot after emitting', () => {
     const initial = new Map([[0, ref(0)]]);
     const f0 = makeFrame(); const f1 = cloneFrame(f0);
-    detect(f0, f1, state, { ...CTX, currentRoster: initial });
+    detectRoster(f0, f1, state, { ...CTX, currentRoster: initial });
 
     const updated = new Map([[0, ref(0)], [9, ref(9)]]);
     const f2 = cloneFrame(f1); const f3 = cloneFrame(f2);
-    detect(f2, f3, state, { ...CTX, currentRoster: updated });
+    detectRoster(f2, f3, state, { ...CTX, currentRoster: updated });
     expect(state.knownRoster.has(9)).toBe(true);
   });
 
   it('does not emit when currentRoster is undefined (skip)', () => {
     const roster = new Map([[0, ref(0)]]);
     const f0 = makeFrame(); const f1 = cloneFrame(f0);
-    detect(f0, f1, state, { ...CTX, currentRoster: roster });
+    detectRoster(f0, f1, state, { ...CTX, currentRoster: roster });
 
     // Next frame: no currentRoster passed
     const f2 = cloneFrame(f1); const f3 = cloneFrame(f2);
-    const events = detect(f2, f3, state, { ...CTX }); // no currentRoster
+    const events = detectRoster(f2, f3, state, { ...CTX }); // no currentRoster
     expect(events.find(e => e.type === 'ROSTER_UPDATED')).toBeUndefined();
   });
 });

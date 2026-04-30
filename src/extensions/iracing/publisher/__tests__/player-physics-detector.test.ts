@@ -21,7 +21,7 @@ import {
   SLOW_CAR_MIN_ACTIVE_MPS,
   SLOW_CAR_COOLDOWN_TICKS,
   type PlayerPhysicsDetectorContext,
-} from '../player-physics-detector';
+} from '../driver-publisher/player-physics-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame, cloneFrame } from './frame-fixtures';
 

@@ -18,9 +18,9 @@
  * Design: pure function — no side-effects, no state mutations.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import type { PublisherEvent } from '../event-types';
+import { buildEvent } from '../session-state';
 import {
   FLAG_CHECKERED,
   FLAG_WHITE,

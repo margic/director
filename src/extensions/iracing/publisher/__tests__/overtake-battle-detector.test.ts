@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectOvertakeAndBattle } from '../overtake-battle-detector';
+import { detectOvertakeAndBattle } from '../session-publisher/overtake-battle-detector';
 import { createSessionState } from '../session-state';
 import {
   makeFrame,

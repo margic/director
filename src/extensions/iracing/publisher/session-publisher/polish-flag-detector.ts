@@ -20,9 +20,9 @@
  *     provided; falls back to empty string.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import type { PublisherEvent } from '../event-types';
+import { buildEvent } from '../session-state';
 
 // ---------------------------------------------------------------------------
 // iRacing irsdk_Flags bit constants (subset)

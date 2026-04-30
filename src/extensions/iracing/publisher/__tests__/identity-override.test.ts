@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { IdentityOverrideService } from '../identity-override';
+import { IdentityOverrideService } from '../driver-publisher/identity-override';
 
 describe('IdentityOverrideService', () => {
   let svc: IdentityOverrideService;

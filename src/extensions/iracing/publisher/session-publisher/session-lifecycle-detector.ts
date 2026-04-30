@@ -16,9 +16,9 @@
  * caller's responsibility after this function returns.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import type { PublisherEvent } from '../event-types';
+import { buildEvent } from '../session-state';
 
 // ---------------------------------------------------------------------------
 // iRacing SessionState enum values

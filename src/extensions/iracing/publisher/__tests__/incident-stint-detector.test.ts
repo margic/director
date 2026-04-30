@@ -11,7 +11,7 @@ import {
   INCIDENT_LIMIT_THRESHOLDS,
   STINT_MILESTONE_PERCENTS,
   type IncidentStintContext,
-} from '../incident-stint-detector';
+} from '../driver-publisher/incident-stint-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame, cloneFrame, withPitExit } from './frame-fixtures';
 

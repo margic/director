@@ -15,9 +15,9 @@
  *   - TIME_OF_DAY_PHASE seeds silently on first call (when lastTimeOfDayPhase == '').
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import { buildEvent } from './session-state';
-import type { PublisherEvent, TimeOfDayPhase } from './event-types';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import { buildEvent } from '../session-state';
+import type { PublisherEvent, TimeOfDayPhase } from '../event-types';
 
 export interface EnvironmentDetectorContext {
   publisherCode: string;

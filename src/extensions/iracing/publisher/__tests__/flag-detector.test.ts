@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectFlags, FLAG_GREEN, FLAG_WHITE, FLAG_YELLOW, FLAG_CAUTION } from '../flag-detector';
+import { detectFlags, FLAG_GREEN, FLAG_WHITE, FLAG_YELLOW, FLAG_CAUTION } from '../session-publisher/flag-detector';
 import { createSessionState } from '../session-state';
 import { makeFrame, FlagBits } from './frame-fixtures';
 

@@ -15,7 +15,7 @@ import {
   SUN_DAY_THRESHOLD,
   SUN_NIGHT_THRESHOLD,
   type EnvironmentDetectorContext,
-} from '../environment-detector';
+} from '../session-publisher/environment-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame, cloneFrame } from './frame-fixtures';
 

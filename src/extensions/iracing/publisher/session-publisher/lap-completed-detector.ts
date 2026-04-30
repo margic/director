@@ -9,9 +9,9 @@
  * same poll window.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import type { PublisherEvent } from './event-types';
-import { buildEvent, carRefFromRoster } from './session-state';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import type { PublisherEvent } from '../event-types';
+import { buildEvent, carRefFromRoster } from '../session-state';
 
 const CAR_COUNT = 64;
 

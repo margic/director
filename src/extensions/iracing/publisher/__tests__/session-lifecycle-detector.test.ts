@@ -4,7 +4,7 @@ import {
   SESSION_STATE,
   FLAG_GREEN,
   FLAG_CHECKERED,
-} from '../session-lifecycle-detector';
+} from '../session-publisher/session-lifecycle-detector';
 import { createSessionState } from '../session-state';
 import {
   makeFrame,

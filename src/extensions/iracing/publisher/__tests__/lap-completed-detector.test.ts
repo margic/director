@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectLapCompleted } from '../lap-completed-detector';
+import { detectLapCompleted } from '../session-publisher/lap-completed-detector';
 import { createSessionState } from '../session-state';
 import { makeFrame } from './frame-fixtures';
 

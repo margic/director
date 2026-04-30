@@ -16,7 +16,7 @@ import {
   CAR_FLAG_MEATBALL,
   CAR_FLAG_DISQUALIFY,
   type PolishFlagDetectorContext,
-} from '../polish-flag-detector';
+} from '../session-publisher/polish-flag-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame, cloneFrame } from './frame-fixtures';
 

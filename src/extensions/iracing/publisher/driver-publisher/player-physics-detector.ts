@@ -15,9 +15,9 @@
  *   - Mutates SessionState cooldown fields on emission.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import type { PublisherEvent } from './event-types';
-import { buildEvent, carRefFromRoster } from './session-state';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import type { PublisherEvent } from '../event-types';
+import { buildEvent, carRefFromRoster } from '../session-state';
 
 // ---------------------------------------------------------------------------
 // Constants

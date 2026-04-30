@@ -13,9 +13,9 @@
  *                               mid-session and the new value differs.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import { buildEvent } from './session-state';
-import type { PublisherEvent } from './event-types';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import { buildEvent } from '../session-state';
+import type { PublisherEvent } from '../event-types';
 import type { IdentityResolutionResult } from './identity-override';
 
 export interface IdentityEventContext {
