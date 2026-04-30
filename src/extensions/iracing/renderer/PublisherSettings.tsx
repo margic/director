@@ -3,26 +3,37 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
-import { Radio, ArrowLeftRight, Search, CheckCircle2, XCircle } from 'lucide-react';
+import { Radio, ArrowLeftRight, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
 
-interface PublisherConfig {
-  enabled: boolean;
-  publisherCode: string;
-  raceSessionId: string;
-  identityDisplayName: string;
-  batchIntervalMs: number;
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type PublisherStatusKind = 'active' | 'idle' | 'connecting' | 'error';
+
+interface PipelineStatus {
+  active: boolean;
+  eventsEnqueued: number;
 }
-
-type LookupState = 'idle' | 'loading' | 'success' | 'error';
-
-type PublisherStatusKind = 'active' | 'idle' | 'connecting' | 'error' | 'disabled';
 
 interface PublisherStatus {
   status: PublisherStatusKind;
   message?: string;
-  eventsQueuedTotal?: number;
+  eventsQueuedTotal: number;
   lastFlushAt?: number;
   lastError?: string;
+  raceSessionId?: string;
+  rigId?: string;
+  pipelines?: {
+    session: PipelineStatus;
+    driver: PipelineStatus;
+  };
+}
+
+interface RegisterResult {
+  success: boolean;
+  errorCode?: number;
+  message?: string;
 }
 
 interface RecentEvent {
@@ -39,61 +50,75 @@ interface OperatorState {
 
 const MAX_RECENT_EVENTS = 5;
 
-const DEFAULT_CONFIG: PublisherConfig = {
-  enabled: false,
-  publisherCode: '',
-  raceSessionId: '',
-  identityDisplayName: '',
-  batchIntervalMs: 500,
-};
+// ---------------------------------------------------------------------------
+// PublisherSettings
+// ---------------------------------------------------------------------------
 
 export const PublisherSettings = () => {
-  const [config, setConfig] = useState<PublisherConfig>(DEFAULT_CONFIG);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [publisherStatus, setPublisherStatus] = useState<PublisherStatus | null>(null);
-  const [recentEvents, setRecentEvents] = useState<RecentEvent[]>([]);
-  const [operatorState, setOperatorState] = useState<OperatorState>({ playerOnPitRoad: false, driverSwapPending: false });
+  // Settings loaded from config
+  const [driverEnabled, setDriverEnabled]       = useState(false);
+  const [displayName, setDisplayName]           = useState('');
+  const [rigId, setRigId]                       = useState('');
+  const [driverSessionId, setDriverSessionId]   = useState('');
+
+  // Live status
+  const [publisherStatus, setPublisherStatus]   = useState<PublisherStatus | null>(null);
+  const [recentEvents, setRecentEvents]         = useState<RecentEvent[]>([]);
+
+  // Driver swap
+  const [operatorState, setOperatorState]       = useState<OperatorState>({ playerOnPitRoad: false, driverSwapPending: false });
   const [incomingDriverName, setIncomingDriverName] = useState('');
-  const [incomingDriverId, setIncomingDriverId] = useState('');
-  const [outgoingDriverId, setOutgoingDriverId] = useState('');
-  const [swapInitiating, setSwapInitiating] = useState(false);
-  const [lookupState, setLookupState] = useState<LookupState>('idle');
-  const [lookupError, setLookupError] = useState<string | null>(null);
+  const [incomingDriverId, setIncomingDriverId]     = useState('');
+  const [outgoingDriverId, setOutgoingDriverId]     = useState('');
+  const [swapInitiating, setSwapInitiating]     = useState(false);
+
+  // Register flow
+  const [manualSessionId, setManualSessionId]   = useState('');
+  const [registering, setRegistering]           = useState(false);
+  const [registerResult, setRegisterResult]     = useState<RegisterResult | null>(null);
+
+  // Regenerate confirmation
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
+
   const eventIdSeq = useRef(0);
 
+  // ---------------------------------------------------------------------------
+  // Load config on mount
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     const load = async () => {
       if (!window.electronAPI?.config) return;
       try {
-        const [
-          enabled,
-          publisherCode,
-          raceSessionId,
-          identityDisplayName,
-          batchIntervalMs,
-        ] = await Promise.all([
-          window.electronAPI.config.get('publisher.enabled'),
-          window.electronAPI.config.get('publisher.publisherCode'),
-          window.electronAPI.config.get('publisher.raceSessionId'),
-          window.electronAPI.config.get('publisher.identityDisplayName'),
-          window.electronAPI.config.get('publisher.batchIntervalMs'),
+        const [enabled, name, id, sessId] = await Promise.all([
+          window.electronAPI.config.get('publisher.driver.enabled'),
+          window.electronAPI.config.get('publisher.driver.displayName'),
+          window.electronAPI.config.get('publisher.rigId'),
+          window.electronAPI.config.get('publisher.driver.sessionId'),
         ]);
-        setConfig({
-          enabled: enabled ?? false,
-          publisherCode: publisherCode ?? '',
-          raceSessionId: raceSessionId ?? '',
-          identityDisplayName: identityDisplayName ?? '',
-          batchIntervalMs: batchIntervalMs ?? DEFAULT_CONFIG.batchIntervalMs,
-        });
+        setDriverEnabled(enabled ?? false);
+        setDisplayName(name ?? '');
+        setRigId(id ?? '');
+        setDriverSessionId(sessId ?? '');
       } catch (e) {
         console.error('Failed to load publisher config', e);
       }
     };
     load();
+
+    // Restore cached status event
+    const restoreStatus = async () => {
+      if (!window.electronAPI?.extensions) return;
+      try {
+        const last = await window.electronAPI.extensions.getLastEvent('iracing.publisherStateChanged');
+        if (last?.payload) setPublisherStatus(last.payload as PublisherStatus);
+      } catch { /* ignore */ }
+    };
+    restoreStatus();
   }, []);
 
-  // Subscribe to live publisher status events
+  // ---------------------------------------------------------------------------
+  // Subscribe to live events
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     let unsub: (() => void) | undefined;
     if (window.electronAPI?.extensions) {
@@ -103,78 +128,116 @@ export const PublisherSettings = () => {
         } else if (data.eventName === 'iracing.publisherOperatorState') {
           setOperatorState(data.payload as OperatorState);
         } else if (data.eventName === 'iracing.publisherEventEmitted') {
-          const payload = data.payload as { type: string; carIdx?: number; timestamp: number };
+          const p = data.payload as { type: string; carIdx?: number; timestamp: number };
           setRecentEvents((prev) => {
             const next: RecentEvent = {
-              id: `${payload.timestamp}-${eventIdSeq.current++}`,
-              type: payload.type,
-              carIdx: payload.carIdx,
-              timestamp: payload.timestamp,
+              id: `${p.timestamp}-${eventIdSeq.current++}`,
+              type: p.type,
+              carIdx: p.carIdx,
+              timestamp: p.timestamp,
             };
             return [next, ...prev].slice(0, MAX_RECENT_EVENTS);
           });
+        } else if (data.eventName === 'iracing.publisher.registerDriverResult') {
+          const r = data.payload as RegisterResult;
+          setRegistering(false);
+          setRegisterResult(r);
+          if (r.success) {
+            // Sync displayed session id
+            window.electronAPI?.config?.get('publisher.driver.sessionId').then((v) => {
+              if (v) setDriverSessionId(v);
+            }).catch(() => {});
+          }
         }
       });
     }
     return () => unsub?.();
   }, []);
 
-  const handleSave = useCallback(async () => {
-    if (!window.electronAPI?.config) return;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      await Promise.all([
-        window.electronAPI.config.set('publisher.enabled', config.enabled),
-        window.electronAPI.config.set('publisher.publisherCode', config.publisherCode),
-        window.electronAPI.config.set('publisher.raceSessionId', config.raceSessionId),
-        window.electronAPI.config.set('publisher.identityDisplayName', config.identityDisplayName),
-        window.electronAPI.config.set('publisher.batchIntervalMs', config.batchIntervalMs),
-      ]);
-    } catch (e) {
-      console.error('Failed to save publisher config', e);
-      setSaveError('Failed to save settings. Check the console for details.');
-    } finally {
-      setSaving(false);
-    }
-  }, [config]);
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  const formatTime = (ms?: number): string => {
+    if (!ms) return '—';
+    return new Date(ms).toLocaleTimeString(undefined, { hour12: false });
+  };
+
+  /** True when the orchestrator has a bound session (Director check-in active). */
+  const checkinActive = !!(publisherStatus?.raceSessionId && publisherStatus.pipelines?.session?.active);
 
   const statusColor: Record<PublisherStatusKind, string> = {
-    active: 'text-[color:var(--color-green-flag)]',
+    active:     'text-[color:var(--color-green-flag)]',
     connecting: 'text-[color:var(--color-yellow-flag)]',
-    idle: 'text-muted-foreground',
-    error: 'text-[color:var(--color-red-flag)]',
-    disabled: 'text-muted-foreground',
+    idle:       'text-muted-foreground',
+    error:      'text-[color:var(--color-red-flag)]',
   };
 
   const statusLabel: Record<PublisherStatusKind, string> = {
-    active: 'Streaming',
+    active:     'Active',
     connecting: 'Connecting',
-    idle: 'Idle',
-    error: 'Error',
-    disabled: 'Disabled',
+    idle:       'Idle',
+    error:      'Error',
   };
 
-  const handleToggleEnabled = useCallback(
-    async (checked: boolean) => {
-      setConfig((c) => ({ ...c, enabled: checked }));
-      try {
-        // Persist first so the orchestrator reads the correct value on start()
-        await window.electronAPI?.config?.set('publisher.enabled', checked);
-        // Hot-toggle the orchestrator — no restart required
-        await window.electronAPI?.extensions?.executeIntent('iracing.publisher.setEnabled', { enabled: checked });
-      } catch (e) {
-        console.error('Failed to toggle publisher', e);
-      }
-    },
-    [],
-  );
+  // ---------------------------------------------------------------------------
+  // Handlers
+  // ---------------------------------------------------------------------------
+
+  const handleToggleDriver = useCallback(async (checked: boolean) => {
+    setDriverEnabled(checked);
+    try {
+      await window.electronAPI?.config?.set('publisher.driver.enabled', checked);
+      await window.electronAPI?.extensions?.executeIntent('iracing.publisher.setDriverEnabled', { enabled: checked });
+    } catch (e) {
+      console.error('Failed to toggle Driver Publisher', e);
+    }
+  }, []);
+
+  const handleSaveDisplayName = useCallback(async () => {
+    try {
+      await window.electronAPI?.config?.set('publisher.driver.displayName', displayName.trim());
+    } catch (e) {
+      console.error('Failed to save display name', e);
+    }
+  }, [displayName]);
+
+  const handleRegenerate = useCallback(async () => {
+    if (!confirmRegenerate) {
+      setConfirmRegenerate(true);
+      return;
+    }
+    setConfirmRegenerate(false);
+    try {
+      await window.electronAPI?.extensions?.executeIntent('iracing.publisher.regenerateRigId', {});
+      // Read the newly generated rigId
+      const newId = await window.electronAPI?.config?.get('publisher.rigId');
+      if (newId) setRigId(newId);
+    } catch (e) {
+      console.error('Failed to regenerate Rig ID', e);
+    }
+  }, [confirmRegenerate]);
+
+  const handleRegister = useCallback(async () => {
+    const sessionId = manualSessionId.trim();
+    if (!sessionId) return;
+    setRegistering(true);
+    setRegisterResult(null);
+    try {
+      await window.electronAPI?.extensions?.executeIntent('iracing.publisher.registerDriver', {
+        raceSessionId: sessionId,
+      });
+      // Result arrives via iracing.publisher.registerDriverResult event
+    } catch (e: any) {
+      setRegistering(false);
+      setRegisterResult({ success: false, message: e?.message ?? 'Intent failed' });
+    }
+  }, [manualSessionId]);
 
   const handleInitiateSwap = useCallback(async () => {
-    if (!window.electronAPI?.extensions) return;
     setSwapInitiating(true);
     try {
-      await window.electronAPI.extensions.executeIntent('iracing.publisher.initiateDriverSwap', {
+      await window.electronAPI?.extensions?.executeIntent('iracing.publisher.initiateDriverSwap', {
         outgoingDriverId,
         incomingDriverId,
         incomingDriverName,
@@ -186,137 +249,278 @@ export const PublisherSettings = () => {
     }
   }, [outgoingDriverId, incomingDriverId, incomingDriverName]);
 
-  const handleLookup = useCallback(async () => {
-    if (!config.publisherCode.trim()) return;
-    setLookupState('loading');
-    setLookupError(null);
-    try {
-      const result = await window.electronAPI?.publisher?.lookupConfig(config.publisherCode.trim());
-      if (!result) throw new Error('No result returned');
-      // Auto-fill resolved fields and immediately persist them.
-      // endpointUrl is not derived from gatewayUrl — the transport always uses
-      // the spec default (https://simracecenter.com/api/telemetry/events).
-      const updates: Partial<PublisherConfig> = {
-        raceSessionId: result.raceSessionId ?? '',
-        identityDisplayName: result.displayName ?? '',
-      };
-      setConfig((c) => ({ ...c, ...updates }));
-      await Promise.all([
-        window.electronAPI?.config?.set('publisher.publisherCode', config.publisherCode.trim()),
-        window.electronAPI?.config?.set('publisher.raceSessionId', result.raceSessionId ?? ''),
-        window.electronAPI?.config?.set('publisher.identityDisplayName', result.displayName ?? ''),
-        // Clear any previously saved endpointUrl so the transport uses the spec default
-        window.electronAPI?.config?.set('publisher.endpointUrl', ''),
-      ]);
-      setLookupState('success');
-    } catch (e: any) {
-      setLookupError(e?.message ?? 'Lookup failed');
-      setLookupState('error');
+  // ---------------------------------------------------------------------------
+  // Register error messaging
+  // ---------------------------------------------------------------------------
+  const registerErrorMessage = (r: RegisterResult): string => {
+    if (r.message) return r.message;
+    switch (r.errorCode) {
+      case 401: return 'Sign in required — please authenticate and retry.';
+      case 404: return 'Session ID not found — check the ID and try again.';
+      case 409: return 'Session not accepting registrations.';
+      default:  return 'Registration failed. Please retry.';
     }
-  }, [config.publisherCode]);
-
-  const formatTime = (ms?: number): string => {
-    if (!ms) return '—';
-    const d = new Date(ms);
-    return d.toLocaleTimeString(undefined, { hour12: false });
   };
 
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
   return (
     <div className="space-y-4">
-      {/* Status bar */}
-      {publisherStatus && (
-        <div className="flex items-center gap-3 px-4 py-2 bg-card border border-border rounded-lg">
-          <Radio className={`w-4 h-4 ${statusColor[publisherStatus.status]}`} />
-          <span className={`text-xs font-rajdhani uppercase tracking-widest font-bold ${statusColor[publisherStatus.status]}`}>
-            {statusLabel[publisherStatus.status]}
-          </span>
-          {publisherStatus.message && (
-            <span className="text-xs text-muted-foreground ml-1">{publisherStatus.message}</span>
-          )}
-          {publisherStatus.eventsQueuedTotal !== undefined && (
-            <span className="ml-auto text-xs font-jetbrains text-muted-foreground">
-              {publisherStatus.eventsQueuedTotal} events sent
-            </span>
-          )}
-        </div>
-      )}
 
-      {/* Stats + recent events feed */}
-      {publisherStatus && (
-        <Card className="bg-card border-border">
-          <CardHeader>
-            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest">
-              Telemetry Publisher
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-3 gap-3">
+      {/* ── Session Publisher ──────────────────────────────────────────────── */}
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
+            <Radio className={`w-3.5 h-3.5 ${publisherStatus?.pipelines?.session?.active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`} />
+            Session Publisher
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Starts automatically when a Director session is active. Publishes flags, overtakes,
+            battles, laps, roster and environment for all cars in the field.
+          </p>
+
+          {/* Status row */}
+          <div className="flex items-center gap-3">
+            <span className={`inline-flex items-center gap-1.5 text-xs font-rajdhani uppercase tracking-wider font-bold
+              ${publisherStatus?.pipelines?.session?.active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`}>
+              <span className={`w-2 h-2 rounded-full inline-block ${publisherStatus?.pipelines?.session?.active ? 'bg-[color:var(--color-green-flag)]' : 'bg-muted-foreground'}`} />
+              {publisherStatus?.pipelines?.session?.active ? 'Active' : 'Idle'}
+            </span>
+            {publisherStatus?.raceSessionId && (
+              <span className="text-xs font-jetbrains text-muted-foreground truncate" title={publisherStatus.raceSessionId}>
+                Session: {publisherStatus.raceSessionId.slice(0, 24)}{publisherStatus.raceSessionId.length > 24 ? '…' : ''}
+              </span>
+            )}
+          </div>
+
+          {/* Per-pipeline counters */}
+          {publisherStatus?.pipelines && (
+            <div className="grid grid-cols-2 gap-3">
               <div className="rounded-md border border-border bg-background/40 p-3">
-                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
-                  Events Published
-                </div>
+                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Events Sent</div>
                 <div className="text-2xl font-jetbrains font-bold text-foreground tabular-nums">
-                  {publisherStatus.eventsQueuedTotal ?? 0}
+                  {publisherStatus.pipelines.session.eventsEnqueued}
                 </div>
               </div>
               <div className="rounded-md border border-border bg-background/40 p-3">
-                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
-                  Last Flush
-                </div>
+                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Last Flush</div>
                 <div className="text-xl font-jetbrains text-foreground tabular-nums">
                   {formatTime(publisherStatus.lastFlushAt)}
                 </div>
               </div>
-              <div className="rounded-md border border-border bg-background/40 p-3">
-                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
-                  Last Error
+            </div>
+          )}
+
+          {/* Recent events */}
+          <div>
+            <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground mb-2">Recent Events</div>
+            <div className="rounded-md border border-border bg-background/40 max-h-36 overflow-y-auto">
+              {recentEvents.length === 0 ? (
+                <div className="px-3 py-4 text-xs text-muted-foreground font-jetbrains text-center">
+                  Waiting for telemetry events…
                 </div>
-                <div
-                  className={`text-xs font-jetbrains truncate ${
-                    publisherStatus.lastError
-                      ? 'text-[color:var(--color-red-flag)]'
-                      : 'text-muted-foreground'
-                  }`}
-                  title={publisherStatus.lastError ?? ''}
-                >
+              ) : (
+                <ul className="divide-y divide-border">
+                  {recentEvents.map((ev) => (
+                    <li key={ev.id} className="flex items-center justify-between px-3 py-1.5 font-jetbrains text-xs">
+                      <span className="text-foreground">{ev.type}</span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {ev.carIdx !== undefined ? `car ${ev.carIdx}` : ''}
+                        <span className="ml-3">{formatTime(ev.timestamp)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Driver Publisher ───────────────────────────────────────────────── */}
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
+              <Radio className={`w-3.5 h-3.5 ${publisherStatus?.pipelines?.driver?.active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`} />
+              Driver Publisher
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground font-rajdhani uppercase">
+                {driverEnabled ? 'Enabled' : 'Disabled'}
+              </span>
+              <Switch checked={driverEnabled} onCheckedChange={handleToggleDriver} />
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <p className="text-xs text-muted-foreground">
+            Publishes fuel, incidents, pit stops, personal bests and stint data for the player car on this rig.
+          </p>
+
+          {/* Status row */}
+          <div className="flex items-center gap-3">
+            <span className={`inline-flex items-center gap-1.5 text-xs font-rajdhani uppercase tracking-wider font-bold
+              ${publisherStatus?.pipelines?.driver?.active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`}>
+              <span className={`w-2 h-2 rounded-full inline-block ${publisherStatus?.pipelines?.driver?.active ? 'bg-[color:var(--color-green-flag)]' : 'bg-muted-foreground'}`} />
+              {publisherStatus?.pipelines?.driver?.active ? 'Active' : 'Idle'}
+            </span>
+            {driverEnabled && !publisherStatus?.pipelines?.driver?.active && !checkinActive && !driverSessionId && (
+              <span className="text-xs text-[color:var(--color-yellow-flag)] font-rajdhani">
+                No session bound — check in or register to start publishing.
+              </span>
+            )}
+          </div>
+
+          {/* Per-pipeline counter */}
+          {publisherStatus?.pipelines && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Events Sent</div>
+                <div className="text-2xl font-jetbrains font-bold text-foreground tabular-nums">
+                  {publisherStatus.pipelines.driver.eventsEnqueued}
+                </div>
+              </div>
+              <div className="rounded-md border border-border bg-background/40 p-3">
+                <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Last Error</div>
+                <div className={`text-xs font-jetbrains truncate ${publisherStatus.lastError ? 'text-[color:var(--color-red-flag)]' : 'text-muted-foreground'}`}
+                     title={publisherStatus.lastError ?? ''}>
                   {publisherStatus.lastError ?? '—'}
                 </div>
               </div>
             </div>
+          )}
 
-            <div>
-              <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground mb-2">
-                Recent Events
-              </div>
-              <div className="rounded-md border border-border bg-background/40 max-h-40 overflow-y-auto">
-                {recentEvents.length === 0 ? (
-                  <div className="px-3 py-4 text-xs text-muted-foreground font-jetbrains text-center">
-                    Waiting for telemetry events…
-                  </div>
-                ) : (
-                  <ul className="divide-y divide-border">
-                    {recentEvents.map((ev) => (
-                      <li
-                        key={ev.id}
-                        className="flex items-center justify-between px-3 py-1.5 font-jetbrains text-xs"
-                      >
-                        <span className="text-foreground">{ev.type}</span>
-                        <span className="text-muted-foreground tabular-nums">
-                          {ev.carIdx !== undefined ? `car ${ev.carIdx}` : ''}
-                          <span className="ml-3">{formatTime(ev.timestamp)}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+          {/* Display name */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Display Name</label>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Your driver display name"
+                className="bg-background border-border font-mono text-sm flex-1"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                onBlur={handleSaveDisplayName}
+                onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveDisplayName(); }}
+              />
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
 
-      {/* Driver Swap Controls — visible when publisher is active */}
-      {publisherStatus && publisherStatus.status !== 'disabled' && (
+          {/* Rig ID */}
+          <div className="space-y-1.5">
+            <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Rig ID</label>
+            <div className="flex gap-2 items-center">
+              <Input
+                readOnly
+                className="bg-background border-border font-jetbrains text-xs flex-1 text-muted-foreground cursor-default select-all"
+                value={rigId || publisherStatus?.rigId || '—'}
+              />
+              {!confirmRegenerate ? (
+                <Button
+                  onClick={handleRegenerate}
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0 border-border font-rajdhani uppercase tracking-wider text-xs"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
+                  Regenerate
+                </Button>
+              ) : (
+                <div className="flex gap-2 shrink-0">
+                  <Button
+                    onClick={handleRegenerate}
+                    size="sm"
+                    className="bg-destructive hover:bg-destructive/90 text-white font-rajdhani uppercase tracking-wider text-xs"
+                  >
+                    Confirm
+                  </Button>
+                  <Button
+                    onClick={() => setConfirmRegenerate(false)}
+                    variant="outline"
+                    size="sm"
+                    className="border-border font-rajdhani uppercase tracking-wider text-xs"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Auto-generated unique ID for this rig. Only regenerate if advised by Race Control support.
+            </p>
+          </div>
+
+          {/* Driver-only session registration — hidden when checkin is active */}
+          {!checkinActive && (
+            <div className="rounded-md border border-border bg-background/30 p-4 space-y-3">
+              <p className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+                For rigs without a Director session
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Enter the Race Control session ID provided by your event organiser and click{' '}
+                <strong>Register</strong>. Leave blank if a Director check-in is active.
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Session ID"
+                  className="bg-background border-border font-jetbrains text-xs flex-1"
+                  value={manualSessionId}
+                  onChange={(e) => {
+                    setManualSessionId(e.target.value);
+                    setRegisterResult(null);
+                  }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') void handleRegister(); }}
+                />
+                <Button
+                  onClick={handleRegister}
+                  disabled={!manualSessionId.trim() || registering}
+                  className="shrink-0 bg-secondary hover:bg-secondary/90 text-white font-rajdhani uppercase tracking-wider font-bold text-xs"
+                >
+                  {registering ? 'Registering…' : 'Register'}
+                </Button>
+              </div>
+
+              {/* Current bound session */}
+              {driverSessionId && !registerResult?.success && (
+                <p className="text-xs text-muted-foreground font-jetbrains">
+                  Registered: <span className="text-foreground">{driverSessionId}</span>
+                </p>
+              )}
+
+              {/* Register result */}
+              {registerResult?.success && (
+                <div className="flex items-center gap-2 rounded-md border border-[color:var(--color-green-flag)] bg-[color:var(--color-green-flag)]/10 px-3 py-2">
+                  <CheckCircle2 className="w-4 h-4 text-[color:var(--color-green-flag)] shrink-0" />
+                  <span className="text-xs font-rajdhani uppercase tracking-widest font-bold text-[color:var(--color-green-flag)]">
+                    Registered — Driver Publisher starting
+                  </span>
+                </div>
+              )}
+              {registerResult && !registerResult.success && (
+                <div className="flex items-start gap-2 rounded-md border border-destructive bg-destructive/10 px-3 py-2">
+                  <AlertCircle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-rajdhani uppercase tracking-widest font-bold text-destructive">Registration Failed</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{registerErrorMessage(registerResult)}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {checkinActive && (
+            <p className="text-xs text-muted-foreground px-1">
+              Director check-in active — session bound automatically. Manual registration is not available.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Driver Swap Controls ───────────────────────────────────────────── */}
+      {publisherStatus && (publisherStatus.pipelines?.session?.active || publisherStatus.pipelines?.driver?.active) && (
         <Card className="bg-card border-border">
           <CardHeader>
             <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
@@ -332,12 +536,9 @@ export const PublisherSettings = () => {
                 </span>
               </div>
             )}
-
             <div className="grid grid-cols-3 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
-                  Outgoing Driver ID
-                </label>
+                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Outgoing Driver ID</label>
                 <Input
                   placeholder="current driver id"
                   className="bg-background border-border font-mono text-xs"
@@ -347,9 +548,7 @@ export const PublisherSettings = () => {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
-                  Incoming Driver ID
-                </label>
+                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Incoming Driver ID</label>
                 <Input
                   placeholder="incoming driver id"
                   className="bg-background border-border font-mono text-xs"
@@ -359,9 +558,7 @@ export const PublisherSettings = () => {
                 />
               </div>
               <div className="space-y-1.5">
-                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
-                  Incoming Driver Name
-                </label>
+                <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Incoming Driver Name</label>
                 <Input
                   placeholder="display name"
                   className="bg-background border-border font-mono text-xs"
@@ -371,7 +568,6 @@ export const PublisherSettings = () => {
                 />
               </div>
             </div>
-
             <Button
               onClick={handleInitiateSwap}
               disabled={
@@ -395,135 +591,7 @@ export const PublisherSettings = () => {
         </Card>
       )}
 
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle className="text-muted-foreground text-sm uppercase font-rajdhani tracking-widest">
-            Publisher Configuration
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-
-          {/* Step 1 — Publisher Code + Lookup */}
-          <div className="space-y-2">
-            <label className="text-sm font-medium uppercase text-muted-foreground">Publisher Code</label>
-            <div className="flex gap-2">
-              <Input
-                placeholder="e.g. rig-01"
-                className="bg-background border-border font-mono flex-1"
-                value={config.publisherCode}
-                onChange={(e) => {
-                  setConfig((c) => ({ ...c, publisherCode: e.target.value }));
-                  setLookupState('idle');
-                  setLookupError(null);
-                }}
-                onKeyDown={(e) => { if (e.key === 'Enter') void handleLookup(); }}
-              />
-              <Button
-                onClick={handleLookup}
-                disabled={!config.publisherCode.trim() || lookupState === 'loading'}
-                className="bg-secondary hover:bg-secondary/90 text-white font-rajdhani uppercase tracking-wider font-bold shrink-0"
-              >
-                <Search className="w-4 h-4 mr-1.5" />
-                {lookupState === 'loading' ? 'Looking up…' : 'Lookup'}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Your unique rig code from Race Control. Click <strong>Lookup</strong> to auto-discover session details.
-            </p>
-          </div>
-
-          {/* Lookup result — shown after a successful or failed lookup */}
-          {lookupState === 'error' && lookupError && (
-            <div className="flex items-center gap-2 rounded-md border border-destructive bg-destructive/10 px-3 py-2.5">
-              <XCircle className="w-4 h-4 text-destructive shrink-0" />
-              <div>
-                <p className="text-xs font-rajdhani uppercase tracking-widest font-bold text-destructive">Lookup Failed</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{lookupError}</p>
-              </div>
-            </div>
-          )}
-
-          {lookupState === 'success' && (
-            <div className="rounded-md border border-[color:var(--color-green-flag)] bg-[color:var(--color-green-flag)]/10 px-3 py-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-[color:var(--color-green-flag)] shrink-0" />
-                <p className="text-xs font-rajdhani uppercase tracking-widest font-bold text-[color:var(--color-green-flag)]">
-                  Configuration Resolved
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 pl-6">
-                <div>
-                  <p className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Driver</p>
-                  <p className="text-sm font-jetbrains text-foreground">{config.identityDisplayName || '—'}</p>
-                </div>
-                <div>
-                  <p className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Session ID</p>
-                  <p className="text-xs font-jetbrains text-muted-foreground truncate" title={config.raceSessionId}>{config.raceSessionId || '—'}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Enable toggle — always visible but needs a resolved session */}
-          <div className={`flex items-center justify-between rounded-lg border p-4 transition-colors ${
-            lookupState === 'success' || config.raceSessionId
-              ? 'border-border'
-              : 'border-border opacity-50'
-          }`}>
-            <div className="space-y-0.5">
-              <label className="text-sm font-medium uppercase text-muted-foreground">Enable Publisher</label>
-              <p className="text-xs text-muted-foreground">
-                {lookupState !== 'success' && !config.raceSessionId
-                  ? 'Complete a successful Lookup first.'
-                  : 'Publish telemetry events from this rig to Race Control.'}
-              </p>
-            </div>
-            <Switch
-              checked={config.enabled}
-              disabled={!config.raceSessionId}
-              onCheckedChange={handleToggleEnabled}
-            />
-          </div>
-
-          {/* Advanced */}
-          <details className="group">
-            <summary className="cursor-pointer text-xs text-muted-foreground uppercase font-rajdhani tracking-widest hover:text-foreground transition-colors select-none">
-              Advanced
-            </summary>
-            <div className="mt-4 space-y-4 pl-1">
-              <div className="space-y-2">
-                <label className="text-sm font-medium uppercase text-muted-foreground">Batch Interval (ms)</label>
-                <Input
-                  type="number"
-                  min={100}
-                  max={5000}
-                  step={100}
-                  className="bg-background border-border font-mono"
-                  value={config.batchIntervalMs}
-                  onChange={(e) =>
-                    setConfig((c) => ({ ...c, batchIntervalMs: parseInt(e.target.value, 10) || 500 }))
-                  }
-                />
-                <p className="text-xs text-muted-foreground">
-                  How often normal-priority events are flushed. High-priority events always flush immediately.
-                </p>
-              </div>
-
-              {saveError && (
-                <p className="text-xs text-destructive">{saveError}</p>
-              )}
-
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-                className="w-full bg-primary hover:bg-primary/90 text-white font-rajdhani uppercase tracking-wider font-bold"
-              >
-                {saving ? 'Saving…' : 'Save Advanced Settings'}
-              </Button>
-            </div>
-          </details>
-        </CardContent>
-      </Card>
     </div>
   );
 };
+
