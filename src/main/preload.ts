@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Publisher API
   publisher: {
     lookupConfig: (publisherCode: string) => ipcRenderer.invoke('publisher:lookup-config', publisherCode),
+    listDrivers: () => ipcRenderer.invoke('publisher:list-drivers'),
   },
 
   // Telemetry API

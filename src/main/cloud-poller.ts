@@ -81,6 +81,7 @@ export class CloudPoller {
   private loopInterval: NodeJS.Timeout | null = null;
   private prefetchTimer: NodeJS.Timeout | null = null;
   private lastCompletedSequenceId: string | null = null;
+  private awaitingCompletion = false;
   private readonly idleRetryMs: number;
   private readonly prefetchLeadMs: number;
   private readonly minPrefetchMs: number;
@@ -115,6 +116,7 @@ export class CloudPoller {
     if (!this.isRunning) return;
     console.log('[CloudPoller] Stopping polling');
     this.isRunning = false;
+    this.awaitingCompletion = false;
     if (this.loopInterval) {
       clearTimeout(this.loopInterval);
       this.loopInterval = null;
@@ -155,6 +157,7 @@ export class CloudPoller {
    */
   onSequenceCompleted(sequenceId: string): void {
     this.lastCompletedSequenceId = sequenceId;
+    this.awaitingCompletion = false;
     // Trigger immediate retry — execution itself consumed the time (10-60s typically)
     if (this.isRunning) {
       if (this.loopInterval) {
@@ -224,6 +227,11 @@ export class CloudPoller {
 
     const delayMs = await this.fetchNextSequence();
 
+    // If we received a sequence, park here — onSequenceCompleted() restarts the loop.
+    // Do NOT apply the heartbeat cap in this state: the sequence request itself refreshed
+    // the check-in TTL, and applying TTL/4 would re-poll while the sequence is still active.
+    if (this.awaitingCompletion) return;
+
     // Schedule next iteration if still running
     if (this.isRunning) {
       let interval = delayMs;
@@ -275,8 +283,16 @@ export class CloudPoller {
             sessionFlags: 'disconnected',
             lapsRemain: -1,
             carCount: 0,
+            drivers: [],
             contextTimestamp: new Date().toISOString(),
           };
+
+      // Skip POST if iRacing has no car data yet — the spec requires a non-empty drivers array.
+      // This happens during session load before the driver roster is populated.
+      if (raceContext.carCount === 0) {
+        console.log('[CloudPoller] Skipping sequence request — no car data yet (carCount=0), will retry.');
+        return this.idleRetryMs;
+      }
 
       const requestBody: NextSequenceRequest = {
         raceContext,
@@ -368,10 +384,10 @@ export class CloudPoller {
       // Invoke callback to enqueue the sequence in SequenceScheduler
       this.options.onSequence(portable);
 
-      // Don't request next sequence immediately — wait for execution completion callback
-      // (onSequenceCompleted will trigger immediate retry)
-      // Return a large delay that will be cleared by onSequenceCompleted
-      return 3600000; // 1 hour (effectively infinite, will be cleared)
+      // Park the main loop — onSequenceCompleted() will restart it after execution.
+      // The sequence request just refreshed the check-in TTL, so no heartbeat re-poll needed.
+      this.awaitingCompletion = true;
+      return 3600000; // large sentinel — will be ignored because awaitingCompletion=true
 
     } catch (error) {
       console.error('[CloudPoller] Error fetching sequence:', error);

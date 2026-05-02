@@ -243,7 +243,7 @@ export class DriverPublisherOrchestrator {
         { outgoingDriverId, incomingDriverId, incomingDriverName },
         {
           raceSessionId: this.raceSessionId,
-          publisherCode: this.publisherCode,
+          rigId: this.rigId,
           frame: this.lastFrame,
         },
       );

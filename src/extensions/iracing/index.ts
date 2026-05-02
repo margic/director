@@ -43,6 +43,7 @@ interface SessionInfoResult {
   drivers: DriverEntry[];
   trackName: string;
   sessionLaps: number;
+  sessions: { sessionNum: number; sessionType: string }[];
 }
 
 // --- Telemetry Types ---
@@ -95,9 +96,12 @@ interface RaceState {
   sessionFlags: number;
   sessionLapsRemain: number;
   sessionTimeRemain: number;
+  sessionTimeElapsed: number;
+  sessionTimeTotal: number;
   leaderLap: number;
   totalSessionLaps: number;
   trackName: string;
+  sessionType: string;
 }
 
 // Constants
@@ -159,6 +163,7 @@ let lastVarHeaderCount = -1;
 let telemetryInterval: NodeJS.Timeout | null = null;
 let cachedTrackName = '';
 let cachedSessionLaps = 0;
+let cachedSessions: { sessionNum: number; sessionType: string }[] = [];
 
 // Publisher orchestrator (issue #106) — instantiated at activate(), drives the
 // detector + transport pipeline. Null when the extension is inactive.
@@ -264,11 +269,16 @@ export async function activate(director: ExtensionAPI) {
     // when the operator pastes a raceSessionId and clicks Register.
     director.registerIntentHandler(
         'iracing.publisher.registerDriver',
-        async (payload: { raceSessionId: string }) => {
+        async (payload: { raceSessionId: string; driverName?: string }) => {
             const sessionId = payload?.raceSessionId ?? '';
             if (!sessionId) {
                 director.log('warn', 'iracing.publisher.registerDriver: raceSessionId is required');
                 return;
+            }
+            // If a driverName was supplied by the simplified registration UI, persist it
+            // to config so the orchestrator's registerDriver() picks it up.
+            if (payload?.driverName?.trim()) {
+                director.settings['publisher.driver.displayName'] = payload.driverName.trim();
             }
             await publisherOrchestrator?.registerDriver(sessionId);
             // Restart the polling loop so the interval reflects the new pipeline state.
@@ -278,6 +288,27 @@ export async function activate(director: ExtensionAPI) {
                     telemetryInterval = null;
                 }
                 startTelemetryPolling(director);
+            }
+        },
+    );
+
+    // Session publisher hot-toggle — called from the publisher settings UI.
+    director.registerIntentHandler(
+        'iracing.publisher.setSessionEnabled',
+        async (payload: { enabled: boolean }) => {
+            publisherOrchestrator?.setSessionEnabled(payload?.enabled ?? true);
+        },
+    );
+
+    // Driver publisher hot-toggle — called from the publisher settings UI.
+    director.registerIntentHandler(
+        'iracing.publisher.setDriverEnabled',
+        async (payload: { enabled: boolean }) => {
+            const enabled = payload?.enabled ?? false;
+            director.settings['publisher.driver.enabled'] = enabled;
+            if (!enabled) {
+                // Stop driver pipeline immediately if running.
+                // The orchestrator will gate on this setting on next bindSession.
             }
         },
     );
@@ -462,18 +493,19 @@ function readSessionInfo(director: ExtensionAPI): SessionInfoResult | null {
         // --- Track & Session ---
         const trackName = parsed?.WeekendInfo?.TrackDisplayName ?? '';
         let sessionLaps = 0;
+        const sessions: { sessionNum: number; sessionType: string }[] = [];
         if (parsed?.SessionInfo?.Sessions) {
             for (const s of parsed.SessionInfo.Sessions) {
+                sessions.push({ sessionNum: s.SessionNum ?? 0, sessionType: s.SessionType ?? '' });
                 if (s.SessionType === 'Race' && typeof s.SessionLaps === 'number') {
                     sessionLaps = s.SessionLaps;
-                    break;
                 }
             }
         }
 
         lastSessionInfoUpdate = header.sessionInfoUpdate;
-        director.log('info', `Parsed session info (update #${header.sessionInfoUpdate}): ${cameraGroups.length} cameras, ${drivers.length} drivers, track="${trackName}"`);
-        return { cameraGroups, drivers, trackName, sessionLaps };
+        director.log('info', `Parsed session info (update #${header.sessionInfoUpdate}): ${cameraGroups.length} cameras, ${drivers.length} drivers, track="${trackName}", sessions=[${sessions.map(s => s.sessionType).join(',')}]`);
+        return { cameraGroups, drivers, trackName, sessionLaps, sessions };
     } catch (error: any) {
         director.log('error', `Failed to parse session info YAML: ${error.message}`);
         return null;
@@ -613,6 +645,12 @@ function buildRaceState(_director: ExtensionAPI): RaceState | null {
     const sessionLapsRemain = readVarInt('SessionLapsRemainEx', buf.offset)
                            ?? readVarInt('SessionLapsRemain', buf.offset);
     const sessionTimeRemain = readVarFloat('SessionTimeRemain', buf.offset);
+    const sessionTimeElapsed = readVarFloat('SessionTime', buf.offset);
+    const sessionTimeTotal   = readVarFloat('SessionTimeTotal', buf.offset);
+    const sessionNumArr     = readVarInt('SessionNum', buf.offset);
+    const sessionNum        = sessionNumArr?.[0] ?? 0;
+    const sessionTypeEntry  = cachedSessions.find(s => s.sessionNum === sessionNum);
+    const sessionType       = sessionTypeEntry?.sessionType ?? '';
 
     if (!positions || !lapDistPcts) return null;
 
@@ -656,9 +694,12 @@ function buildRaceState(_director: ExtensionAPI): RaceState | null {
         sessionFlags: sessionFlags?.[0] ?? 0,
         sessionLapsRemain: sessionLapsRemain?.[0] ?? -1,
         sessionTimeRemain: sessionTimeRemain?.[0] ?? -1,
+        sessionTimeElapsed: sessionTimeElapsed?.[0] ?? -1,
+        sessionTimeTotal: sessionTimeTotal?.[0] ?? -1,
         leaderLap: cars.length > 0 ? cars[0].lapsCompleted : 0,
         totalSessionLaps: cachedSessionLaps,
         trackName: cachedTrackName,
+        sessionType,
     };
 }
 
@@ -837,6 +878,7 @@ function pollSessionData(director: ExtensionAPI) {
             cachedDrivers = result.drivers;
             cachedTrackName = result.trackName;
             cachedSessionLaps = result.sessionLaps;
+            cachedSessions = result.sessions;
             director.emitEvent('iracing.cameraGroupsChanged', { groups: result.cameraGroups });
             director.emitEvent('iracing.driversChanged', { drivers: result.drivers });
             // #108: keep publisher roster in sync whenever SessionInfo YAML changes
@@ -850,6 +892,19 @@ function pollSessionData(director: ExtensionAPI) {
                     carClassShortName: d.carClassName,
                 })),
             );
+        }
+
+        // Always resolve the current session type from telemetry SessionNum so
+        // the publisher knows whether this is Practice / Qualify / Race.
+        if (cachedSessions.length > 0 && publisherOrchestrator) {
+            const buf = getLatestBuffer();
+            const sessionNumArr = buf ? readVarInt('SessionNum', buf.offset) : null;
+            const sessionNum = sessionNumArr?.[0] ?? 0;
+            const entry = cachedSessions.find(s => s.sessionNum === sessionNum);
+            const sessionType = entry?.sessionType ?? '';
+            if (sessionType) {
+                publisherOrchestrator.setSessionMetadata({ sessionType });
+            }
         }
     }
 }

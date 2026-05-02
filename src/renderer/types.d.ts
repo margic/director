@@ -38,6 +38,16 @@ export interface UserProfile {
   center?: Center;
 }
 
+export interface Driver {
+  id?: string;
+  driverId: string;
+  displayName: string;
+  nickname?: string;
+  iracingName?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface RaceSession {
   raceSessionId: string;
   name: string;
@@ -192,6 +202,7 @@ export interface IElectronAPI {
   discordSendTest: (text: string) => Promise<void>;
   discordUpdateVoicePreference: (voice: string) => Promise<any>;
   publisher: {
+    listDrivers: () => Promise<Driver[]>;
     lookupConfig: (publisherCode: string) => Promise<{
       raceSessionId: string;
       displayName: string;

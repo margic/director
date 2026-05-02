@@ -48,6 +48,14 @@ describe('CloudPoller', () => {
     mockOptions = {
       idleRetryMs: 100, // Shortened for tests
       getActiveIntents: vi.fn().mockReturnValue(['system.wait', 'system.log']),
+      getRaceContext: vi.fn().mockReturnValue({
+        sessionType: 'Race',
+        sessionFlags: 'green',
+        lapsRemain: 10,
+        carCount: 5,
+        drivers: [{ carNumber: '1', gapToAhead: 0, lapsCompleted: 5, bestLap: 90, classPosition: 1, pos: 1, driverName: 'Test Driver', carClass: 'GT3', isOnTrack: true, lastLap: 91 }],
+        contextTimestamp: new Date().toISOString(),
+      }),
       onSequence: vi.fn(),
       onSessionEnded: vi.fn(),
     };
@@ -413,6 +421,31 @@ describe('CloudPoller', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('heartbeat cap should NOT re-poll while awaiting sequence completion', async () => {
+      // Regression test for issue #125: TTL/4 heartbeat cap was overriding the
+      // awaitingCompletion state and causing re-polls every 30s during execution.
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'seq-1', steps: [] }),
+      });
+
+      // Set a very short TTL so TTL/4 fires well within the test window
+      poller.updateCheckin('checkin-abc', 1); // TTL=1s → cap=250ms
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
+      }, { timeout: 1000 });
+
+      // Wait well past TTL/4 (250ms) — should NOT re-poll while awaiting completion
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      poller.stop();
     });
   });
 

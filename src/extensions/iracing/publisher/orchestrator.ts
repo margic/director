@@ -73,7 +73,7 @@ export interface PublisherOrchestratorConfig {
 
 const DEFAULT_RC_BASE_URL       = 'https://simracecenter.com';
 const DEFAULT_BATCH_INTERVAL_MS = 2000;
-const HEARTBEAT_INTERVAL_MS     = 1_000;
+const HEARTBEAT_INTERVAL_MS     = 30_000;
 
 /** Legacy config keys removed in DIR-2 and DIR-3 (S3 migration). */
 const LEGACY_KEYS = [
@@ -213,6 +213,29 @@ export class PublisherOrchestrator {
 
     this.raceSessionId = '';
     this.cfg.director.log('info', 'Publisher session released');
+  }
+
+  /**
+   * Hot-toggle the Session Publisher pipeline.
+   * Persists the setting and immediately starts/stops the pipeline if a
+   * session is bound and iRacing is connected.
+   */
+  setSessionEnabled(enabled: boolean): void {
+    this.cfg.director.saveSetting?.('publisher.session.enabled', enabled);
+
+    if (!enabled) {
+      if (this.sessionPublisher?.isActive) {
+        this.sessionPublisher.deactivate();
+      }
+    } else {
+      // Start immediately if infrastructure is up, connected, and a session is bound.
+      if (this.running && this.connected && this.raceSessionId && this.sessionPublisher && !this.sessionPublisher.isActive) {
+        this.sessionPublisher.activate(this.raceSessionId, this.rigId);
+        if (this.currentRoster.size > 0) {
+          this.sessionPublisher.updateRoster(Array.from(this.currentRoster.values()));
+        }
+      }
+    }
   }
 
   /**
@@ -516,7 +539,10 @@ export class PublisherOrchestrator {
   private startSessionPipeline(): void {
     if (!this.running || !this.sessionPublisher || !this.driverPublisher) return;
 
-    this.sessionPublisher.activate(this.raceSessionId, this.rigId);
+    const sessionEnabled = this.cfg.director.settings['publisher.session.enabled'] !== false;
+    if (sessionEnabled) {
+      this.sessionPublisher.activate(this.raceSessionId, this.rigId);
+    }
 
     // Driver Publisher only activates via bindSession on Director Loop rigs
     // when the operator has opted in (publisher.driver.enabled = true).
