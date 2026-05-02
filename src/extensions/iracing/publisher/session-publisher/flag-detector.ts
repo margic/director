@@ -18,9 +18,9 @@
  * Design: pure function — no side-effects, no state mutations.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import type { PublisherEvent } from '../event-types';
+import { buildEvent } from '../session-state';
 import {
   FLAG_CHECKERED,
   FLAG_WHITE,
@@ -33,7 +33,7 @@ import {
 export { FLAG_CHECKERED, FLAG_WHITE, FLAG_GREEN, FLAG_YELLOW, FLAG_CAUTION };
 
 export interface FlagDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
 }
 
@@ -60,7 +60,7 @@ export function detectFlags(
   const events: PublisherEvent[] = [];
   const prevFlags = prev.sessionFlags;
   const currFlags = curr.sessionFlags;
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const nocar = { carIdx: -1, carNumber: '', driverName: '' };
 
   /** True when `bit` was off in prev and is on in curr. */

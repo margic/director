@@ -450,6 +450,18 @@ app.on('ready', () => {
     return res.json();
   });
 
+  ipcMain.handle('publisher:list-drivers', async () => {
+    const token = await authService.getAccessToken();
+    if (!token) throw new Error('Not authenticated');
+    const url = `${apiConfig.baseUrl}${apiConfig.endpoints.drivers}`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}${body ? ` — ${body}` : ''}`);
+    }
+    return res.json();
+  });
+
   ipcMain.handle('config:set', async (event, key, value) => {
     configService.set(key as any, value);
 

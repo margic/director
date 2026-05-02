@@ -19,8 +19,8 @@ export interface PublisherEvent<T extends PublisherEventType = PublisherEventTyp
   id: string;
   /** Cloud-assigned session id (from check-in response) */
   raceSessionId: string;
-  /** Identifies the rig — set from publisher.publisherCode setting */
-  publisherCode: string;
+  /** Auto-generated UUID for this rig; set from publisher.rigId setting. Optional annotation for debugging. */
+  rigId?: string;
   /** Event type discriminator */
   type: T;
   /** ms since epoch (publisher clock) */
@@ -40,10 +40,10 @@ export interface PublisherEvent<T extends PublisherEventType = PublisherEventTyp
 export interface PublisherCarRef {
   /** iRacing CarIdx (0–63) */
   carIdx: number;
-  /** iRacing CarNumberRaw */
-  carNumber: string;
-  /** Display name with edge identity override applied */
-  driverName: string;
+  /** iRacing CarNumberRaw — optional when roster is not yet resolved for this carIdx */
+  carNumber?: string;
+  /** Display name with edge identity override applied — optional when roster is not yet resolved */
+  driverName?: string;
   teamName?: string;
   carClassShortName?: string;
 }
@@ -354,7 +354,8 @@ export interface StintBestLapPayload {
 
 export interface OvertakePayload {
   overtakingCarIdx: number;
-  overtakenCarIdx: number;
+  /** Self-describing ref for the overtaken car. */
+  overtakenCar: PublisherCarRef;
   newPosition: number;
   lap: number;
   /** Fraction of lap where pass occurred — iRacing: CarIdxLapDistPct */
@@ -368,8 +369,10 @@ export interface PositionChangePayload {
 }
 
 export interface BattlePayload {
-  chaserCarIdx: number;
-  leaderCarIdx: number;
+  /** Self-describing ref for the chaser car (also the envelope car). */
+  chaserCar: PublisherCarRef;
+  /** Self-describing ref for the leader car being chased. */
+  leaderCar: PublisherCarRef;
   /** Gap in seconds — iRacing: CarIdxF2Time */
   gapSec: number;
   closingRateSecPerLap: number;
@@ -377,9 +380,11 @@ export interface BattlePayload {
 }
 
 export interface TrafficPayload {
-  targetCarIdx: number;
-  targetCarNumber: string;
   distanceMeters: number;
+  /** Self-describing ref for the lapped car — populated on LAPPED_TRAFFIC_AHEAD only. */
+  lappedCar?: PublisherCarRef;
+  /** Self-describing ref for the lapping car — populated on BEING_LAPPED only. */
+  lappingCar?: PublisherCarRef;
 }
 
 export interface StoppedOnTrackPayload {

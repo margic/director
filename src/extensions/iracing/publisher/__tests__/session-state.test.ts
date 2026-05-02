@@ -148,18 +148,18 @@ describe('battleKey', () => {
 describe('buildEvent', () => {
   const frame = makeFrame();
   const car = { carIdx: 1, carNumber: '44', driverName: 'Lewis Hamilton' };
-  const opts = { raceSessionId: TEST_SESSION_ID, publisherCode: TEST_PUBLISHER_CODE, frame, leaderLap: 5 };
+  const opts = { raceSessionId: TEST_SESSION_ID, rigId: TEST_PUBLISHER_CODE, frame, leaderLap: 5 };
 
   it('assigns a UUID id', () => {
-    const event = buildEvent('OVERTAKE', car, { overtakingCarIdx: 1, overtakenCarIdx: 2, newPosition: 3, lap: 5, lapDistPct: 0.45 }, opts);
+    const event = buildEvent('OVERTAKE', car, { overtakingCarIdx: 1, overtakenCar: { carIdx: 2 }, newPosition: 3, lap: 5, lapDistPct: 0.45 }, opts);
     expect(event.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  it('sets type, raceSessionId, publisherCode correctly', () => {
+  it('sets type, raceSessionId, rigId correctly', () => {
     const event = buildEvent('LAP_COMPLETED', car, { lapNumber: 3, lapTime: 89.4, position: 2, classPosition: 2, gapToLeaderSec: 1.2 }, opts);
     expect(event.type).toBe('LAP_COMPLETED');
     expect(event.raceSessionId).toBe(TEST_SESSION_ID);
-    expect(event.publisherCode).toBe(TEST_PUBLISHER_CODE);
+    expect(event.rigId).toBe(TEST_PUBLISHER_CODE);
   });
 
   it('copies sessionTick and sessionTime from the frame', () => {

@@ -4,7 +4,7 @@ import {
   SESSION_STATE,
   FLAG_GREEN,
   FLAG_CHECKERED,
-} from '../session-lifecycle-detector';
+} from '../session-publisher/session-lifecycle-detector';
 import { createSessionState } from '../session-state';
 import {
   makeFrame,
@@ -25,7 +25,7 @@ import {
 // ---------------------------------------------------------------------------
 
 const CTX = {
-  publisherCode: 'rig-01',
+  rigId: 'rig-01',
   raceSessionId: 'session-abc',
   trackName: 'Sebring',
 };
@@ -300,7 +300,7 @@ describe('event envelope', () => {
     const curr = makeFrame({ sessionState: SessionStateEnum.Racing, sessionFlags: FlagBits.Green });
     const events = detect(prev, curr, state);
     for (const e of events) {
-      expect(e.publisherCode).toBe('rig-01');
+      expect(e.rigId).toBe('rig-01');
     }
   });
 

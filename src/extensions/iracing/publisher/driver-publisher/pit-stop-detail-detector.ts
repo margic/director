@@ -23,9 +23,9 @@
  *     carries non-zero fuel fields in the payload.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
-import type { PublisherEvent } from './event-types';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
+import type { PublisherEvent } from '../event-types';
 
 const CAR_COUNT = 64;
 
@@ -37,7 +37,7 @@ const FUEL_LOW_THRESHOLDS = [0.10, 0.05] as const;
 export const DEFAULT_FUEL_JUMP_THRESHOLD_L = 1.0;
 
 export interface PitStopDetailContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** iRacing DriverInfo.DriverCarIdx — required for player-specific events. */
   playerCarIdx?: number;
@@ -67,7 +67,7 @@ export function detectPitStopDetail(
     return events;
   }
 
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const playerCarIdx = ctx.playerCarIdx ?? 0;
   const fuelJumpThreshold = ctx.fuelJumpThresholdL ?? DEFAULT_FUEL_JUMP_THRESHOLD_L;
 

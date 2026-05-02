@@ -43,6 +43,7 @@ interface SessionInfoResult {
   drivers: DriverEntry[];
   trackName: string;
   sessionLaps: number;
+  sessions: { sessionNum: number; sessionType: string }[];
 }
 
 // --- Telemetry Types ---
@@ -95,9 +96,12 @@ interface RaceState {
   sessionFlags: number;
   sessionLapsRemain: number;
   sessionTimeRemain: number;
+  sessionTimeElapsed: number;
+  sessionTimeTotal: number;
   leaderLap: number;
   totalSessionLaps: number;
   trackName: string;
+  sessionType: string;
 }
 
 // Constants
@@ -159,6 +163,7 @@ let lastVarHeaderCount = -1;
 let telemetryInterval: NodeJS.Timeout | null = null;
 let cachedTrackName = '';
 let cachedSessionLaps = 0;
+let cachedSessions: { sessionNum: number; sessionType: string }[] = [];
 
 // Publisher orchestrator (issue #106) — instantiated at activate(), drives the
 // detector + transport pipeline. Null when the extension is inactive.
@@ -200,9 +205,9 @@ export async function activate(director: ExtensionAPI) {
         broadcastMessage(IRSDK_REPLAY_SETSTATE, payload.state, 0, 0);
     });
 
-    // Publisher orchestrator (issue #106) — starts internally only if
-    // publisher.enabled === true. Registering the telemetry frame callback is
-    // safe regardless of publisher state; the orchestrator no-ops when not running.
+    // Publisher orchestrator (DIR-2) — starts transport infrastructure
+    // immediately on activate(). The Session Publisher pipeline starts
+    // automatically when bindSession() receives a raceSessionId.
     publisherOrchestrator = new PublisherOrchestrator({
         director,
         version: EXTENSION_VERSION,
@@ -212,13 +217,15 @@ export async function activate(director: ExtensionAPI) {
         publisherOrchestrator?.onTelemetryFrame(frame);
     });
 
-    // Publisher hot-toggle — fired by the settings UI switch without restarting the app.
+    // Session binding — internal directive fired by DirectorOrchestrator once
+    // check-in confirms the raceSessionId (issue #109, DIR-2). Not advertised
+    // as a capability; never appears in the AI planner's intent list.
     director.registerIntentHandler(
-        'iracing.publisher.setEnabled',
-        async (payload: { enabled: boolean }) => {
-            publisherOrchestrator?.setEnabled(payload.enabled);
-            // Restart the telemetry polling loop so the interval matches the
-            // new state (200ms / 5Hz with publisher, 250ms / 4Hz without).
+        'iracing.publisher.bindSession',
+        async (payload: { raceSessionId: string }) => {
+            publisherOrchestrator?.bindSession(payload?.raceSessionId ?? null);
+            // Restart the telemetry polling loop so the interval reflects
+            // the new pipeline active state (200ms / 5Hz vs 250ms / 4Hz).
             if (pBase) {
                 if (telemetryInterval) {
                     clearInterval(telemetryInterval);
@@ -229,25 +236,19 @@ export async function activate(director: ExtensionAPI) {
         },
     );
 
-    // Session binding — internal directive fired by DirectorOrchestrator once
-    // check-in confirms the raceSessionId (issue #109). Not advertised as a
-    // capability; never appears in the AI planner's intent list.
-    // Also auto-enables the publisher so the operator doesn't need to toggle it
-    // manually — if the Director has checked into a session, telemetry should flow.
+    // Session release — fired by SessionManager on check-out / session expiry.
     director.registerIntentHandler(
-        'iracing.publisher.bindSession',
-        async (payload: { raceSessionId: string }) => {
-            if (payload?.raceSessionId) {
-                publisherOrchestrator?.setRaceSessionId(payload.raceSessionId);
-                publisherOrchestrator?.setEnabled(true);
-                // Restart the telemetry polling loop at the publisher rate (200ms / 5Hz).
-                if (pBase) {
-                    if (telemetryInterval) {
-                        clearInterval(telemetryInterval);
-                        telemetryInterval = null;
-                    }
-                    startTelemetryPolling(director);
+        'iracing.publisher.releaseSession',
+        async () => {
+            publisherOrchestrator?.releaseSession();
+            // Restart the polling loop so the interval drops back to 4Hz
+            // now that the session publisher is no longer active.
+            if (pBase) {
+                if (telemetryInterval) {
+                    clearInterval(telemetryInterval);
+                    telemetryInterval = null;
                 }
+                startTelemetryPolling(director);
             }
         },
     );
@@ -261,6 +262,54 @@ export async function activate(director: ExtensionAPI) {
                 payload.incomingDriverId ?? '',
                 payload.incomingDriverName ?? '',
             );
+        },
+    );
+
+    // Driver-only rig registration (DIR-3) — called from the publisher settings UI
+    // when the operator pastes a raceSessionId and clicks Register.
+    director.registerIntentHandler(
+        'iracing.publisher.registerDriver',
+        async (payload: { raceSessionId: string; driverName?: string }) => {
+            const sessionId = payload?.raceSessionId ?? '';
+            if (!sessionId) {
+                director.log('warn', 'iracing.publisher.registerDriver: raceSessionId is required');
+                return;
+            }
+            // If a driverName was supplied by the simplified registration UI, persist it
+            // to config so the orchestrator's registerDriver() picks it up.
+            if (payload?.driverName?.trim()) {
+                director.settings['publisher.driver.displayName'] = payload.driverName.trim();
+            }
+            await publisherOrchestrator?.registerDriver(sessionId);
+            // Restart the polling loop so the interval reflects the new pipeline state.
+            if (pBase) {
+                if (telemetryInterval) {
+                    clearInterval(telemetryInterval);
+                    telemetryInterval = null;
+                }
+                startTelemetryPolling(director);
+            }
+        },
+    );
+
+    // Session publisher hot-toggle — called from the publisher settings UI.
+    director.registerIntentHandler(
+        'iracing.publisher.setSessionEnabled',
+        async (payload: { enabled: boolean }) => {
+            publisherOrchestrator?.setSessionEnabled(payload?.enabled ?? true);
+        },
+    );
+
+    // Driver publisher hot-toggle — called from the publisher settings UI.
+    director.registerIntentHandler(
+        'iracing.publisher.setDriverEnabled',
+        async (payload: { enabled: boolean }) => {
+            const enabled = payload?.enabled ?? false;
+            director.settings['publisher.driver.enabled'] = enabled;
+            if (!enabled) {
+                // Stop driver pipeline immediately if running.
+                // The orchestrator will gate on this setting on next bindSession.
+            }
         },
     );
 
@@ -444,18 +493,19 @@ function readSessionInfo(director: ExtensionAPI): SessionInfoResult | null {
         // --- Track & Session ---
         const trackName = parsed?.WeekendInfo?.TrackDisplayName ?? '';
         let sessionLaps = 0;
+        const sessions: { sessionNum: number; sessionType: string }[] = [];
         if (parsed?.SessionInfo?.Sessions) {
             for (const s of parsed.SessionInfo.Sessions) {
+                sessions.push({ sessionNum: s.SessionNum ?? 0, sessionType: s.SessionType ?? '' });
                 if (s.SessionType === 'Race' && typeof s.SessionLaps === 'number') {
                     sessionLaps = s.SessionLaps;
-                    break;
                 }
             }
         }
 
         lastSessionInfoUpdate = header.sessionInfoUpdate;
-        director.log('info', `Parsed session info (update #${header.sessionInfoUpdate}): ${cameraGroups.length} cameras, ${drivers.length} drivers, track="${trackName}"`);
-        return { cameraGroups, drivers, trackName, sessionLaps };
+        director.log('info', `Parsed session info (update #${header.sessionInfoUpdate}): ${cameraGroups.length} cameras, ${drivers.length} drivers, track="${trackName}", sessions=[${sessions.map(s => s.sessionType).join(',')}]`);
+        return { cameraGroups, drivers, trackName, sessionLaps, sessions };
     } catch (error: any) {
         director.log('error', `Failed to parse session info YAML: ${error.message}`);
         return null;
@@ -595,6 +645,12 @@ function buildRaceState(_director: ExtensionAPI): RaceState | null {
     const sessionLapsRemain = readVarInt('SessionLapsRemainEx', buf.offset)
                            ?? readVarInt('SessionLapsRemain', buf.offset);
     const sessionTimeRemain = readVarFloat('SessionTimeRemain', buf.offset);
+    const sessionTimeElapsed = readVarFloat('SessionTime', buf.offset);
+    const sessionTimeTotal   = readVarFloat('SessionTimeTotal', buf.offset);
+    const sessionNumArr     = readVarInt('SessionNum', buf.offset);
+    const sessionNum        = sessionNumArr?.[0] ?? 0;
+    const sessionTypeEntry  = cachedSessions.find(s => s.sessionNum === sessionNum);
+    const sessionType       = sessionTypeEntry?.sessionType ?? '';
 
     if (!positions || !lapDistPcts) return null;
 
@@ -638,9 +694,12 @@ function buildRaceState(_director: ExtensionAPI): RaceState | null {
         sessionFlags: sessionFlags?.[0] ?? 0,
         sessionLapsRemain: sessionLapsRemain?.[0] ?? -1,
         sessionTimeRemain: sessionTimeRemain?.[0] ?? -1,
+        sessionTimeElapsed: sessionTimeElapsed?.[0] ?? -1,
+        sessionTimeTotal: sessionTimeTotal?.[0] ?? -1,
         leaderLap: cars.length > 0 ? cars[0].lapsCompleted : 0,
         totalSessionLaps: cachedSessionLaps,
         trackName: cachedTrackName,
+        sessionType,
     };
 }
 
@@ -709,14 +768,15 @@ function startTelemetryPolling(director: ExtensionAPI) {
     // Parse variable headers on first connect
     parseVarHeaders(director);
 
-    const publisherEnabled = director.settings['publisher.enabled'] === true;
-    const intervalMs = getTelemetryIntervalMs(publisherEnabled);
+    // S4 — 200ms when either pipeline is active, 250ms otherwise.
+    const pipelineActive = publisherOrchestrator?.isAnyPipelineActive ?? false;
+    const intervalMs = getTelemetryIntervalMs(pipelineActive);
 
     telemetryInterval = setInterval(() => {
         pollTelemetry(director);
     }, intervalMs);
 
-    director.log('info', `Telemetry polling started (${intervalMs}ms interval, ${publisherEnabled ? '5Hz publisher' : '4Hz standard'})`);
+    director.log('info', `Telemetry polling started (${intervalMs}ms interval, ${pipelineActive ? '5Hz publisher' : '4Hz standard'})`);
 }
 
 function stopTelemetryPolling(director: ExtensionAPI) {
@@ -818,6 +878,7 @@ function pollSessionData(director: ExtensionAPI) {
             cachedDrivers = result.drivers;
             cachedTrackName = result.trackName;
             cachedSessionLaps = result.sessionLaps;
+            cachedSessions = result.sessions;
             director.emitEvent('iracing.cameraGroupsChanged', { groups: result.cameraGroups });
             director.emitEvent('iracing.driversChanged', { drivers: result.drivers });
             // #108: keep publisher roster in sync whenever SessionInfo YAML changes
@@ -831,6 +892,19 @@ function pollSessionData(director: ExtensionAPI) {
                     carClassShortName: d.carClassName,
                 })),
             );
+        }
+
+        // Always resolve the current session type from telemetry SessionNum so
+        // the publisher knows whether this is Practice / Qualify / Race.
+        if (cachedSessions.length > 0 && publisherOrchestrator) {
+            const buf = getLatestBuffer();
+            const sessionNumArr = buf ? readVarInt('SessionNum', buf.offset) : null;
+            const sessionNum = sessionNumArr?.[0] ?? 0;
+            const entry = cachedSessions.find(s => s.sessionNum === sessionNum);
+            const sessionType = entry?.sessionType ?? '';
+            if (sessionType) {
+                publisherOrchestrator.setSessionMetadata({ sessionType });
+            }
         }
     }
 }

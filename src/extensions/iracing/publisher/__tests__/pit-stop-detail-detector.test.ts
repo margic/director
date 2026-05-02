@@ -11,7 +11,7 @@ import {
   detectPitStopDetail,
   DEFAULT_FUEL_JUMP_THRESHOLD_L,
   type PitStopDetailContext,
-} from '../pit-stop-detail-detector';
+} from '../driver-publisher/pit-stop-detail-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import {
   makeFrame,
@@ -24,7 +24,7 @@ import {
   withLapCompleted,
 } from './frame-fixtures';
 
-const CTX: PitStopDetailContext = { publisherCode: 'rig-01', raceSessionId: 'rs-1', playerCarIdx: 0 };
+const CTX: PitStopDetailContext = { rigId: 'rig-01', raceSessionId: 'rs-1', playerCarIdx: 0 };
 
 let state: SessionState;
 beforeEach(() => { state = createSessionState('rs-1', 1); });

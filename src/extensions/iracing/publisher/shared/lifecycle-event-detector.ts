@@ -14,14 +14,14 @@
  */
 
 import { randomUUID } from 'crypto';
-import type { PublisherEvent, PublisherEventType, EventPayloadMap } from './event-types';
+import type { PublisherEvent, PublisherEventType, EventPayloadMap } from '../event-types';
 
 // ---------------------------------------------------------------------------
 // Context passed by the orchestrator
 // ---------------------------------------------------------------------------
 
 export interface LifecycleDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** Semver version string from the extension manifest */
   version: string;
@@ -31,7 +31,7 @@ export interface LifecycleDetectorContext {
 // Constants
 // ---------------------------------------------------------------------------
 
-const HEARTBEAT_INTERVAL_MS = 1_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 const CAPABILITIES = ['telemetry-v1'];
 const NOCAR = { carIdx: -1, carNumber: '', driverName: '' };
 
@@ -123,7 +123,7 @@ export class LifecycleEventDetector {
     return {
       id: randomUUID(),
       raceSessionId: ctx.raceSessionId,
-      publisherCode: ctx.publisherCode,
+      rigId: ctx.rigId,
       type,
       timestamp: this.getNow(),
       sessionTime: 0,

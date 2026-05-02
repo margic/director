@@ -192,9 +192,12 @@ export class DirectorOrchestrator extends EventEmitter {
     if (flagBits & FLAG_RED) sessionFlags = 'red';
     else if ((flagBits & FLAG_CAUTION) || (flagBits & FLAG_YELLOW)) sessionFlags = 'caution';
 
-    // Infer session type: Race sessions have a fixed lap count; others are unlimited
+    // Infer session type from iRacing YAML (sourced via SessionNum lookup in raceStateChanged payload).
+    // Fall back to totalLaps heuristic only if YAML data isn't available yet.
     const totalLaps: number = state.totalSessionLaps ?? 0;
-    const sessionType = totalLaps > 0 ? 'Race' : 'Practice';
+    const sessionType: string = (state.sessionType && state.sessionType !== '')
+      ? state.sessionType
+      : (totalLaps > 0 ? 'Race' : 'Practice');
 
     // iRacing returns 32767 for unlimited laps — normalize to -1
     const rawLapsRemain: number = state.sessionLapsRemain ?? -1;
@@ -205,20 +208,18 @@ export class DirectorOrchestrator extends EventEmitter {
 
     // Build per-driver context (focused cars only — top 20 to avoid oversized payload)
     const cars: any[] = Array.isArray(state.cars) ? state.cars.slice(0, 20) : [];
-    const drivers = cars.length > 0
-      ? cars.map((c: any) => ({
-          carNumber: String(c.carNumber ?? ''),
-          gapToAhead: c.gapToCarAhead ?? 0,
-          lapsCompleted: c.lapsCompleted ?? 0,
-          bestLap: c.bestLapTime ?? 0,
-          classPosition: c.classPosition ?? 0,
-          pos: c.position > 0 ? c.position : undefined,
-          driverName: c.driverName || undefined,
-          carClass: c.carClass || undefined,
-          isOnTrack: typeof c.onPitRoad === 'boolean' ? !c.onPitRoad : undefined,
-          lastLap: c.lastLapTime > 0 ? c.lastLapTime : undefined,
-        }))
-      : undefined;
+    const drivers = cars.map((c: any) => ({
+      carNumber: String(c.carNumber ?? ''),
+      gapToAhead: c.gapToCarAhead ?? 0,
+      lapsCompleted: c.lapsCompleted ?? 0,
+      bestLap: c.bestLapTime ?? 0,
+      classPosition: c.classPosition ?? 0,
+      pos: c.position > 0 ? c.position : 0,
+      driverName: c.driverName || '',
+      carClass: c.carClass || '',
+      isOnTrack: typeof c.onPitRoad === 'boolean' ? !c.onPitRoad : false,
+      lastLap: c.lastLapTime > 0 ? c.lastLapTime : 0,
+    }));
 
     // Pitting cars
     const pitting = cars
@@ -257,13 +258,15 @@ export class DirectorOrchestrator extends EventEmitter {
       carCount,
       contextTimestamp: new Date().toISOString(),
       ...(timeRemain > 0 ? { timeRemainSec: Math.round(timeRemain) } : {}),
+      ...(state.sessionTimeElapsed != null && state.sessionTimeElapsed >= 0 ? { sessionTimeElapsedSec: Math.round(state.sessionTimeElapsed) } : {}),
+      ...(state.sessionTimeTotal != null && state.sessionTimeTotal > 0 ? { sessionTimeTotalSec: Math.round(state.sessionTimeTotal) } : {}),
       ...(state.leaderLap > 0 ? { leaderLap: state.leaderLap } : {}),
       ...(totalLaps > 0 ? { totalLaps } : {}),
       ...(state.trackName ? { trackName: state.trackName } : {}),
       ...(focusedCar ? { focusedCarNumber: String(focusedCar.carNumber) } : {}),
       ...(pitting.length > 0 ? { pitting } : {}),
       ...(battles.length > 0 ? { battles } : {}),
-      ...(drivers ? { drivers } : {}),
+      ...(drivers.length > 0 ? { drivers } : {}),
       ...(recentEvents.length > 0 ? { recentEvents } : {}),
       ...(stintLaps !== undefined ? { stintLaps } : {}),
     };

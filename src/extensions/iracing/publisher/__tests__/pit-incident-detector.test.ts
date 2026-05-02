@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectPitAndIncidents } from '../pit-incident-detector';
+import { detectPitAndIncidents } from '../driver-publisher/pit-incident-detector';
 import { createSessionState } from '../session-state';
 import {
   makeFrame,
@@ -18,7 +18,7 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const CTX = { publisherCode: 'rig-01', raceSessionId: 'session-abc' };
+const CTX = { rigId: 'rig-01', raceSessionId: 'session-abc' };
 
 function makeState() {
   return createSessionState('session-abc', 1);
@@ -376,7 +376,7 @@ describe('event envelope', () => {
     );
     const events = detectPitAndIncidents(frames[0], frames[1], state, CTX);
     expect(events[0].raceSessionId).toBe('session-abc');
-    expect(events[0].publisherCode).toBe('rig-01');
+    expect(events[0].rigId).toBe('rig-01');
   });
 
   it('each event has a unique UUID', () => {

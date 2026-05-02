@@ -1,13 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { LifecycleEventDetector } from '../lifecycle-event-detector';
-import type { LifecycleDetectorContext } from '../lifecycle-event-detector';
+import { LifecycleEventDetector } from '../shared/lifecycle-event-detector';
+import type { LifecycleDetectorContext } from '../shared/lifecycle-event-detector';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 const CTX: LifecycleDetectorContext = {
-  publisherCode: 'rig-01',
+  rigId: 'rig-01',
   raceSessionId: 'session-abc',
   version: '1.2.3',
 };
@@ -34,7 +34,7 @@ describe('onActivate', () => {
   it('event carries correct publisherCode and raceSessionId', () => {
     const detector = new LifecycleEventDetector();
     const [ev] = detector.onActivate(CTX);
-    expect(ev.publisherCode).toBe('rig-01');
+    expect(ev.rigId).toBe('rig-01');
     expect(ev.raceSessionId).toBe('session-abc');
   });
 
@@ -76,7 +76,7 @@ describe('onDeactivate', () => {
   it('event carries correct publisherCode', () => {
     const detector = new LifecycleEventDetector();
     const [ev] = detector.onDeactivate(CTX);
-    expect(ev.publisherCode).toBe('rig-01');
+    expect(ev.rigId).toBe('rig-01');
   });
 });
 
@@ -102,7 +102,7 @@ describe('onConnectionChange', () => {
   it('event carries publisherCode and raceSessionId', () => {
     const detector = new LifecycleEventDetector();
     const [ev] = detector.onConnectionChange(true, CTX);
-    expect(ev.publisherCode).toBe('rig-01');
+    expect(ev.rigId).toBe('rig-01');
     expect(ev.raceSessionId).toBe('session-abc');
   });
 
@@ -179,7 +179,7 @@ describe('checkHeartbeat', () => {
     const detector = new LifecycleEventDetector(() => now);
     now = 2000;
     const [ev] = detector.checkHeartbeat(CTX);
-    expect(ev.publisherCode).toBe('rig-01');
+    expect(ev.rigId).toBe('rig-01');
     expect(ev.raceSessionId).toBe('session-abc');
   });
 });

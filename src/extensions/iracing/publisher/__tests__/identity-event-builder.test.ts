@@ -4,13 +4,13 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { buildIdentityEvents, type IdentityEventContext } from '../identity-event-builder';
-import { IdentityOverrideService } from '../identity-override';
+import { buildIdentityEvents, type IdentityEventContext } from '../driver-publisher/identity-event-builder';
+import { IdentityOverrideService } from '../driver-publisher/identity-override';
 import { createSessionState, type SessionState } from '../session-state';
 import { makeFrame } from './frame-fixtures';
 
 const ctx: IdentityEventContext = {
-  publisherCode: 'TEST',
+  rigId: 'TEST',
   raceSessionId: 'rs-1',
   playerCarIdx:  0,
 };

@@ -20,9 +20,9 @@
  * reset at that moment so subsequent laps count from the fresh pit exit.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import { getOrCreateCarState, buildEvent, carRefFromRoster } from './session-state';
-import type { PublisherEvent } from './event-types';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
+import type { PublisherEvent } from '../event-types';
 
 /** Team incident thresholds for INCIDENT_LIMIT_WARNING (in percent). */
 export const INCIDENT_LIMIT_THRESHOLDS = [50, 75, 90] as const;
@@ -31,7 +31,7 @@ export const INCIDENT_LIMIT_THRESHOLDS = [50, 75, 90] as const;
 export const STINT_MILESTONE_PERCENTS = [25, 50, 75] as const;
 
 export interface IncidentStintContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** iRacing DriverInfo.DriverCarIdx — required for STINT_MILESTONE. */
   playerCarIdx?: number;
@@ -55,7 +55,7 @@ export function detectIncidentsAndMilestones(
   const events: PublisherEvent[] = [];
   if (prev === null) return events;
 
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const playerCarIdx      = ctx.playerCarIdx ?? 0;
   const estimatedStintLaps = ctx.estimatedStintLaps ?? 0;
 

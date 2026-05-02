@@ -9,12 +9,12 @@
  * Pure-ish function — mutates only `state.lastSessionType`.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import { buildEvent } from './session-state';
-import type { PublisherEvent } from './event-types';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import { buildEvent } from '../session-state';
+import type { PublisherEvent } from '../event-types';
 
 export interface SessionTypeContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** Current sessionType from iRacing YAML (e.g. "Practice", "Qualify", "Race"). */
   sessionType: string;
@@ -44,7 +44,7 @@ export function detectSessionTypeChange(
       'SESSION_TYPE_CHANGE',
       { carIdx: -1, carNumber: '', driverName: '' },
       { previousType, newType: incoming },
-      { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr },
+      { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr },
     ),
   ];
 }

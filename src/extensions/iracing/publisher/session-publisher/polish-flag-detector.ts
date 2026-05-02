@@ -20,9 +20,9 @@
  *     provided; falls back to empty string.
  */
 
-import type { TelemetryFrame, SessionState } from './session-state';
-import type { PublisherEvent } from './event-types';
-import { buildEvent } from './session-state';
+import type { TelemetryFrame, SessionState } from '../session-state';
+import type { PublisherEvent } from '../event-types';
+import { buildEvent } from '../session-state';
 
 // ---------------------------------------------------------------------------
 // iRacing irsdk_Flags bit constants (subset)
@@ -47,7 +47,7 @@ export const CAR_FLAG_DISQUALIFY = 0x00020000;
 // ---------------------------------------------------------------------------
 
 export interface PolishFlagDetectorContext {
-  publisherCode: string;
+  rigId: string;
   raceSessionId: string;
   /** Map from carIdx → car number string (e.g. "42") for payload enrichment. */
   carNumberByCarIdx?: Map<number, string>;
@@ -66,7 +66,7 @@ export function detectPolishFlags(
   if (prev === null) return [];
 
   const events: PublisherEvent[] = [];
-  const opts = { raceSessionId: ctx.raceSessionId, publisherCode: ctx.publisherCode, frame: curr };
+  const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const nocar = { carIdx: -1, carNumber: '', driverName: '' };
 
   const prevFlags = prev.sessionFlags;

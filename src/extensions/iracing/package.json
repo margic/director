@@ -88,6 +88,46 @@
           },
           "required": ["enabled"]
         }
+      },
+      {
+        "intent": "iracing.publisher.registerDriver",
+        "title": "Register Driver Publisher",
+        "category": "operational",
+        "description": "Registers this rig as a driver publisher for the given race session.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "raceSessionId": { "type": "string" },
+            "driverName": { "type": "string" }
+          },
+          "required": ["raceSessionId"]
+        }
+      },
+      {
+        "intent": "iracing.publisher.setSessionEnabled",
+        "title": "Set Session Publisher Enabled",
+        "category": "operational",
+        "description": "Hot-toggles the session publisher pipeline on or off.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["enabled"]
+        }
+      },
+      {
+        "intent": "iracing.publisher.setDriverEnabled",
+        "title": "Set Driver Publisher Enabled",
+        "category": "operational",
+        "description": "Hot-toggles the driver publisher pipeline on or off.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" }
+          },
+          "required": ["enabled"]
+        }
       }
     ],
     "events": [

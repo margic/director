@@ -48,6 +48,14 @@ describe('CloudPoller', () => {
     mockOptions = {
       idleRetryMs: 100, // Shortened for tests
       getActiveIntents: vi.fn().mockReturnValue(['system.wait', 'system.log']),
+      getRaceContext: vi.fn().mockReturnValue({
+        sessionType: 'Race',
+        sessionFlags: 'green',
+        lapsRemain: 10,
+        carCount: 5,
+        drivers: [{ carNumber: '1', gapToAhead: 0, lapsCompleted: 5, bestLap: 90, classPosition: 1, pos: 1, driverName: 'Test Driver', carClass: 'GT3', isOnTrack: true, lastLap: 91 }],
+        contextTimestamp: new Date().toISOString(),
+      }),
       onSequence: vi.fn(),
       onSessionEnded: vi.fn(),
     };
@@ -413,6 +421,138 @@ describe('CloudPoller', () => {
 
       await new Promise((resolve) => setTimeout(resolve, 200));
       expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('heartbeat cap should NOT re-poll while awaiting sequence completion', async () => {
+      // Regression test for issue #125: TTL/4 heartbeat cap was overriding the
+      // awaitingCompletion state and causing re-polls every 30s during execution.
+      fetchMock.mockResolvedValueOnce({
+        status: 200,
+        ok: true,
+        json: async () => ({ id: 'seq-1', steps: [] }),
+      });
+
+      // Set a very short TTL so TTL/4 fires well within the test window
+      poller.updateCheckin('checkin-abc', 1); // TTL=1s → cap=250ms
+
+      poller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
+      }, { timeout: 1000 });
+
+      // Wait well past TTL/4 (250ms) — should NOT re-poll while awaiting completion
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      poller.stop();
+    });
+  });
+
+  describe('pre-fetch deduplication', () => {
+    it('should deliver pre-fetched sequence on completion, not before', async () => {
+      // Pre-fetch stores the result; onSequenceCompleted is the sole delivery path.
+      const customPoller = new CloudPoller(mockAuthService as any, 'test-session-123', {
+        ...mockOptions,
+        idleRetryMs: 100,
+        prefetchLeadMs: 0,
+        minPrefetchMs: 0,
+      });
+
+      fetchMock
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ id: 'seq-1', steps: [], metadata: { totalDurationMs: 100 } }),
+          headers: { get: () => null },
+        })
+        .mockResolvedValueOnce({
+          // pre-fetch gets seq-2 — should be buffered, NOT delivered yet
+          status: 200,
+          ok: true,
+          json: async () => ({ id: 'seq-2', steps: [] }),
+          headers: { get: () => null },
+        });
+
+      customPoller.start();
+
+      // seq-1 delivered by main loop
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledWith(expect.objectContaining({ id: 'seq-1' }));
+      }, { timeout: 1000 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      // Start seq-1 with short duration — pre-fetch fires immediately (prefetchLeadMs=0, minPrefetchMs=0)
+      customPoller.onSequenceStarted('seq-1', 100);
+
+      // Wait for pre-fetch HTTP call to complete
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 1000 });
+
+      // seq-2 should NOT have been delivered yet — it's buffered
+      expect(mockOptions.onSequence).toHaveBeenCalledTimes(1);
+
+      // seq-1 completes → onSequenceCompleted delivers buffered seq-2, no 3rd RC call
+      customPoller.onSequenceCompleted('seq-1');
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledWith(expect.objectContaining({ id: 'seq-2' }));
+      }, { timeout: 1000 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(2); // no 3rd call
+
+      customPoller.stop();
+    });
+
+    it('should fetch normally on completion when pre-fetch returned 204', async () => {
+      const customPoller = new CloudPoller(mockAuthService as any, 'test-session-123', {
+        ...mockOptions,
+        idleRetryMs: 100,
+        prefetchLeadMs: 0,
+        minPrefetchMs: 0,
+      });
+
+      fetchMock
+        .mockResolvedValueOnce({
+          status: 200,
+          ok: true,
+          json: async () => ({ id: 'seq-1', steps: [], metadata: { totalDurationMs: 100 } }),
+          headers: { get: () => null },
+        })
+        .mockResolvedValueOnce({
+          // pre-fetch returns 204 — buffer stays empty
+          status: 204,
+          ok: true,
+          headers: { get: () => null },
+        })
+        .mockResolvedValueOnce({
+          // main loop on completion gets seq-2
+          status: 200,
+          ok: true,
+          json: async () => ({ id: 'seq-2', steps: [] }),
+          headers: { get: () => null },
+        });
+
+      customPoller.start();
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledWith(expect.objectContaining({ id: 'seq-1' }));
+      }, { timeout: 1000 });
+
+      customPoller.onSequenceStarted('seq-1', 100);
+      // pre-fetch fires and gets 204
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), { timeout: 1000 });
+
+      // seq-1 completes — buffer empty so main loop restarts and fetches seq-2
+      customPoller.onSequenceCompleted('seq-1');
+
+      await vi.waitFor(() => {
+        expect(mockOptions.onSequence).toHaveBeenCalledWith(expect.objectContaining({ id: 'seq-2' }));
+      }, { timeout: 1000 });
+
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+
+      customPoller.stop();
     });
   });
 
