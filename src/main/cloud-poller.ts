@@ -82,6 +82,8 @@ export class CloudPoller {
   private prefetchTimer: NodeJS.Timeout | null = null;
   private lastCompletedSequenceId: string | null = null;
   private awaitingCompletion = false;
+  /** Sequence fetched ahead of time by the pre-fetch timer, held until onSequenceCompleted delivers it. */
+  private bufferedSequence: PortableSequence | null = null;
   private readonly idleRetryMs: number;
   private readonly prefetchLeadMs: number;
   private readonly minPrefetchMs: number;
@@ -117,6 +119,7 @@ export class CloudPoller {
     console.log('[CloudPoller] Stopping polling');
     this.isRunning = false;
     this.awaitingCompletion = false;
+    this.bufferedSequence = null;
     if (this.loopInterval) {
       clearTimeout(this.loopInterval);
       this.loopInterval = null;
@@ -158,7 +161,19 @@ export class CloudPoller {
   onSequenceCompleted(sequenceId: string): void {
     this.lastCompletedSequenceId = sequenceId;
     this.awaitingCompletion = false;
-    // Trigger immediate retry — execution itself consumed the time (10-60s typically)
+
+    // Single delivery path: if the pre-fetch stored a sequence, deliver it now.
+    // The pre-fetch never calls onSequence directly — only this method does.
+    if (this.bufferedSequence) {
+      const next = this.bufferedSequence;
+      this.bufferedSequence = null;
+      this.awaitingCompletion = true;
+      console.log(`[CloudPoller] Delivering pre-fetched sequence ${next.id} on completion of ${sequenceId}`);
+      this.options.onSequence(next);
+      return;
+    }
+
+    // No buffer — fall back to immediate fetch
     if (this.isRunning) {
       if (this.loopInterval) {
         clearTimeout(this.loopInterval);
@@ -208,14 +223,15 @@ export class CloudPoller {
 
   /**
    * One-shot pre-fetch fired during sequence execution to warm up the queue.
-   * Calls fetchNextSequence() and discards the scheduling delay — this does NOT
-   * drive the main polling loop. The main loop resumes via onSequenceCompleted().
+   * Stores the result in bufferedSequence — does NOT call onSequence directly.
+   * onSequenceCompleted() is the sole delivery path; it reads and clears the buffer.
+   *
+   * The carCount=0 guard is bypassed here: the pre-fetch fires while a sequence is
+   * already executing (which confirmed cars were present when it was dispatched).
    */
   private async firePrefetch(): Promise<void> {
     console.log('[CloudPoller] Firing pre-fetch for next sequence');
-    // fetchNextSequence() calls onSequence() on 200, which enqueues the next sequence.
-    // The returned delay is intentionally ignored — loop scheduling is handled separately.
-    await this.fetchNextSequence();
+    await this.fetchNextSequence({ skipCarCheck: true, storeOnly: true });
   }
 
   /**
@@ -256,7 +272,7 @@ export class CloudPoller {
    * - n > 0: Retry-After header specified delay in milliseconds
    * - 0: Should not happen (sequences are no longer executed here)
    */
-  private async fetchNextSequence(): Promise<number> {
+  private async fetchNextSequence(opts?: { skipCarCheck?: boolean; storeOnly?: boolean }): Promise<number> {
     const startTime = Date.now();
     const token = await this.authService.getAccessToken();
     if (!token) {
@@ -289,7 +305,9 @@ export class CloudPoller {
 
       // Skip POST if iRacing has no car data yet — the spec requires a non-empty drivers array.
       // This happens during session load before the driver roster is populated.
-      if (raceContext.carCount === 0) {
+      // Pre-fetch calls bypass this check (skipCarCheck=true) since a sequence is already
+      // executing which confirms cars were present when it was dispatched.
+      if (raceContext.carCount === 0 && !opts?.skipCarCheck) {
         console.log('[CloudPoller] Skipping sequence request — no car data yet (carCount=0), will retry.');
         return this.idleRetryMs;
       }
@@ -381,13 +399,17 @@ export class CloudPoller {
         executionPath,
       });
 
-      // Invoke callback to enqueue the sequence in SequenceScheduler
-      this.options.onSequence(portable);
+      if (opts?.storeOnly) {
+        // Pre-fetch path: store for delivery by onSequenceCompleted — do not call onSequence here.
+        console.log(`[CloudPoller] Pre-fetched sequence ${portable.id} — buffered for next completion`);
+        this.bufferedSequence = portable;
+        return 0; // unused; pre-fetch doesn't drive the loop
+      }
 
-      // Park the main loop — onSequenceCompleted() will restart it after execution.
-      // The sequence request just refreshed the check-in TTL, so no heartbeat re-poll needed.
+      // Main loop path: deliver immediately and park until completion.
+      this.options.onSequence(portable);
       this.awaitingCompletion = true;
-      return 3600000; // large sentinel — will be ignored because awaitingCompletion=true
+      return 3600000; // large sentinel — ignored because awaitingCompletion=true
 
     } catch (error) {
       console.error('[CloudPoller] Error fetching sequence:', error);
