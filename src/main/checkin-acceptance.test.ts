@@ -233,6 +233,14 @@ describe('Session Check-In Acceptance Criteria', () => {
         {
           idleRetryMs: 5000,
           getActiveIntents: () => ['system.wait', 'obs.switchScene'],
+          getRaceContext: () => ({
+            sessionType: 'Race',
+            sessionFlags: 'green',
+            lapsRemain: 10,
+            carCount: 2,
+            drivers: [],
+            contextTimestamp: new Date().toISOString(),
+          }),
           onSequence: vi.fn(),
           onSessionEnded: vi.fn(),
           checkinId: 'checkin-for-polling',
