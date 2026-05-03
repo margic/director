@@ -73,7 +73,7 @@ export interface PublisherOrchestratorConfig {
 
 const DEFAULT_RC_BASE_URL       = 'https://simracecenter.com';
 const DEFAULT_BATCH_INTERVAL_MS = 2000;
-const HEARTBEAT_INTERVAL_MS     = 1_000;
+const HEARTBEAT_INTERVAL_MS     = 30_000;
 
 /** Legacy config keys removed in DIR-2 and DIR-3 (S3 migration). */
 const LEGACY_KEYS = [
@@ -522,7 +522,7 @@ export class PublisherOrchestrator {
       );
     }
 
-    // 1Hz heartbeat
+    // 30s heartbeat
     this.heartbeatTimer = setInterval(() => this.tickHeartbeat(), HEARTBEAT_INTERVAL_MS);
 
     this.cfg.director.log('info', 'Publisher infrastructure started');

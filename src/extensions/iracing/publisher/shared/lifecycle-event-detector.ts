@@ -31,7 +31,7 @@ export interface LifecycleDetectorContext {
 // Constants
 // ---------------------------------------------------------------------------
 
-const HEARTBEAT_INTERVAL_MS = 1_000;
+const HEARTBEAT_INTERVAL_MS = 30_000;
 const CAPABILITIES = ['telemetry-v1'];
 const NOCAR = { carIdx: -1, carNumber: '', driverName: '' };
 

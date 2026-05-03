@@ -72,6 +72,7 @@ export const PublisherSettings = () => {
   const [driverEnabled, setDriverEnabled]           = useState(false);
   const [rigId, setRigId]                           = useState('');
   const [driverSessionId, setDriverSessionId]       = useState('');
+  const [registeredDriverName, setRegisteredDriverName] = useState('');
 
   // Live status
   const [publisherStatus, setPublisherStatus]       = useState<PublisherStatus | null>(null);
@@ -109,16 +110,18 @@ export const PublisherSettings = () => {
     const load = async () => {
       if (!window.electronAPI?.config) return;
       try {
-        const [sessEnabled, drvEnabled, id, sessId] = await Promise.all([
+        const [sessEnabled, drvEnabled, id, sessId, driverDisplayName] = await Promise.all([
           window.electronAPI.config.get('publisher.session.enabled'),
           window.electronAPI.config.get('publisher.driver.enabled'),
           window.electronAPI.config.get('publisher.rigId'),
           window.electronAPI.config.get('publisher.driver.sessionId'),
+          window.electronAPI.config.get('publisher.driver.displayName'),
         ]);
         setSessionEnabled(sessEnabled !== false);
         setDriverEnabled(drvEnabled ?? false);
         setRigId(id ?? '');
         setDriverSessionId(sessId ?? '');
+        if (driverDisplayName) setRegisteredDriverName(driverDisplayName);
       } catch (e) {
         console.error('Failed to load publisher config', e);
       }
@@ -186,6 +189,7 @@ export const PublisherSettings = () => {
           setRegistering(false);
           setRegisterResult(r);
           if (r.success) {
+            setRegisteredDriverName(selectedDriverName);
             window.electronAPI?.config?.get('publisher.driver.sessionId').then((v) => {
               if (v) setDriverSessionId(v);
             }).catch(() => {});
@@ -608,10 +612,15 @@ export const PublisherSettings = () => {
                 {registering ? 'Registering…' : 'Register'}
               </Button>
 
-              {/* Current bound session */}
+              {/* Current registration */}
               {driverSessionId && !registerResult?.success && (
                 <p className="text-xs text-muted-foreground font-jetbrains">
-                  Registered: <span className="text-foreground">{driverSessionId}</span>
+                  Registered:{' '}
+                  {registeredDriverName && (
+                    <span className="text-foreground">{registeredDriverName}</span>
+                  )}
+                  {registeredDriverName && ' — '}
+                  <span className="text-foreground">{driverSessionId}</span>
                 </p>
               )}
 

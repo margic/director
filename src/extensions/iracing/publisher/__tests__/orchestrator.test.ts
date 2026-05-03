@@ -393,12 +393,12 @@ describe('iracing.publisherStateChanged', () => {
 // ---------------------------------------------------------------------------
 
 describe('heartbeat', () => {
-  it('fires PUBLISHER_HEARTBEAT after 1s of inactivity', () => {
+  it('fires PUBLISHER_HEARTBEAT after 30s of inactivity', () => {
     const { orch, director } = makeActiveOrchestrator();
     director.emittedEvents.length = 0;
 
     // Advance time so heartbeat detector considers it idle, then tick
-    vi.advanceTimersByTime(1500);
+    vi.advanceTimersByTime(31000);
     orch.tickHeartbeat();
 
     const beat = director.emittedEvents.find(
@@ -425,12 +425,12 @@ describe('heartbeat', () => {
     expect(beat).toBeUndefined();
   });
 
-  it('automatic 1Hz timer drives heartbeats while running', async () => {
+  it('automatic 30s timer drives heartbeats while running', async () => {
     const { orch, director } = makeActiveOrchestrator();
     director.emittedEvents.length = 0;
 
-    // Advance fake time by 3s — should produce ~3 heartbeats
-    await vi.advanceTimersByTimeAsync(3500);
+    // Advance fake time by 65s — should produce 2 heartbeats (at ~30s and ~60s)
+    await vi.advanceTimersByTimeAsync(65_000);
 
     const beats = director.emittedEvents.filter(
       (e) => e.event === 'iracing.publisherEventEmitted' && e.payload?.type === 'PUBLISHER_HEARTBEAT',
