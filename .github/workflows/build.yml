@@ -40,6 +40,9 @@ jobs:
           echo "VITE_AZURE_TENANT_ID=${{ secrets.VITE_AZURE_TENANT_ID }}" >> .env
           echo "GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }}" >> .env
           echo "GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }}" >> .env
+          echo "VITE_APPINSIGHTS_INSTRUMENTATION_KEY=${{ secrets.VITE_APPINSIGHTS_INSTRUMENTATION_KEY }}" >> .env
+          echo "VITE_APPINSIGHTS_INGESTION_ENDPOINT=${{ secrets.VITE_APPINSIGHTS_INGESTION_ENDPOINT }}" >> .env
+          echo "VITE_APPINSIGHTS_APPLICATION_ID=${{ secrets.VITE_APPINSIGHTS_APPLICATION_ID }}" >> .env
         shell: bash
 
       - name: Build and Publish
