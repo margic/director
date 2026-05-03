@@ -13,7 +13,9 @@ export const telemetryConfig = {
   ingestionEndpoint: process.env.VITE_APPINSIGHTS_INGESTION_ENDPOINT || 'https://westus3-1.in.applicationinsights.azure.com/',
   liveEndpoint: process.env.VITE_APPINSIGHTS_LIVE_ENDPOINT || 'https://westus3.livediagnostics.monitor.azure.com/',
   applicationId: process.env.VITE_APPINSIGHTS_APPLICATION_ID || '',
-  enabled: process.env.VITE_APPINSIGHTS_ENABLED !== 'false', // Default to true
+  // Disabled if explicitly set to 'false' OR if no instrumentation key is configured.
+  // An empty key causes the App Insights SDK to create a broken client that crashes at runtime.
+  enabled: process.env.VITE_APPINSIGHTS_ENABLED !== 'false' && !!process.env.VITE_APPINSIGHTS_INSTRUMENTATION_KEY,
   applicationVersion: app.getVersion(),
   get connectionString() {
     return `InstrumentationKey=${this.instrumentationKey};IngestionEndpoint=${this.ingestionEndpoint};LiveEndpoint=${this.liveEndpoint}`;
