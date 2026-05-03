@@ -651,22 +651,24 @@ describe('LAPPED_TRAFFIC_AHEAD', () => {
   });
 
   it('re-fires after the pair separates and re-closes', () => {
+    // Both cars start at the same physical track position (lapDistPct = 0).
     const base = makeFrame({ cars: [
-      { carIdx: 0, position: 1, lapsCompleted: 10, f2Time: 0 },
-      { carIdx: 1, position: 2, lapsCompleted: 11, f2Time: 1.5 },
+      { carIdx: 0, position: 1, lapsCompleted: 10, lapDistPct: 0 },
+      { carIdx: 1, position: 2, lapsCompleted: 11, lapDistPct: 0 },
     ] });
     const state = prime(base);
-    detect(base, cloneFrame(base), state);
+    detect(base, cloneFrame(base), state);  // first fire, latches la:0-1 / bl:0-1
 
-    // Gap widens past threshold → announcement cleared
+    // Car 0 moves to 50% of the lap — physGap 0.5 × 90 s = 45 s >> 2 s threshold.
     const wide = cloneFrame(base);
-    wide.carIdxF2Time[1] = 5;
+    wide.carIdxLapDistPct[0] = 0.5;
     detect(base, wide, state);
-    expect(state.trafficAnnouncements.has('0-1')).toBe(false);
+    expect(state.trafficAnnouncements.has('la:0-1')).toBe(false); // latch cleared
+    expect(state.trafficAnnouncements.has('bl:0-1')).toBe(false);
 
-    // Close again
+    // Car 0 moves back close to car 1 (1% of lap ≈ 0.9 s gap).
     const close = cloneFrame(wide);
-    close.carIdxF2Time[1] = 1.2;
+    close.carIdxLapDistPct[0] = 0.01;
     const events = detect(wide, close, state);
     expect(events.find(e => e.type === 'LAPPED_TRAFFIC_AHEAD')).toBeDefined();
   });
@@ -695,11 +697,116 @@ describe('BEING_LAPPED', () => {
     expect((ev.payload as any).lappingCar.carIdx).toBe(0); // the lapping car is carIdx 0
     expect((ev.payload as any).lappedCar).toBeUndefined(); // not present on this event
   });
+
+  it('does NOT fire twice while the lapping car remains close', () => {
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 1, lapsCompleted: 11, lapDistPct: 0 },
+      { carIdx: 1, position: 2, lapsCompleted: 10, lapDistPct: 0 },
+    ] });
+    const state = prime(base);
+    detect(base, cloneFrame(base), state);                      // first fire
+    const events = detect(base, cloneFrame(base), state);       // same proximity
+    expect(events.filter(e => e.type === 'BEING_LAPPED')).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// Tier 2 (#97): STOPPED_ON_TRACK
+// Tier 2 (#97): LAPPED_TRAFFIC_AHEAD + BEING_LAPPED — real-world scenarios
+//
+// These tests cover the scenario that originally failed: a car parked on
+// track gets lapped but NO events are produced.  The old code relied on
+// carIdxF2Time which equals ≈ lap_time × lap_delta (~80–90 s) and always
+// exceeded the 2 s threshold.  The new code uses carIdxLapDistPct.
 // ---------------------------------------------------------------------------
+
+describe('lapping detection — real-world physical-proximity scenarios', () => {
+  it('fires BEING_LAPPED when lapping car is physically close (approaching from behind)', () => {
+    // Lapping car (idx 1, 5 laps) is approaching the parked user car (idx 0,
+    // 0 laps) from behind.  Both are near the start/finish straight.
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 20, lapsCompleted: 0, lapDistPct: 0.05, lastLapTime: 90 },
+      { carIdx: 1, position: 10, lapsCompleted: 5, lapDistPct: 0.97, lastLapTime: 90 },
+    ] });
+    const state = prime(base);
+    // physDiff = 0.97 - 0.05 = 0.92; normalise: 0.92 - 1.0 = -0.08
+    // gapSec = 0.08 * 90 = 7.2 s  — just beyond the default 2 s threshold.
+    // Let's tighten the approach: lapping car at 0.99.
+    const f1 = cloneFrame(base);
+    f1.carIdxLapDistPct[1] = 0.99;
+    // physDiff = 0.99 - 0.05 = 0.94; normalise: 0.94 - 1.0 = -0.06; gapSec = 5.4 s — still wide.
+    // Move parked car further into the lap so approaching gap is < 2 s.
+    f1.carIdxLapDistPct[0] = 0.02;
+    // physDiff = 0.99 - 0.02 = 0.97; normalise: 0.97 - 1.0 = -0.03; gapSec = 0.03*90 = 2.7 s — still wide.
+    // Tighten further: lapping car at 0.995, parked at 0.005.
+    f1.carIdxLapDistPct[0] = 0.005;
+    f1.carIdxLapDistPct[1] = 0.995;
+    // physDiff = 0.995 - 0.005 = 0.99; normalise: 0.99 - 1.0 = -0.01; gapSec = 0.01*90 = 0.9 s ✓
+    const events = detect(base, f1, state);
+    expect(events.find(e => e.type === 'BEING_LAPPED')).toBeDefined();
+    const ev = events.find(e => e.type === 'BEING_LAPPED')!;
+    expect((ev.payload as any).lappingCar.carIdx).toBe(1);
+  });
+
+  it('fires LAPPED_TRAFFIC_AHEAD simultaneously with BEING_LAPPED', () => {
+    // Same pair — both events should fire on the first proximity frame.
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 20, lapsCompleted: 0, lapDistPct: 0.005, lastLapTime: 90 },
+      { carIdx: 1, position: 10, lapsCompleted: 5, lapDistPct: 0.995, lastLapTime: 90 },
+    ] });
+    const state = prime(base);
+    const events = detect(base, cloneFrame(base), state);
+    expect(events.find(e => e.type === 'BEING_LAPPED')).toBeDefined();
+    expect(events.find(e => e.type === 'LAPPED_TRAFFIC_AHEAD')).toBeDefined();
+    // BEING_LAPPED from parked car's perspective
+    const bl = events.find(e => e.type === 'BEING_LAPPED')!;
+    expect((bl.payload as any).lappingCar.carIdx).toBe(1);
+    // LAPPED_TRAFFIC_AHEAD from lapping car's perspective
+    const la = events.find(e => e.type === 'LAPPED_TRAFFIC_AHEAD')!;
+    expect((la.payload as any).lappedCar.carIdx).toBe(0);
+  });
+
+  it('fires BEING_LAPPED after lapping car crosses start/finish just ahead', () => {
+    // Lapping car has just crossed start/finish; parked car is a tiny fraction behind.
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 15, lapsCompleted: 3, lapDistPct: 0.998, lastLapTime: 90 },
+      { carIdx: 1, position: 5,  lapsCompleted: 4, lapDistPct: 0.01,  lastLapTime: 90 },
+    ] });
+    const state = prime(base);
+    // physDiff = 0.01 - 0.998 = -0.988; normalise: -0.988 + 1.0 = 0.012; gapSec = 0.012*90 = 1.08 s ✓
+    const events = detect(base, cloneFrame(base), state);
+    expect(events.find(e => e.type === 'BEING_LAPPED')).toBeDefined();
+  });
+
+  it('does NOT fire BEING_LAPPED when lapping car is far away physically', () => {
+    // Lapping car is at 50% of the track, parked car is at 5% — 45 s apart.
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 20, lapsCompleted: 0, lapDistPct: 0.05, lastLapTime: 90 },
+      { carIdx: 1, position: 5,  lapsCompleted: 5, lapDistPct: 0.50, lastLapTime: 90 },
+    ] });
+    const state = prime(base);
+    const events = detect(base, cloneFrame(base), state);
+    expect(events.find(e => e.type === 'BEING_LAPPED')).toBeUndefined();
+  });
+
+  it('fires BEING_LAPPED for a parked car lapped by multiple cars simultaneously', () => {
+    // Parked car at 0.01 lapDistPct; two lapping cars both physically close.
+    // car 1 at 0.995: physDiff = 0.995−0.01 = 0.985 → normalise = −0.015 → 0.015×90 = 1.35 s ✓
+    // car 2 at 0.990: physDiff = 0.990−0.01 = 0.980 → normalise = −0.020 → 0.020×90 = 1.80 s ✓
+    const base = makeFrame({ cars: [
+      { carIdx: 0, position: 20, lapsCompleted: 0, lapDistPct: 0.01,  lastLapTime: 90 },
+      { carIdx: 1, position: 5,  lapsCompleted: 5, lapDistPct: 0.995, lastLapTime: 90 },
+      { carIdx: 2, position: 6,  lapsCompleted: 5, lapDistPct: 0.990, lastLapTime: 90 },
+    ] });
+    const state = prime(base);
+    const events = detect(base, cloneFrame(base), state);
+    // Two BEING_LAPPED events — one for each lapping car
+    const beingLapped = events.filter(e => e.type === 'BEING_LAPPED');
+    expect(beingLapped).toHaveLength(2);
+    // Two LAPPED_TRAFFIC_AHEAD events — from each lapper's perspective
+    const lappedAhead = events.filter(e => e.type === 'LAPPED_TRAFFIC_AHEAD');
+    expect(lappedAhead).toHaveLength(2);
+  });
+});
 
 describe('STOPPED_ON_TRACK', () => {
   it('fires after ≥ 2s with no lapDistPct movement while off pit road', () => {

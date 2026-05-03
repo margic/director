@@ -120,55 +120,55 @@ describe('onConnectionChange', () => {
 // ---------------------------------------------------------------------------
 
 describe('checkHeartbeat', () => {
-  it('fires PUBLISHER_HEARTBEAT when no event has been emitted (starts at time 0, check at 1001)', () => {
+  it('fires PUBLISHER_HEARTBEAT when no event has been emitted (starts at time 0, check at 30001)', () => {
     let now = 0;
     const detector = new LifecycleEventDetector(() => now);
-    now = 1001;
+    now = 30001;
     const events = detector.checkHeartbeat(CTX);
     expect(events).toHaveLength(1);
     expect(events[0].type).toBe('PUBLISHER_HEARTBEAT');
   });
 
-  it('fires exactly at the 1000ms boundary', () => {
+  it('fires exactly at the 30000ms boundary', () => {
     let now = 0;
     const detector = new LifecycleEventDetector(() => now);
-    now = 999;
+    now = 29999;
     expect(detector.checkHeartbeat(CTX)).toHaveLength(0);
-    now = 1000;
+    now = 30000;
     expect(detector.checkHeartbeat(CTX)).toHaveLength(1);
   });
 
-  it('returns empty array when another event was emitted less than 1s ago', () => {
-    let now = 500;
+  it('returns empty array when another event was emitted less than 30s ago', () => {
+    let now = 15000;
     const detector = new LifecycleEventDetector(() => now);
-    detector.notifyEventEmitted(); // last event at 500ms
-    now = 1000; // only 500ms since last event
+    detector.notifyEventEmitted(); // last event at 15s
+    now = 20000; // only 5s since last event
     expect(detector.checkHeartbeat(CTX)).toHaveLength(0);
   });
 
   it('notifyEventEmitted from external detector suppresses heartbeat', () => {
     let now = 0;
     const detector = new LifecycleEventDetector(() => now);
-    now = 1500;
-    detector.notifyEventEmitted(); // some other event fired at 1500ms
-    now = 2000; // only 500ms since last
+    now = 15000;
+    detector.notifyEventEmitted(); // some other event fired at 15s
+    now = 20000; // only 5s since last
     expect(detector.checkHeartbeat(CTX)).toHaveLength(0);
   });
 
-  it('heartbeat fires again after a second interval has elapsed', () => {
+  it('heartbeat fires again after a second 30s interval has elapsed', () => {
     let now = 0;
     const detector = new LifecycleEventDetector(() => now);
-    now = 1001;
-    detector.checkHeartbeat(CTX); // fires; updates lastEventAt to 1001
-    now = 2002;
-    const events = detector.checkHeartbeat(CTX); // 1001ms since last
+    now = 30001;
+    detector.checkHeartbeat(CTX); // fires; updates lastEventAt to 30001
+    now = 60002;
+    const events = detector.checkHeartbeat(CTX); // 30001ms since last
     expect(events).toHaveLength(1);
   });
 
   it('heartbeat does NOT fire twice in rapid succession', () => {
     let now = 0;
     const detector = new LifecycleEventDetector(() => now);
-    now = 1001;
+    now = 30001;
     detector.checkHeartbeat(CTX); // fires
     const second = detector.checkHeartbeat(CTX); // same ms → no fire
     expect(second).toHaveLength(0);
@@ -177,7 +177,7 @@ describe('checkHeartbeat', () => {
   it('heartbeat carries publisherCode and raceSessionId', () => {
     let now = 0;
     const detector = new LifecycleEventDetector(() => now);
-    now = 2000;
+    now = 31000;
     const [ev] = detector.checkHeartbeat(CTX);
     expect(ev.rigId).toBe('rig-01');
     expect(ev.raceSessionId).toBe('session-abc');
@@ -194,10 +194,10 @@ describe('notifyEventEmitted', () => {
     const detector = new LifecycleEventDetector(() => now);
     now = 5000;
     detector.notifyEventEmitted();
-    now = 5500;
-    expect(detector.checkHeartbeat(CTX)).toHaveLength(0); // still within window
-    now = 6001;
-    expect(detector.checkHeartbeat(CTX)).toHaveLength(1); // now past 1s
+    now = 5500;                    // only 500ms since last event
+    expect(detector.checkHeartbeat(CTX)).toHaveLength(0); // still within 30s window
+    now = 35001;                   // 30001ms since last event
+    expect(detector.checkHeartbeat(CTX)).toHaveLength(1); // now past 30s
   });
 });
 

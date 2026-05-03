@@ -289,78 +289,112 @@ export function detectOvertakeAndBattle(
   }
 
   // -------------------------------------------------------------------------
-  // Step 4: Lapped-traffic detection (#97)
+  // Step 4: Cross-lap physical proximity — LAPPED_TRAFFIC_AHEAD / BEING_LAPPED
   //
-  // For each car i with a car immediately ahead (leaderIdx), compare
-  // carIdxLapCompleted. If i is within TRAFFIC_PROXIMITY_GAP_SEC of leaderIdx:
-  //   - leaderIdx has fewer laps → LAPPED_TRAFFIC_AHEAD (i catching slower car)
-  //   - leaderIdx has more laps   → BEING_LAPPED (i is about to be lapped)
-  // Latched per pair via state.trafficAnnouncements; cleared when gap grows
-  // past threshold or laps equalise.
+  // carIdxF2Time cannot be used here: for cars on different laps it equals
+  // ≈ lap_difference × lap_time (80–90 s), always above any reasonable
+  // proximity threshold.  Instead we compare carIdxLapDistPct positions
+  // directly and convert the fractional-track gap to seconds via the last
+  // known lap time (FALLBACK_LAP_TIME_SEC when unavailable).
+  //
+  // The position-adjacent scan (currPos − 1) also cannot work: when being
+  // lapped the lapping car is many positions ahead in race order, not just
+  // one.  An O(n²) scan over all on-track pairs finds every cross-lap pair.
+  //
+  // For each qualifying pair we fire:
+  //   LAPPED_TRAFFIC_AHEAD — from the lapper's perspective (more laps)
+  //   BEING_LAPPED         — from the lapped car's perspective (fewer laps)
+  //
+  // Latched per pair via state.trafficAnnouncements using prefixed keys:
+  //   'la:<pairKey>'  — LAPPED_TRAFFIC_AHEAD announced
+  //   'bl:<pairKey>'  — BEING_LAPPED announced
+  // Both are cleared when the cars move more than TRAFFIC_PROXIMITY_GAP_SEC
+  // apart physically.
   // -------------------------------------------------------------------------
   const seenTrafficPairs = new Set<string>();
+
   for (let i = 0; i < CAR_COUNT; i++) {
-    const currPos = curr.carIdxPosition[i];
-    if (currPos <= 1) continue;
+    if (curr.carIdxPosition[i] <= 0) continue;
     if (curr.carIdxOnPitRoad[i] !== 0) continue;
+    const lapI = curr.carIdxLapCompleted[i];
+    const pctI = curr.carIdxLapDistPct[i];
 
-    const leaderIdx = currPosMap.get(currPos - 1);
-    if (leaderIdx === undefined) continue;
-    if (curr.carIdxOnPitRoad[leaderIdx] !== 0) continue;
+    for (let j = i + 1; j < CAR_COUNT; j++) {
+      if (curr.carIdxPosition[j] <= 0) continue;
+      if (curr.carIdxOnPitRoad[j] !== 0) continue;
+      const lapJ = curr.carIdxLapCompleted[j];
 
-    const gap = curr.carIdxF2Time[i];
-    if (gap < 0 || gap > TRAFFIC_PROXIMITY_GAP_SEC) continue;
+      // Only interested in cars on different laps.
+      if (lapI === lapJ) continue;
 
-    const chaserLap = curr.carIdxLapCompleted[i];
-    const leaderLap = curr.carIdxLapCompleted[leaderIdx];
-    if (chaserLap === leaderLap) continue;
+      const pctJ = curr.carIdxLapDistPct[j];
 
-    const pairKey = battleKey(i, leaderIdx);
-    seenTrafficPairs.add(pairKey);
-    const existing = state.trafficAnnouncements.get(pairKey);
+      // Physical track gap as a fraction of the lap, normalised to [−0.5, 0.5]
+      // so that the start/finish line wrap-around is handled correctly.
+      let physDiff = pctI - pctJ;
+      if (physDiff >  0.5) physDiff -= 1.0;
+      if (physDiff < -0.5) physDiff += 1.0;
 
-    // Approximate distance in metres from F2Time. We don't have vehicle speed
-    // in the frame, so we report a rough figure based on a nominal 50 m/s
-    // racing pace. Good enough for highlights/UI.
-    const approxDistanceMeters = Math.round(gap * 50);
+      // Convert fractional gap to approximate seconds using the last known
+      // lap time (fall back to FALLBACK_LAP_TIME_SEC when unavailable).
+      const lapRef =
+        curr.carIdxLastLapTime[i] > 0 ? curr.carIdxLastLapTime[i] :
+        curr.carIdxLastLapTime[j] > 0 ? curr.carIdxLastLapTime[j] :
+        FALLBACK_LAP_TIME_SEC;
+      const gapSec = Math.abs(physDiff) * lapRef;
 
-    if (leaderLap < chaserLap) {
-      // The car ahead is a lapped car — chaser is catching lapped traffic.
-      if (existing !== 'LAPPED_AHEAD') {
-        const car = carRefFromRoster(state, i);
+      if (gapSec > TRAFFIC_PROXIMITY_GAP_SEC) continue;
+
+      // Determine which car is lapping (more completed laps) and which is
+      // being lapped (fewer completed laps).
+      const lapperIdx = lapI > lapJ ? i : j;
+      const lappedIdx  = lapI > lapJ ? j : i;
+
+      const pairKey = battleKey(lapperIdx, lappedIdx);
+      const laKey   = `la:${pairKey}`;
+      const blKey   = `bl:${pairKey}`;
+      seenTrafficPairs.add(laKey);
+      seenTrafficPairs.add(blKey);
+
+      // Approximate distance in metres at a nominal 50 m/s racing pace.
+      const approxDistanceMeters = Math.round(gapSec * 50);
+
+      // LAPPED_TRAFFIC_AHEAD — fired from the lapper's perspective.
+      if (!state.trafficAnnouncements.has(laKey)) {
+        const lapperCar = carRefFromRoster(state, lapperIdx);
         events.push(buildEvent(
           'LAPPED_TRAFFIC_AHEAD',
-          car,
+          lapperCar,
           {
-            lappedCar:      carRefFromRoster(state, leaderIdx),
+            lappedCar:      carRefFromRoster(state, lappedIdx),
             distanceMeters: approxDistanceMeters,
           },
           opts,
         ));
-        state.trafficAnnouncements.set(pairKey, 'LAPPED_AHEAD');
+        state.trafficAnnouncements.set(laKey, 'LAPPED_AHEAD');
       }
-    } else if (leaderLap > chaserLap) {
-      // The car ahead has MORE laps — chaser is about to be lapped.
-      if (existing !== 'BEING_LAPPED') {
-        const car = carRefFromRoster(state, i);
+
+      // BEING_LAPPED — fired from the lapped car's perspective.
+      if (!state.trafficAnnouncements.has(blKey)) {
+        const lappedCar = carRefFromRoster(state, lappedIdx);
         events.push(buildEvent(
           'BEING_LAPPED',
-          car,
+          lappedCar,
           {
-            lappingCar:     carRefFromRoster(state, leaderIdx),
+            lappingCar:     carRefFromRoster(state, lapperIdx),
             distanceMeters: approxDistanceMeters,
           },
           opts,
         ));
-        state.trafficAnnouncements.set(pairKey, 'BEING_LAPPED');
+        state.trafficAnnouncements.set(blKey, 'BEING_LAPPED');
       }
     }
   }
 
-  // Clear traffic announcements for pairs that are no longer close/out-of-lap.
-  for (const pairKey of Array.from(state.trafficAnnouncements.keys())) {
-    if (!seenTrafficPairs.has(pairKey)) {
-      state.trafficAnnouncements.delete(pairKey);
+  // Clear traffic announcements for pairs that are no longer physically close.
+  for (const key of Array.from(state.trafficAnnouncements.keys())) {
+    if (!seenTrafficPairs.has(key)) {
+      state.trafficAnnouncements.delete(key);
     }
   }
 
