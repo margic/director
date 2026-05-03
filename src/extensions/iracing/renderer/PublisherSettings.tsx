@@ -277,7 +277,18 @@ export const PublisherSettings = () => {
     setLoadingDrivers(true);
     try {
       const list = await window.electronAPI?.publisher?.listDrivers();
-      if (list) setDrivers(list.map((d) => ({ driverId: d.driverId, displayName: d.displayName, nickname: d.nickname })));
+      if (!list) return;
+      const mapped = list.map((d) => ({ driverId: d.driverId, displayName: d.displayName, nickname: d.nickname }));
+      setDrivers(mapped);
+      // Restore previously selected driver if config has one
+      const savedId = await window.electronAPI?.config?.get('publisher.driver.driverId').catch(() => null);
+      if (savedId) {
+        const found = mapped.find((d) => d.driverId === savedId);
+        if (found) {
+          setSelectedDriverId(found.driverId);
+          setSelectedDriverName(found.displayName);
+        }
+      }
     } catch (e) {
       console.error('Failed to load drivers', e);
     } finally {
@@ -285,10 +296,14 @@ export const PublisherSettings = () => {
     }
   }, []);
 
+  // Auto-load driver list on mount so the previously selected driver is restored
+  useEffect(() => { void loadDrivers(); }, [loadDrivers]);
+
   const handleSelectDriver = useCallback((driverId: string) => {
     setSelectedDriverId(driverId);
     const found = drivers.find((d) => d.driverId === driverId);
     setSelectedDriverName(found?.displayName ?? '');
+    window.electronAPI?.config?.set('publisher.driver.driverId', driverId).catch(() => {});
   }, [drivers]);
 
   const handleRegister = useCallback(async () => {
