@@ -1,180 +1,122 @@
-# Sequence Executor Feature Specification
+# Sequence Executor
 
-## Overview
-The Sequence Executor is responsible for processing and executing `PortableSequence` objects. It acts as a **headless runtime** — a central dispatch mechanism that routes steps to their respective handlers via the Extension System, ensuring modularity and separation of concerns.
+> STATUS: IMPLEMENTED. Source of truth: `src/main/sequence-executor.ts`.
 
-The executor does not care *who* created the sequence. It can be produced by:
-- The Race Control Cloud API (AI Director)
-- A Visual Editor / Control Deck UI
-- A manual JSON file
-- An external webhook
+The executor is a **headless, intent-driven runtime**. It does not
+care how a sequence was authored — it walks `PortableSequence.steps`
+and dispatches each step to either a built-in handler or the extension
+host. The author-time authoring tools (Visual Editor, AI Planner,
+JSON import, REST sync) are all upstream of this layer.
 
-## Data Protocol: The Portable Sequence
+For data shapes, see `data-models.md`. For queueing, history,
+variable resolution, priority preemption and progress events, see
+`feature_sequence_scheduler.md` (the executor is invoked by the
+scheduler, not directly).
 
-To decouple the **Sequence Generator** (UI, AI, Manual File) from the **Sequence Executor**, we define a strict **Portable Sequence Format**.
+## Dispatch table
 
-### 1. PortableSequence
-A portable JSON object representing a full sequence.
-```json
-{
-  "id": "seq_12345",
-  "name": "Race Start Protocol",
-  "version": "1.0.0",
-  "steps": [
-    {
-      "id": "step_1",
-      "intent": "system.log",
-      "payload": { "message": "Starting Sequence", "level": "INFO" }
-    },
-    {
-      "id": "step_2",
-      "intent": "broadcast.showLiveCam",
-      "payload": { "carNum": "63", "camGroup": "TV1" }
-    },
-    {
-      "id": "step_3",
-      "intent": "system.wait",
-      "payload": { "durationMs": 3000 }
-    },
-    {
-      "id": "step_4",
-      "intent": "obs.switchScene",
-      "payload": { "sceneName": "Race Cam" }
-    }
-  ]
-}
+For each step, the executor looks at `step.intent`:
+
+| Prefix / value | Handler | Description |
+|---|---|---|
+| `system.wait` | built-in | Sleeps for `payload.durationMs`. |
+| `system.log` | built-in | Logs `payload.message` at `payload.level` (`INFO` / `WARN` / `ERROR`, default `INFO`). |
+| `system.executeSequence` | built-in | Looks up `payload.sequenceId` in the `SequenceLibraryService` and recurses into `execute()`. |
+| `overlay.show` | built-in | `overlayBus.showOverlay(payload.extensionId, payload.overlayId)`. |
+| `overlay.hide` | built-in | `overlayBus.hideOverlay(payload.extensionId, payload.overlayId)`. |
+| anything else | extension host | If `intentRegistry.getIntent(intent)` returns a handler, dispatched via `extensionHost.executeIntent(intent, payload)`. Otherwise, **soft-skip** with a warning. |
+
+### Built-in payload schemas
+
+```ts
+// system.wait
+{ durationMs: number }              // 0 or missing = no-op
+
+// system.log
+{ message: string; level?: 'INFO' | 'WARN' | 'ERROR' }
+
+// system.executeSequence
+{ sequenceId: string }              // resolved via SequenceLibraryService.getSequence
+
+// overlay.show / overlay.hide
+{ extensionId: string; overlayId: string }
 ```
 
-### 2. Universal Command (Step)
-The Executor operates on a normalized command structure. It does **not** rely on hardcoded TypeScript Enums for extension usage.
+Missing required fields cause a warning and a no-op (consistent with
+soft-failure).
 
-```typescript
-interface SequenceStep {
-  id: string;          // Unique step ID
-  intent: string;      // Semantic Intent ID (e.g. "obs.switchScene")
-  payload: Record<string, unknown>;  // Data matching the Extension's Input Schema
-  metadata?: {
-    label?: string;    // Human readable label for UI
-    timeout?: number;  // Max execution time in ms
-  };
-}
+## Soft-failure
+
+The executor's contract is: **a sequence never aborts because of one
+bad step.** Every failure path is logged and skipped:
+
+- Unknown intent → `console.warn` and continue.
+- Built-in payload missing required fields → `console.warn` and continue.
+- Handler throws → caught in the per-step `try { await this.executeStep(step) }`,
+  logged, and the loop advances.
+
+This is what makes Director Loop usable when an extension is disabled
+or disconnected: the AI planner can still emit a sequence that
+references OBS scenes and Discord announcements; if Discord is down,
+the OBS step still fires.
+
+The trade-off: there is **no transactional semantics**. If your
+sequence depends on step N+1 only running when step N succeeded, you
+must either author the dependency into your extension (e.g. an OBS
+intent that no-ops if disconnected) or use `priority: true` to allow a
+new sequence to preempt a partially-failed one.
+
+## Step execution flow
+
+```
+async executeStep(step):
+  if intent is system.wait      → setTimeout(payload.durationMs)
+  if intent is system.log       → console[level](formatted message)
+  if intent is system.executeSequence → recurse on getSequence(payload.sequenceId)
+  if intent is overlay.show/hide → overlayBus.show/hideOverlay(...)
+  else:
+    if !extensionHost.hasActiveHandler(intent):
+      warn "No active handler for intent X"; return     // soft skip
+    await extensionHost.executeIntent(intent, payload)
 ```
 
-### 3. Intent Naming Convention
-Intents use **semantic `domain.action`** notation defined by extensions in their `package.json` manifests:
-- `system.wait` — Built-in
-- `system.log` — Built-in
-- `broadcast.showLiveCam` — iRacing Extension
-- `obs.switchScene` — OBS Extension
-- `communication.announce` — Discord Extension
-- `communication.talkToChat` — YouTube Extension
+The extension-host call returns immediately after posting the
+`EXECUTE_INTENT` IPC message — there is no acknowledgement round-trip.
+This means **`durationMs` in step metadata is not enforced**; long-
+running intents block the next step only if they `await` something
+the executor can observe (e.g. `system.wait` after them).
 
-This naming is intentionally **not tied to extension IDs**. The AI can reason about `communication.announce` semantically without knowing it's the Discord extension.
+## Progress reporting
 
-### 4. API Backward Compatibility
-The Race Control API sends legacy `DirectorCommand[]` with `commandType` enums. The `DirectorService` normalizes these to `PortableSequence` before passing them to the executor via a built-in adapter function (`normalizeApiResponse`).
+`execute(sequence, onProgress?)` invokes the optional callback with
+`(completed, total)` after each step. The scheduler uses this to emit
+`SequenceProgress` events on the `'progress'` event emitter (which the
+preload surfaces as `sequences.onProgress`).
 
-### 5. Decoupling Guarantee
-- **The Executor is Headless**: It does not know *how* the sequence was created. It only validates:
-    1.  Does the `intent` have an active handler in the Registry?
-    2.  Does the `payload` match the Schema? (Optional runtime validation)
-- **The Extension System is the Definition**: The `package.json` manifest provides the *only* definition of valid intents and payloads. The Executor is merely a generic runtime engine.
+## What the executor does NOT do
 
-## Scope & Acceptance Criteria
+These responsibilities belong to the scheduler, not the executor:
 
-**Goal**: Implement the core executor logic and the command handler architecture using the new **Intent-based Extension System**.
+- Variable resolution (`$var()`).
+- Cancellation.
+- Queueing or priority preemption.
+- History tracking.
+- Per-step timing and `ExecutionResult` aggregation.
 
-**In Scope**:
-- `SequenceExecutor` class implementation (iterating steps, error handling).
-- **Built-in Handlers** (inline in executor, no separate handler classes):
-  - `system.wait` — Non-blocking delay.
-  - `system.log` — Write to application log.
-- **Extension Integration**:
-  - Dynamic lookup of Intent Handlers via `ExtensionHostService`.
-  - Extensions register their handlers via `registerIntentHandler()` during `activate()`.
-- **API Adapter**:
-  - `normalizeApiResponse()` in `DirectorService` to convert legacy API format to `PortableSequence`.
+If you need any of those, call `scheduler.enqueue(sequence, vars,
+opts)`, not `executor.execute(sequence)` directly. The orchestrator,
+event mapper, and IPC layer all go through the scheduler.
 
-**Out of Scope**:
-- Implementation of specific extension handlers (these live in `extensions/iracing`, `extensions/obs`, etc.).
-- Visual Editor / Control Deck UI (separate feature).
+## Wiring
 
-## Architecture
-
-### Intent-Driven Dispatch
-The `SequenceExecutor` iterates through the `steps` array. For each step, it checks the `intent` string:
-1. If `system.*` — handled inline (built-in).
-2. Otherwise — dispatched to `ExtensionHostService.executeIntent()`.
-
-### Execution Logic (Soft Failures)
-To support the dynamic nature of extensions (which may be disabled or uninstalled):
-
-1.  **Lookup**: The executor checks `extensionHost.hasActiveHandler(intent)`.
-2.  **Hit**: The handler is executed via `extensionHost.executeIntent(intent, payload)`.
-3.  **Miss (Soft Fail)**: If no handler is registered (e.g., extension disabled):
-    - Log a warning: `[SequenceExecutor] Skipping step: No active handler for intent '${intent}'`.
-    - **continue** to the next step.
-    - Do **not** throw an error or abort the sequence.
-
-### Two-Tier Registry
-The system uses a two-tier registry to manage capabilities:
-1.  **Capability Catalog (Static)**: Derived from `package.json` manifests of ALL installed extensions. Used by the **Visual Editor** to show available intents even if the extension isn't active.
-2.  **Handler Registry (Dynamic)**: Populated at runtime when extensions `activate()`. Used by the **Sequence Executor** to dispatch intents.
-
-## Intent Catalog
-
-### Built-in Intents
-
-#### system.wait
-**Description**: Non-blocking pause for the sequence execution.
-**Payload**:
-```json
-{
-  "durationMs": 1000
-}
+```
+src/main/main.ts
+  sequenceExecutor = new SequenceExecutor(extensionHost, overlayBus);
+  sequenceLibrary  = new SequenceLibraryService(capabilityCatalog, authService);
+  sequenceExecutor.setSequenceLibrary(sequenceLibrary);  // for system.executeSequence
+  sequenceScheduler = new SequenceScheduler(sequenceExecutor);
 ```
 
-#### system.log
-**Description**: Write a message to the application log.
-**Payload**:
-```json
-{
-  "message": "string",
-  "level": "INFO | WARN | ERROR"
-}
-```
-
-### Extension Intents (Examples)
-These are defined by their respective extension manifests. The executor does not need to know about them at compile time.
-
-#### broadcast.showLiveCam (iRacing)
-```json
-{ "carNum": "string", "camGroup": "string" }
-```
-
-#### obs.switchScene (OBS)
-```json
-{ "sceneName": "string", "transition": "string", "duration": "number" }
-```
-
-#### communication.announce (Discord)
-```json
-{ "message": "string" }
-```
-
-#### communication.talkToChat (YouTube)
-```json
-{ "message": "string" }
-```
-
-## Error Handling
-
-- **Soft Failure**: Missing handlers result in a skip and log warning.
-- **Handler Failure**: If an executed handler throws an error, the executor catches it, logs the error, and proceeds to the next step (unless configured to abort).
-- **Timeout**: Steps can optionally specify a `metadata.timeout` for maximum execution time. (Future implementation.)
-
-## Future Considerations
-- **Parallel Execution**: Currently, steps are executed sequentially. Future versions might support `PARALLEL` blocks.
-- **Conditional Logic**: Simple `IF` logic based on telemetry data (e.g., "If Leader Gap < 1s, use `broadcast.showLiveCam`").
-- **Step Results**: Intent handlers could return result data for use in subsequent steps.
-
+The library is wired in *after* construction to break a circular
+dependency (the library references stored sequences, which can be
+nested via `system.executeSequence`, which the executor needs).
