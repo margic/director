@@ -1,133 +1,149 @@
-# OBS Integration Feature Specification
+# OBS Integration
 
-> **Status: Extension + Core Module (Dual-Layer)**
-> This feature is implemented as:
-> - **Extension** at `src/extensions/obs` — runs in the Extension Host utility process, registers intent handlers.
-> - **Core Module** at `src/main/modules/obs-core` — runs in the Main Process, provides IPC handlers for the Renderer and direct access for the Sequence Executor.
->
-> See `feature_extension_system.md` § 2.5 "Core Module Lifecycle Management" for the architectural pattern.
+> STATUS: IMPLEMENTED. Source of truth: `src/extensions/obs/index.ts`,
+> `src/main/modules/obs-core/obs-service.ts`, `src/main/main.ts`.
 
-## Overview
-This feature integrates **OBS Studio** (Open Broadcaster Software) using the `obs-websocket-js` library. The Director application can control broadcast scenes programmatically, ensuring the correct camera feeds and graphics are displayed during a race event.
+OBS Studio is reached through OBS-WebSocket v5 (`obs-websocket-js`).
+Director uses **two** consumers of the same connection model:
 
-## Architecture
+1. **The `director-obs` extension** — exposes the broadcast intents
+   (`obs.switchScene`, `obs.getScenes`) used by sequences. Activated
+   by the extension host like any other extension.
+2. **The legacy `ObsService` singleton** — predates the extension
+   system and is still used by some renderer pages
+   (`obsConnect`, `obsGetStatus`, `obsSetScene` on the preload).
+   Both can be live simultaneously and each maintains its own
+   `OBSWebSocket` connection.
 
-### Dual-Layer Design
-OBS uses a dual-layer architecture because:
-1. The **Core Module (`ObsService`)** must live in the Main Process so IPC handlers can return status synchronously and the Sequence Executor can call `switchScene()` directly.
-2. The **Extension** runs in the isolated utility process and registers intent handlers (`obs.switchScene`, `obs.getScenes`) for the Extension API.
+This dual model is intentional for backward compatibility; new code
+should use the extension and reach OBS via `obs.switchScene`.
 
-### Lifecycle Rules
-- The `ObsService` is **instantiated** at app startup but does **NOT** connect automatically.
-- Connection is initiated only when:
-  1. The user clicks **Connect** in the OBS Panel, OR
-  2. The extension is enabled AND `autoConnect` is `true` in config.
-- When the extension is **disabled** (via the master toggle), `main.ts` must call `obsService.stop()` to halt the connection and reconnect loop.
-- `ObsService.stop()` sets a `stopping` flag to prevent the `ConnectionClosed` event from re-triggering the reconnect loop (see § 2.5 in `feature_extension_system.md`).
+## Extension manifest
 
-## Design Pattern: Module-Based Dashboard
-1.  **Sidebar**: Adds an OBS icon (Aperture) to the main navigation.
-2.  **Preview Module**: Adds an "OBS Status" card to the main dashboard.
-    - Displays connection state (Connected/Disconnected).
-    - Displays configuration warnings (e.g., "Missing Scenes").
-    - Clicking it navigates to the Detail Page.
-3.  **Detail Page**: A dedicated view (`/obs`) with **Status** and **Settings** tabs.
+`name: "director-obs"`. Contributes:
 
-## Scope
+| Kind | Items |
+|---|---|
+| **Intents** | `obs.switchScene { sceneName, transition?, duration? }` (broadcast), `obs.getScenes` (operational) |
+| **Events** | `obs.connectionStateChanged { connected }`, `obs.scenes { scenes, connected, currentScene? }` |
+| **Settings** | `obs.host`, `obs.password` (secure), `obs.autoConnect` |
 
-### 1. Backend (Main Process — `ObsService`)
-- **Library**: `obs-websocket-js`
-- **Service**: `ObsService` class at `src/main/modules/obs-core/obs-service.ts`.
-    - **Connection**: User-initiated via IPC or auto-connect on startup (if configured).
-    - **Reconnect**: Automatic retry every 5 seconds with a `stopping` flag guard.
-    - **Validation**: On connection, fetch scene list and compare against session requirements.
-    - **Scene Switching**: `switchScene(sceneName)` method.
-    - **Config Management**: `saveConfig(host, password, autoConnect)` persists to `configService`.
-- **IPC Handlers** (registered in `main.ts`):
-    - `obs:get-status`: Returns `{ connected, missingScenes, availableScenes, host, autoConnect }`.
-    - `obs:get-scenes`: Returns available scene list.
-    - `obs:set-scene`: Switches the active scene.
-    - `obs:connect`: Initiates connection using saved credentials.
-    - `obs:disconnect`: Stops connection and reconnect loop.
-    - `obs:get-config`: Returns `{ host, passwordSet, autoConnect }` for the Settings UI.
-    - `obs:save-settings`: Persists `{ host, password, autoConnect }` to config.
+The extension does NOT contribute overlays, views, or commands.
 
-### 2. Frontend (Renderer)
-- **Navigation**: OBS Panel registered in `extension-views.ts` as a full-page component.
-- **Sidebar**: Aperture icon.
-- **Dashboard Widget (`DashboardCard.tsx`)**:
-    - **Status Indicator**:
-        - Green: Connected & Config Valid.
-        - Yellow: Connected but Missing Scenes.
-        - Red: Disconnected.
-    - **Action**: Click → Navigate to OBS Panel.
-- **Panel (`Panel.tsx`)**: Two-tab layout:
-    - **Status Tab**:
-        - Connection banner with ONLINE/OFFLINE badge.
-        - **Connect** / **Disconnect** button (user-controlled).
-        - Missing scenes warning (if applicable).
-        - Scene Control grid — buttons to switch scenes.
-        - "Configuration Required" warning if no host is set.
-    - **Settings Tab**:
-        - WebSocket Host input (e.g., `ws://localhost:4455`).
-        - Password input (masked, shows "set" state).
-        - **Auto-Connect on Startup** toggle (persisted).
-        - Save button.
+## Extension state machine and reconnect
 
-### 3. Extension (Utility Process — `src/extensions/obs/index.ts`)
-- Registers intent handlers:
-    - `obs.switchScene` — switches the OBS scene via `obs-websocket-js`.
-    - `obs.getScenes` — emits current scene list as an event.
-- Manages its own `obs-websocket-js` instance within the utility process.
-- Emits `obs.connectionStateChanged` event on connect/disconnect.
+Implemented in `src/extensions/obs/index.ts:90..104`:
 
-### 4. Intent Integration (Sequence Executor)
-- **Intent**: `obs.switchScene`
-- **Payload**:
-    ```json
-    {
-      "sceneName": "string",
-      "transition": "string (optional)",
-      "duration": "number (optional, ms)"
-    }
-    ```
-- **Soft Failure**: If the OBS extension is disabled, the Sequence Executor skips the step and logs a warning.
+```
+                       ┌────────────┐
+       activate ──────▶│ DISCONNECTED│
+                       └─────┬──────┘
+                             │ host configured? → connect()
+                             ▼
+                       ┌────────────┐    success     ┌────────────┐
+                       │ CONNECTING │───────────────▶│ CONNECTED  │
+                       └─────┬──────┘                └─────┬──────┘
+                             │ failure                     │ ConnectionClosed
+                             ▼                             ▼
+                       ┌──────────────────────────────────────────┐
+                       │ RECONNECTING (setInterval every 5000 ms) │
+                       └──────────────────────────────────────────┘
+                                      │ on success → CONNECTED (interval cleared)
+```
 
-## Configuration
-- **Persisted via `configService`** (electron-store):
-    - `obs.host`: WebSocket URL (e.g., `ws://localhost:4455`).
-    - `obs.password`: WebSocket password.
-    - `obs.autoConnect`: Whether to connect automatically on startup (default: `false`).
-    - `obs.enabled`: Master extension toggle (managed by Core).
-- **No `.env` dependency**: All OBS configuration is managed through the Settings UI and persisted in electron-store. Environment variables (`OBS_WS_PASSWORD`) are supported as fallbacks but not the primary mechanism.
+The interval is **fixed at 5 s** with no jitter or backoff. It clears
+itself when `connected === true`. There is no maximum retry count; the
+extension reconnects forever until disabled.
 
-## Validation Logic
-1.  **Trigger**: Runs automatically when OBS connects OR when the Race Session data is refreshed.
-2.  **Input**:
-    - `RaceSession.scenes`: Expected scene names from Race Control API.
-    - `OBS.GetSceneList()`: Actual scenes in OBS.
-3.  **Output**:
-    - `missingScenes`: Scenes expected but not found.
-    - Drives the warning UI in the Dashboard Widget and Panel Status tab.
+## Singleton `ObsService` reconnect
 
-## Lessons Learned
+`src/main/modules/obs-core/obs-service.ts:104..126` implements the
+**same** 5-second polling reconnect, with one extra guard: a
+`stopping: boolean` flag set by `disconnect()`. When `stopping` is
+true, the reconnect loop is suppressed — this is what makes "Disable
+extension" reliably stop the service rather than instantly reconnect.
 
-### 1. Unconditional Auto-Connect Causes Log Noise
-**Problem**: The original implementation called `obsService.start('ws://localhost:4455')` unconditionally at startup. When OBS was not running, the reconnect loop filled the console with connection errors every 5 seconds, making it difficult to debug other issues.
+`stop()` (called when the operator disables OBS in the UI):
 
-**Resolution**: Connection is now user-initiated. The `autoConnect` preference defaults to `false`. Users opt in via the Settings tab.
+1. Sets `stopping = true`.
+2. Clears `reconnectInterval` if running.
+3. Disconnects the WebSocket.
 
-### 2. Disabling Extension Did Not Stop Core Module
-**Problem**: The extension master toggle correctly unloaded the extension from the utility process, but the `ObsService` in the main process continued its reconnect loop independently.
+Toggling re-enable later requires an explicit `connect()` call, which
+clears `stopping` again.
 
-**Resolution**: Added lifecycle hooks in `main.ts` — when `extensions:set-enabled` is called for `director-obs` with `enabled=false`, `obsService.stop()` is explicitly called.
+## Auto-connect at startup
 
-### 3. The `stopping` Flag Pattern
-**Problem**: `ObsService.stop()` called `obs.disconnect()`, which fired `ConnectionClosed`, which called `startReconnect()` — making the service impossible to stop.
+In `src/main/main.ts`, after `extensionHost.start()` resolves:
 
-**Resolution**: Added a `stopping` boolean flag. Set to `true` in `stop()`, checked in `ConnectionClosed` handler and reconnect loop. Reset to `false` in `connect()`. This pattern is now documented in `feature_extension_system.md` § 2.5 as a required pattern for all services with reconnect loops.
+```ts
+const obsConfig = configService.get('obs');
+if (obsConfig?.autoConnect && obsConfig.host) {
+  obsService.connect(obsConfig.host, obsConfig.password);
+}
+```
 
-### 4. Cross-Cutting: Extension "Active" ≠ "Connected"
-The same root-cause pattern that affected OBS was later found in iRacing: renderer components using `getStatus().active` as a proxy for connection state. OBS avoided this specific manifestation because it has a dedicated `obs:get-status` IPC handler returning real connection state, but the underlying confusion (extension lifecycle vs. integration connectivity) is a systemic risk.
+The `director-obs` extension is also activated (if `obs.enabled !==
+false`) and will connect itself if `obs.host` is set, regardless of
+`autoConnect`. The two are independent.
 
-**Resolution**: Documented as an anti-pattern in `feature_extension_system.md` § 2.4. Added `getLastEvent()` event caching API (§ 2.6) as the canonical solution for extension-only integrations.
+## Capability propagation
+
+When the OBS-WebSocket emits `Identified`, the extension fetches the
+scene list via `GetSceneList` and emits:
+
+```ts
+director.emitEvent('obs.scenes', {
+  scenes: string[],          // array of scene names
+  connected: true,
+  currentScene: string,
+});
+```
+
+The `ExtensionHostService` listens for `obs.scenes` and caches the
+scene list in `cachedObsScenes`. When this changes, the host emits a
+synthetic `extension.capabilitiesChanged` event so the orchestrator
+can re-check-in with the updated `DirectorCapabilities.scenes`.
+
+## IPC handlers (legacy preload surface)
+
+`window.electronAPI.obs*` (see `api-contextbridge.md`):
+
+| Method | Main handler | Backed by |
+|---|---|---|
+| `obsGetStatus()` | `obs:status` | `obsService.getStatus()` |
+| `obsGetScenes()` | `obs:get-scenes` | `obsService.getScenes()` |
+| `obsSetScene(name)` | `obs:set-scene` | `obsService.setScene(name)` |
+| `obsConnect()` | `obs:connect` | `obsService.connect(host, password)` |
+| `obsDisconnect()` | `obs:disconnect` | `obsService.stop()` |
+| `obsGetConfig()` | `obs:get-config` | reads `obs.host`, `obs.password` (secure), `obs.autoConnect` |
+| `obsSaveSettings(s)` | `obs:save-settings` | persists, then triggers `connect()` if `autoConnect` |
+
+These bypass the extension entirely and talk to the singleton.
+
+## Why two parallel connections?
+
+- The **extension** path is what AI-generated sequences use. It must
+  go through the extension host because the sequence executor only
+  knows how to dispatch intents.
+- The **singleton** path is what the OBS Settings page uses to test
+  credentials, list scenes, and so on, without forcing a full
+  extension load/unload cycle.
+
+The extension and singleton **can both be connected at once** to the
+same OBS instance — OBS-WebSocket allows multiple authenticated
+clients.
+
+## Removing the singleton (future)
+
+The long-term direction is to remove `ObsService` and route all OBS
+calls through the extension. The migration path is:
+
+1. Add `obs.connect`, `obs.disconnect`, `obs.getStatus`,
+   `obs.getConfig` as `category: 'operational'` intents on the
+   extension.
+2. Update the renderer to call them via `extensions.executeIntent`
+   plus `extensions.getLastEvent` for the status snapshot.
+3. Delete `obs-service.ts` and the `obs:*` preload methods.
+
+This is not currently planned for any release.

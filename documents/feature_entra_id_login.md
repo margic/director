@@ -1,52 +1,161 @@
-# Feature Specification: Entra ID Login
+# Entra ID (Microsoft Identity) Login
 
-## Overview
-Implement Microsoft Entra ID (formerly Azure AD) authentication to allow Directors to log in using their Sim RaceCenter Microsoft credentials. This ensures secure access and identifies the operator.
+> STATUS: IMPLEMENTED. Source of truth: `src/main/auth-service.ts`,
+> `src/main/auth-config.ts`, `src/main/cache-plugin.ts`,
+> `src/main/preload.ts`.
 
-## User Stories
-- As a Director, I want to log in with my Microsoft account so that I can access the application features.
-- As a Director, I want to see my profile name after logging in to confirm my identity.
-- As a System, I need to securely store the authentication token to maintain the session.
+Director uses **MSAL Node** (`@azure/msal-node`) to authenticate the
+operator against Microsoft Entra ID and to obtain a Race Control API
+access token. All secrets are managed in the main process; the
+renderer never sees raw tokens.
 
-## Implementation Details
+## Configuration
 
-### 1. Authentication Provider
-- **Provider**: Microsoft Entra ID.
-- **Library**: `@azure/msal-node` running in the Electron **Main** process.
+In `auth-config.ts`:
 
-### 2. Architecture & IPC
-- **Main Process**: Handles all authentication logic, token acquisition, and caching via `AuthService`.
-- **Renderer Process**: Triggers login/logout actions and receives user account data via Electron IPC.
-- **IPC Channels**:
-  - `auth:login`: Triggers interactive login.
-  - `auth:logout`: Clears the token cache.
-  - `auth:get-account`: Checks for an existing valid session on startup.
+```ts
+msalConfig = {
+  auth: {
+    clientId: process.env.VITE_AZURE_CLIENT_ID,
+    authority: `https://login.microsoftonline.com/${process.env.VITE_AZURE_TENANT_ID || 'common'}`,
+  },
+  cache: { cachePlugin },          // file-based plain JSON
+  system: { loggerOptions: { logLevel: 1 /* Warning */ } },
+};
 
-### 3. Login Flow
-1.  **Trigger**: User clicks "Login" in the Renderer.
-2.  **IPC Call**: Renderer calls `window.electronAPI.login()`.
-3.  **Interactive Auth**: Main process (`AuthService`) calls `acquireTokenInteractive`.
-4.  **Browser**: System default browser opens to the Microsoft login page.
-5.  **Redirect**: After successful login, the browser redirects to a localhost loopback address which `msal-node` listens to.
-6.  **Token**: `msal-node` exchanges the authorization code for an Access Token and ID Token.
-7.  **Response**: The user account information is returned to the Renderer.
+rcApiScope = process.env.VITE_RC_API_SCOPE
+          || 'api://racecontrol-api-{tenant-guid}/access_as_user';
+```
 
-### 4. Session Management & Caching
-- **Storage**: Tokens are persisted to a local file named `msal-cache.json` in the application's `userData` directory.
-- **Mechanism**: A custom `ICachePlugin` (`cachePlugin`) handles serialization and deserialization of the token cache to/from the file system.
-- **Auto-Login**: On app launch, `AuthService` attempts to acquire a token silently using the cached account.
+Both env vars must be set for login to work. In a packaged build,
+they are read from `{resourcesPath}/.env`; in dev, from the repo
+root `.env` via `dotenv`.
 
-### 5. Configuration
-- **Environment Variables**:
-  - `VITE_AZURE_CLIENT_ID`: The Application (client) ID.
-  - `VITE_AZURE_TENANT_ID`: The Directory (tenant) ID.
-- **Loading**: Variables are loaded from a `.env` file (development) or `process.resourcesPath` (production).
+## IPC channels and preload surface
 
-### 6. UI/UX
-- **Login**: Login button initiates the flow.
-- **Authenticated State**: Displays user avatar/initials in the sidebar.
-- **Logout**: "Log Out" option in the user menu clears the session and resets the UI.
+| Preload method | IPC channel | Description |
+|---|---|---|
+| `login()` | `auth:login` | Interactive flow. Returns `AuthLoginResult` or `null`. |
+| `getAccount()` | `auth:get-account` | Returns the cached `AccountInfo` or `null`. |
+| `getUserProfile()` | `auth:get-user-profile` | GETs `/api/auth/user` with a silent token. |
+| `logout()` | `auth:logout` | Clears the MSAL cache. |
 
-## Technical Considerations
-- **Security**: The current implementation uses a plain JSON file for token cache. Future improvements should consider using `keytar` or Electron's `safeStorage` for encryption at rest.
-- **Scopes**: The application currently requests the `User.Read` scope.
+These are at the top level of `window.electronAPI` (not under a
+namespace) for historical reasons.
+
+## Token acquisition
+
+`AuthService.getAccessToken()`:
+
+1. Look up the cached account.
+2. Try `acquireTokenSilent({ scopes: [rcApiScope], account })`.
+3. On `InteractionRequiredAuthError`, fall back to
+   `acquireTokenInteractive({ scopes: [rcApiScope] })`. This opens a
+   system browser tab via the configured redirect URI.
+4. Return the bearer token (string) or `null` on failure.
+
+The token is **never** cached by `AuthService` itself — every call
+re-runs silent acquisition. MSAL handles the token cache; cached
+access tokens are reused until expiry, at which point the refresh
+token is used (silently).
+
+`getAccessToken()` is called by:
+
+- Every Race Control HTTP call (`SessionManager`, `CloudPoller`,
+  `DiscordService.playTts`, the publisher transport, the YouTube
+  extension's auth URL builder, the publisher config endpoint).
+- The extension API: `api.getAuthToken()` round-trips via `INVOKE`.
+
+## Startup auth flow
+
+`auth:get-account` is called by the renderer at app launch and drives
+the boot UX:
+
+```
+App boots → renderer calls electronAPI.getAccount()
+   ├─ returns AccountInfo → render dashboard, kick off
+   │                        electronAPI.getUserProfile()
+   │                        and electronAPI.session.discover()
+   └─ returns null        → render "Sign in with Microsoft" splash
+                            screen; on click, call electronAPI.login()
+```
+
+There is no automatic interactive token acquisition at startup — the
+renderer opts in by calling `getUserProfile()`, which internally calls
+`getAccessToken()` (which may trigger an interactive flow if the
+refresh token has expired, but normally completes silently).
+
+## Token cache — current state
+
+> The previous `feature_entra_id_login.md` referenced a `safeStorage`
+> migration. **That migration applies only to app-level secrets**
+> (Discord bot token, YouTube refresh token, OBS password) which are
+> stored via `configService.saveSecure(...)`. The **MSAL token cache
+> itself is still plain-text JSON** at
+> `{userData}/msal-cache.json`. See `cache-plugin.ts:8..42`.
+
+| Secret class | Storage | File |
+|---|---|---|
+| MSAL access/refresh/id tokens | **plain JSON** | `{userData}/msal-cache.json` |
+| Discord bot token | safeStorage (`enc:` prefix) or `plain:` fallback | electron-store at `secure.discord.token` |
+| YouTube client secret | safeStorage / fallback | electron-store at `secure.youtube.clientSecret` |
+| YouTube refresh token | safeStorage / fallback | electron-store at `secure.youtube.refreshToken` |
+| OBS password | safeStorage / fallback | electron-store at `secure.obs.password` (legacy: also in plain `obs.password`) |
+
+This is a known gap. Migrating the MSAL cache to `safeStorage`
+requires writing a custom serialiser inside `cache-plugin.ts` that
+encrypts on `afterCacheAccess` and decrypts on `beforeCacheAccess`, and
+gracefully migrating any existing plain-JSON cache on first launch.
+See `security_design.md` for the broader plan.
+
+## What `safeStorage` does
+
+`safeStorage` wraps the OS keychain on macOS, DPAPI on Windows, and
+libsecret on Linux. On Linux without libsecret, `isEncryptionAvailable()`
+returns `false` and `configService.saveSecure` falls back to a `plain:`
+prefix in electron-store — this is intentional for dev environments,
+but production Linux builds should ensure libsecret is installed.
+
+The encrypted blob is base64-encoded with a leading `enc:` marker
+(`saveSecure`); the prefix tells `getSecure` whether to base64-decode
+and decrypt or just strip a `plain:` prefix.
+
+## Telemetry
+
+`AuthService.login` tracks two Application Insights events:
+
+- `Auth.LoginAttempt { hadAccount }` — fired before silent acquisition.
+- `Auth.LoginSuccess { username, tenantId }` — fired after a
+  successful interactive login.
+
+No telemetry is emitted for silent token acquisitions (would be too
+chatty). The `username` is the operator's UPN (e.g. `alice@example.com`);
+this is captured as a custom dimension and is subject to the
+organisation's Application Insights retention policy.
+
+## Logout
+
+`auth:logout`:
+
+1. Call `pca.getTokenCache().removeAccount(account)` for the cached account.
+2. Clear `safeStorage`-backed Race Control cookies if any (none today).
+3. The plain `msal-cache.json` is left on disk; the next
+   `acquireTokenSilent` will not find any usable refresh token and
+   will error out, requiring an interactive login.
+
+The renderer then transitions back to the splash screen.
+
+## Common errors
+
+| Symptom | Cause |
+|---|---|
+| `AADSTS65001: User has not consented` | First-time login without admin consent for the app registration. Operator must accept the consent prompt. |
+| `InteractionRequiredAuthError` on every call | Refresh token expired (default 90 days of inactivity). User must log in again. |
+| `getAccessToken()` returns `null` | Either no account cached, or interactive flow was cancelled. Renderer should treat as "logged out". |
+
+## Test harness
+
+There is no E2E test for the auth flow (it depends on Microsoft Entra
+ID). Unit tests in `src/main/__tests__/auth-service.test.ts` mock
+`@azure/msal-node` to verify the silent → interactive fallback and
+the telemetry calls.

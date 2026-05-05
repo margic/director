@@ -1,77 +1,132 @@
-# Project Overview: Race Control
+# Director — Overview
 
-Race Control is the central command center for Sim RaceCenter’s broadcast operations. It is a web-based portal designed to professionalize and streamline the complex configuration required to produce live sim racing events.
+> STATUS: IMPLEMENTED. Reflects code as of `src/main/main.ts`.
 
-## The Problem
+## What Director is
 
-Currently, managing a live broadcast involves tracking critical data—which driver is in which simulator rig, which camera feeds (OBS scenes) correspond to them, and the details of the current race session—across spreadsheets, mental notes, or ad-hoc messages. This manual process is error-prone and stressful, especially during the high-pressure environment of a live race start.
+Director is an **Electron desktop application** that runs on a Sim
+RaceCenter PC or simulator rig. It bridges:
 
-## The Solution
+- the local **iRacing simulator** (via shared-memory FFI),
+- local **broadcast tooling** (OBS via OBS-WebSocket, Discord voice for
+  TTS),
+- the **Race Control cloud** (https://simracecenter.com), which provides
+  AI-generated broadcast sequences and session orchestration.
 
-Race Control provides a single source of truth for all broadcast configuration data. It allows the production team to define, manage, and associate Drivers, Rigs, OBS Scenes, and Race Sessions in a structured, reliable system.
+It has two operating modes:
 
-## Key Capabilities
+- **Director Loop** — the cloud is in charge: every few seconds the
+  Director polls Race Control for the next broadcast sequence to
+  execute, sending live telemetry as `RaceContext`. Sequences come
+  back as `PortableSequence` JSON and are executed locally.
+- **Control Deck** — the operator is in charge: sequences are
+  triggered manually from the Sequence Library UI or imported from
+  files.
 
-*   **Unified Configuration:** A centralized dashboard to manage the roster of drivers, the physical simulator rigs available, and the broadcast scenes associated with them.
-*   **Session Management:** Tools to plan and initiate specific race sessions, ensuring that the telemetry systems know exactly who is racing and where.
-*   **The "Broadcast Agent":** An intelligent, conversational assistant integrated into the UI. It guides the Broadcast Director through complex setup flows (like "onboarding a new driver" or "starting a multi-class race"), reducing cognitive load and manual data entry.
-*   **Bridge to Production:** Acts as the configuration authority for our telemetry systems. When the race starts, our low-latency broadcasting tools fetch their setup instructions directly from Race Control, ensuring the on-screen graphics and camera feeds match reality.
+Both modes use the **same execution pipeline** (`SequenceScheduler` →
+`SequenceExecutor` → `ExtensionHost`).
 
-## Target Audience
+## Two-tier product model
 
-*   **Broadcast Director:** The primary user. They use the tool to ensure the show is set up correctly and to make quick adjustments during an event.
-*   **Race Organizer:** Uses the system to prepare entry lists and assignments days before the event.
-*   **Technical Operator:** Relies on the system to ensure the underlying hardware and software (OBS, iRacing) are synced with the broadcast plan.
+| Tier | What it is | Where it lives |
+|---|---|---|
+| **Open-source core** | Electron app, extension host, executor, OBS/iRacing/Discord/YouTube extensions, overlay server | This repo |
+| **Premium cloud intelligence** | AI Planner + Executor models, sequence template generation, session orchestration, identity & roster | Race Control cloud (`margic/racecontrol`, separate repo) |
 
-## Technical Foundation
+The core can run standalone in Control Deck mode. The Director Loop
+requires a Race Control account and an active session.
 
-The platform is built for reliability and modern usability:
+## Key actors and where they live
 
-*   **Interface:** A responsive, professional web application built with Next.js and Tailwind UI Catalyst, ensuring a consistent and accessible user experience.
-*   **Backend:** Powered by Azure Static Web Apps and Azure Cosmos DB, providing a scalable, serverless architecture that is low-maintenance and highly available.
-*   **Security:** Enterprise-grade authentication via Microsoft Entra ID ensures only authorized staff can modify broadcast configurations.
+```
+┌────────────────────────────────── Renderer (React) ──────────────────────────────────┐
+│  src/renderer/  — pages, components, contexts (PageHeader, Telemetry)                │
+│  Talks to main only via window.electronAPI (see api-contextbridge.md).               │
+└──────────────────────────────────────┬───────────────────────────────────────────────┘
+                                       │  IPC (contextBridge → ipcRenderer.invoke)
+┌──────────────────────────────────────▼─── Main process ──────────────────────────────┐
+│  AuthService            – MSAL/Entra ID, token cache (safeStorage)                   │
+│  ConfigService          – electron-store + safeStorage for secrets                   │
+│  SessionManager         – session discovery, selection, check-in, wrap               │
+│  DirectorOrchestrator   – mode FSM: stopped ↔ manual ↔ auto                          │
+│  CloudPoller            – polls /sequences/next while in auto mode                   │
+│  SequenceScheduler      – queue + history, $var() resolution, priority preemption    │
+│  SequenceExecutor       – dispatches each step (built-ins or extension intent)       │
+│  SequenceLibraryService – built-in / cloud / custom sequence storage                 │
+│  ExtensionHostService   – owns the utility process, two-tier registry, event bus     │
+│  OverlayBus + OverlayServer – HTTP+WS server (port 9100) for OBS Browser Source      │
+│  ObsService, DiscordService, TelemetryService, RaceAnalyzer                          │
+└──────────────────────────────────────┬───────────────────────────────────────────────┘
+                                       │  utilityProcess + MessageChannelMain
+┌──────────────────────────────────────▼─── Extension Host (utility process) ──────────┐
+│  Loads built-in extensions from src/extensions/{iracing,obs,discord,youtube}         │
+│  Each extension calls back to main via the `invoke` bridge for privileged ops.       │
+└──────────────────────────────────────────────────────────────────────────────────────┘
+```
 
----
+## The Director Loop, in one paragraph
 
-# The Director App
+When the operator selects a session and transitions to **auto** mode,
+`DirectorOrchestrator` starts a `CloudPoller`. The poller POSTs
+`POST /api/director/v1/sessions/{id}/sequences/next` with the current
+`RaceContext` (built from the latest `iracing.raceStateChanged` event)
+and the active broadcast intents. Race Control replies with either
+`200` + a `PortableSequence`, `204` (try again later), or `410` (the
+session has ended). On `200`, the poller hands the sequence to
+`SequenceScheduler`, which resolves `$var()` placeholders and walks the
+steps via `SequenceExecutor`. `system.wait` and `system.log` execute
+in-process; everything else is dispatched as an intent into the
+extension host, where the appropriate extension (OBS, iRacing, Discord,
+…) carries it out. Progress is mirrored to the renderer over the
+`sequence:progress` IPC channel and to OBS Browser Source over the
+overlay WebSocket.
 
-The Director App is the on-premise Broadcast Orchestrator for Sim RaceCenter. It runs locally on the race center PC, acting as the bridge between the physical racing environment, broadcast software, and the race control strategies.
+## App startup sequence
 
-## Product Philosophy: "The Racing Is Real"
+The full sequence is in `src/main/main.ts:79..344`. In short:
 
-The Director App is an **Open Source** automation platform. Our philosophy is simple:
-*   **The Orchestrator is Free:** The core ability to connect integrations (OBS, iRacing, Discord) and trigger sequences manually is open source.
-*   **The Intelligence is Premium:** Our cloud-based "Race Control" acts as an expert AI director that automatically triggers these sequences for you.
+1. `app.on('ready')` fires.
+2. `telemetryService.initialize()` — Application Insights.
+3. `AuthService` is constructed; `discordService` is given a reference.
+4. `SessionManager`, `ObsService`, `IntentRegistry`,
+   `CapabilityCatalog`, `ExtensionEventBus`, `ViewRegistry`,
+   `OverlayBus` are instantiated.
+5. `OverlayServer` starts on `configService.getAny('overlay.port') || 9100`.
+6. `ExtensionHostService` is instantiated with the two-tier registry
+   and the overlay bus.
+7. `registerInvokeHandler('discordPlayTts', …)` is registered so the
+   `director-discord` extension can delegate to the singleton
+   `DiscordService`.
+8. `SequenceExecutor`, `SequenceLibraryService`, `SequenceScheduler`
+   are instantiated in that order (the executor needs the library; the
+   scheduler needs the executor).
+9. `DirectorOrchestrator` is instantiated.
+10. `SessionManager` is wired with three callbacks:
+    - `setCapabilitiesBuilder` — assembles `DirectorCapabilities` from
+      the catalog + cached event payloads (scenes, camera groups,
+      drivers) when a check-in is sent.
+    - `setLocalSequencesGetter` — supplies the operator's local
+      sequence library (max 50) for Planner training.
+    - `setRaceContextGetter` — bridges to
+      `directorOrchestrator.getRaceContext()` so check-in includes a
+      live `raceContext` snapshot.
+11. `EventMapper` is instantiated (binds extension events to
+    sequences).
+12. `extensionHost.start()` is invoked asynchronously. When it
+    resolves, the sequence library is initialised, then OBS and
+    Discord auto-connect (if their extension is enabled and
+    `autoConnect` is set in config).
+13. All `ipcMain.handle` channels are registered.
+14. `createWindow()` opens the main `BrowserWindow` (preload =
+    `dist-electron/main/preload.js`, contextIsolation on, nodeIntegration off).
 
-## Core Responsibilities
+On quit (`app.on('will-quit')`), the current session is auto-wrapped
+(`sessionManager.wrapSession('app-quit')`), the overlay server is
+stopped, and the extension host is stopped.
 
-The Director App operates in two modes:
+## Where to look next
 
-### 1. Manual Mode (The "Control Deck")
-The app provides a "Stream Deck" style interface allowing local operators to manually trigger complex broadcast sequences.
-*   *Example:* Operator presses "Safety Car" -> App mutes drivers, switches OBS to Track Map, and plays audio cue.
-
-### 2. Auto Mode (The "Director Loop")
-The app connects to Sim RaceCenter Cloud to receive real-time commands from our AI Broadcast Agent.
-*   *Example:* AI detects a crash -> AI commands Director to run "Replay Sequence".
-
-## Architecture: The Extension System
-
-The Director is built as a modular host for **Extensions**.
-*   **Core:** Handles the execution loop, authentication, and the sequence engine.
-*   **Extensions:** All device integrations (OBS, Discord, Philips Hue, iRacing) are plugins. This allows the community to build and share new integrations without waiting for core updates.
-    *   **iRacing Data API:** For retrieving series results and session info.
-*   **Local Hardware Control:**
-    *   **OBS Studio:** Connects via WebSocket to switch scenes, toggle sources, and manage the broadcast stream.
-    *   **iRacing Simulator:** Uses Windows Events to control in-game cameras for replays and live cuts.
-*   **Sequence Execution:** Orchestrates complex timing sequences (e.g., "Switch to Replay Scene" -> "Trigger iRacing Replay" -> "Wait 10s" -> "Switch to Live"). It manages the complexity of asynchronous events (chat) versus synchronous commands (voice/OBS).
-
-## Technical Foundation
-
-The Director App is built on a modern, cross-platform desktop stack designed for reliability and ease of development:
-
-*   **Runtime:** **Node.js** and **Electron**. This allows deep integration with the host operating system (Windows) while maintaining a web-standard codebase.
-*   **Frontend:** React-based UI for configuration and status monitoring.
-*   **Architecture:**
-    *   **Main Process:** Handles low-level integrations (OBS WebSocket, Windows Events, Token Storage).
-    *   **Renderer Process:** Provides the user interface for authentication flows and connection status.
+- For the FSM and module composition: **`architecture-orchestrator.md`**.
+- For the renderer ↔ main API surface: **`api-contextbridge.md`**.
+- For the data shapes that flow over the wire: **`data-models.md`**.
+- For how extensions plug in: **`feature_extension_system.md`**.
