@@ -44,6 +44,10 @@
     "linux": {
       "target": "AppImage",
       "icon": "build/icons"
+    },
+    "publish": {
+      "provider": "github",
+      "releaseType": "release"
     }
   },
   "repository": {
