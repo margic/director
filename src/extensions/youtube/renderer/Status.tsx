@@ -16,12 +16,13 @@ export const YouTubeStatus = () => {
         monitoring: false
     });
     const [extensionStatus, setExtensionStatus] = useState<'active' | 'inactive'>('inactive');
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         // Listen for extension events
         if (window.electronAPI?.extensions?.onExtensionEvent) {
             const unsubscribe = window.electronAPI.extensions.onExtensionEvent((data: any) => {
-                if (data.extensionId === 'youtube') {
+                if (data.extensionId === 'director-youtube') {
                     if (data.eventName === 'youtube.stats') {
                         setStats(prev => ({
                             ...prev,
@@ -34,6 +35,10 @@ export const YouTubeStatus = () => {
                             ...prev,
                             monitoring: data.payload.monitoring || false
                         }));
+                        if (data.payload.monitoring) setError(null);
+                    }
+                    if (data.eventName === 'youtube.error') {
+                        setError(data.payload.message || 'An unknown error occurred.');
                     }
                 }
             });
@@ -47,7 +52,7 @@ export const YouTubeStatus = () => {
         const checkStatus = async () => {
             if (window.electronAPI?.extensions?.getStatus) {
                 const statuses = await window.electronAPI.extensions.getStatus();
-                setExtensionStatus(statuses['youtube']?.active ? 'active' : 'inactive');
+                setExtensionStatus(statuses['director-youtube']?.active ? 'active' : 'inactive');
             }
         };
 
@@ -57,17 +62,18 @@ export const YouTubeStatus = () => {
     }, []);
 
     const handleStartMonitoring = async () => {
+        setError(null);
         try {
-            await window.electronAPI.extensions.executeIntent('youtube.startMonitoring', {});
-        } catch (error) {
-            console.error('Failed to start monitoring:', error);
-            alert('Failed to start monitoring. Check your authentication.');
+            await window.electronAPI.extensions.executeIntent('youtube.startMonitor', {});
+        } catch (err) {
+            console.error('Failed to start monitoring:', err);
+            setError('Failed to start monitoring. Check your authentication.');
         }
     };
 
     const handleStopMonitoring = async () => {
         try {
-            await window.electronAPI.extensions.executeIntent('youtube.stopMonitoring', {});
+            await window.electronAPI.extensions.executeIntent('youtube.stopMonitor', {});
         } catch (error) {
             console.error('Failed to stop monitoring:', error);
         }
@@ -108,10 +114,10 @@ export const YouTubeStatus = () => {
                 <CardHeader>
                     <CardTitle className="text-muted-foreground text-sm uppercase font-rajdhani tracking-widest flex items-center gap-2">
                         <MessageSquare className="w-4 h-4" />
-                        Broadcast Monitor
+                        Chat Monitor
                     </CardTitle>
                     <CardDescription>
-                        Control telemetry polling and check live status
+                        Start monitoring to read live chat from your active broadcast
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
@@ -174,8 +180,23 @@ export const YouTubeStatus = () => {
                 </Card>
             </div>
 
+            {/* Error Notice */}
+            {error && (
+                <Card className="bg-card border-border border-l-4 border-l-destructive">
+                    <CardContent className="pt-6">
+                        <div className="flex gap-3">
+                            <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+                            <div>
+                                <h4 className="font-bold text-sm">Monitor Error</h4>
+                                <p className="text-xs text-muted-foreground mt-1">{error}</p>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
+
             {/* Info Notice */}
-            {!stats.monitoring && extensionStatus === 'active' && (
+            {!stats.monitoring && !error && extensionStatus === 'active' && (
                 <Card className="bg-card border-border border-l-4 border-l-yellow-500">
                     <CardContent className="pt-6">
                         <div className="flex gap-3">

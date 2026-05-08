@@ -31,6 +31,18 @@
         "title": "Stop Chat Monitoring",
         "category": "operational",
         "description": "Stops polling YouTube API."
+      },
+      {
+        "intent": "director.youtube.login",
+        "title": "Sign in to YouTube",
+        "category": "auth",
+        "description": "Starts the OAuth flow for YouTube."
+      },
+      {
+        "intent": "director.youtube.logout",
+        "title": "Sign out of YouTube",
+        "category": "auth",
+        "description": "Clears stored YouTube credentials."
       }
     ],
     "commands": [

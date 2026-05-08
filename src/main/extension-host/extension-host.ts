@@ -66,9 +66,14 @@ class ScraperManager {
     this.scrapers.set(id, { window: win, extensionId });
     
     await win.loadURL(url);
-    
-    // Inject custom script if provided?
-    // win.webContents.executeJavaScript(script);
+
+    if (script) {
+      try {
+        await win.webContents.executeJavaScript(script);
+      } catch (err: any) {
+        console.error(`[ScraperManager] Failed to inject script for ${extensionId}:`, err.message);
+      }
+    }
     
     return id;
   }
@@ -587,7 +592,18 @@ export class ExtensionHostService {
         console.log(`[Ext:${msg.payload.extensionId}] [${msg.payload.level.toUpperCase()}] ${msg.payload.message}`);
         break;
       case 'REGISTER_INTENT':
-        // Optional verification
+        // Dynamically register intents declared at runtime (e.g. login/logout handlers
+        // that aren't in the manifest's static intents array)
+        if (msg.payload?.intent && msg.payload?.extensionId) {
+          const alreadyRegistered = this.intentRegistry.getIntent(msg.payload.intent);
+          if (!alreadyRegistered) {
+            this.intentRegistry.registerIntents(msg.payload.extensionId, [{
+              intent: msg.payload.intent,
+              title: msg.payload.intent,
+              category: 'operational',
+            }]);
+          }
+        }
         break;
       case 'REGISTER_COMMAND':
         const cmdPayload = msg.payload;

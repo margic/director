@@ -416,6 +416,9 @@ export class PublisherOrchestrator {
    */
   tickHeartbeat(): void {
     if (!this.running) return;
+    // No session bound — heartbeat would carry an empty raceSessionId and be
+    // meaningless to Race Control. Skip until bindSession() fires.
+    if (!this.raceSessionId) return;
     const events = this.lifecycleDetector.checkHeartbeat(this.lifecycleCtx());
     this.dispatchLifecycleEvents(events);
   }
