@@ -46,13 +46,51 @@ let sequenceExecutor: SequenceExecutor;
 let overlayBus: OverlayBus;
 let overlayServer: OverlayServer;
 
+let saveWindowStateTimer: ReturnType<typeof setTimeout> | null = null;
 
+interface WindowState {
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  zoomFactor?: number;
+}
+
+const DEFAULT_WINDOW_WIDTH = 1280;
+const DEFAULT_WINDOW_HEIGHT = 800;
+
+function getWindowState(): WindowState {
+  const saved = configService.getAny('windowState') as WindowState | undefined;
+  return {
+    width: saved?.width ?? DEFAULT_WINDOW_WIDTH,
+    height: saved?.height ?? DEFAULT_WINDOW_HEIGHT,
+    x: saved?.x,
+    y: saved?.y,
+    zoomFactor: saved?.zoomFactor ?? 1.0,
+  };
+}
+
+function saveWindowState(win: BrowserWindow): void {
+  const bounds = win.getBounds();
+  const zoomFactor = win.webContents.getZoomFactor();
+  configService.setAny('windowState', {
+    width: bounds.width,
+    height: bounds.height,
+    x: bounds.x,
+    y: bounds.y,
+    zoomFactor,
+  });
+}
 
 const createWindow = () => {
+  const windowState = getWindowState();
+
   // Create the browser window.
   mainWindow = new BrowserWindow({
-    width: 800,
-    height: 600,
+    width: windowState.width,
+    height: windowState.height,
+    x: windowState.x,
+    y: windowState.y,
     backgroundColor: '#090B10', // Brand background
     icon: path.join(__dirname, '../icon.png'),
     webPreferences: {
@@ -60,6 +98,37 @@ const createWindow = () => {
       nodeIntegration: false,
       contextIsolation: true,
     },
+  });
+
+  // Debounce-save bounds to avoid excessive I/O during continuous resize/move.
+  const scheduleSaveWindowState = (win: BrowserWindow) => {
+    if (saveWindowStateTimer) clearTimeout(saveWindowStateTimer);
+    saveWindowStateTimer = setTimeout(() => {
+      saveWindowState(win);
+      saveWindowStateTimer = null;
+    }, 500);
+  };
+
+  mainWindow.on('resize', () => { if (mainWindow) scheduleSaveWindowState(mainWindow); });
+  mainWindow.on('move', () => { if (mainWindow) scheduleSaveWindowState(mainWindow); });
+
+  // Flush any pending debounce and persist zoom factor just before the window is destroyed.
+  mainWindow.on('close', () => {
+    if (saveWindowStateTimer) {
+      clearTimeout(saveWindowStateTimer);
+      saveWindowStateTimer = null;
+    }
+    if (mainWindow) saveWindowState(mainWindow);
+  });
+
+  // Restore the most recently saved zoom factor after each page load.
+  // Re-read from configService so that any mid-session saves are honoured.
+  mainWindow.webContents.on('did-finish-load', () => {
+    if (mainWindow) {
+      const state = configService.getAny('windowState') as WindowState | undefined;
+      const zoomFactor = state?.zoomFactor ?? 1.0;
+      mainWindow.webContents.setZoomFactor(zoomFactor);
+    }
   });
 
   // In production, load the index.html of the app.
