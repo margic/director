@@ -328,10 +328,33 @@ export class SessionManager extends EventEmitter {
     const capabilities = this.buildCapabilities?.() ?? { intents: [], connections: {} };
     const directorId = configService.getOrCreateDirectorId();
 
+    // Always include raceContext — live spec requires it (issue #142).
+    // When iRacing is not yet running, send a disconnected snapshot so the Planner
+    // generates a full template set; the PATCH /checkin triggered on iRacing connect
+    // will carry updated capabilities so the Planner re-plans with real session data.
+    let raceContextValue: import('./director-types').RaceContext | null = null;
+    if (this.getRaceContext) {
+      try {
+        raceContextValue = this.getRaceContext();
+      } catch (err) {
+        console.warn('[SessionManager] Failed to get raceContext for check-in:', err);
+      }
+    }
+    const raceContext: import('./director-types').RaceContext = raceContextValue ?? {
+      sessionType: '',
+      sessionFlags: 'disconnected',
+      lapsRemain: -1,
+      carCount: 0,
+      drivers: [],
+      contextTimestamp: new Date().toISOString(),
+    };
+    console.log(`[SessionManager] Including raceContext in check-in (sessionType=${raceContext.sessionType || '(disconnected)'})`);
+
     const body: SessionCheckinRequest = {
       directorId,
       version: app.getVersion(),
       capabilities,
+      raceContext,
     };
 
     // Include local sequences for Planner training
@@ -344,19 +367,6 @@ export class SessionManager extends EventEmitter {
         }
       } catch (err) {
         console.warn('[SessionManager] Failed to gather local sequences:', err);
-      }
-    }
-
-    // Include live race context snapshot for Planner phase-weighting (issue #114)
-    if (this.getRaceContext) {
-      try {
-        const raceContext = this.getRaceContext();
-        if (raceContext) {
-          body.raceContext = raceContext;
-          console.log(`[SessionManager] Including raceContext in check-in (sessionType=${raceContext.sessionType})`);
-        }
-      } catch (err) {
-        console.warn('[SessionManager] Failed to get raceContext for check-in:', err);
       }
     }
 
@@ -516,6 +526,26 @@ export class SessionManager extends EventEmitter {
     }
 
     const capabilities = this.buildCapabilities?.() ?? { intents: [], connections: {} };
+
+    // Include raceContext when available so the Planner can scope re-generated
+    // templates to the correct session type (issue #142 / racecontrol#319).
+    // The PATCH spec now accepts raceContext as optional; if omitted, Race Control
+    // falls back to the raceContext captured at original POST check-in.
+    let raceContext: import('./director-types').RaceContext | undefined;
+    if (this.getRaceContext) {
+      try {
+        raceContext = this.getRaceContext() ?? undefined;
+      } catch {
+        // Non-fatal — PATCH without raceContext is valid; RC uses POST-time fallback.
+      }
+    }
+
+    const patchBody: Record<string, unknown> = { capabilities };
+    if (raceContext) {
+      patchBody.raceContext = raceContext;
+      console.log(`[SessionManager] Refreshing check-in with raceContext (sessionType=${raceContext.sessionType})`);
+    }
+
     const url = `${apiConfig.baseUrl}${apiConfig.endpoints.refreshCheckin(raceSessionId)}`;
 
     try {
@@ -527,7 +557,7 @@ export class SessionManager extends EventEmitter {
           'Content-Type': 'application/json',
           'X-Checkin-Id': this.checkinId,
         },
-        body: JSON.stringify({ capabilities }),
+        body: JSON.stringify(patchBody),
       });
 
       const duration = Date.now() - startTime;

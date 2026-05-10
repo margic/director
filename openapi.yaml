@@ -393,10 +393,22 @@ components:
           maxItems: 50
           items:
             $ref: '#/components/schemas/PortableSequence'
+        raceContext:
+          $ref: '#/components/schemas/RaceContext'
+          description: |
+            Live race context snapshot from the Director's simulator at check-in time.
+            The AI Planner uses this to generate phase-appropriate templates:
+            - `sessionType` suppresses irrelevant categories (e.g. no opening/closing
+              templates during Practice or Qualify). Optional — if omitted or empty
+              (e.g. iRacing not yet running), the Planner generates a full template set.
+            - `cautionType` controls whether caution/pace-car templates are generated
+            - `totalLaps` and `lapsRemain` tune lap-phase weighting (early / mid / late race)
+            - `trackName` and `seriesName` personalise template names and descriptions
       required:
         - directorId
         - version
         - capabilities
+        - raceContext
     SessionCheckinResponse:
       type: object
       properties:
@@ -969,6 +981,96 @@ paths:
             Another Director owns this session.
         '404':
           description: No active check-in exists for this session.
+    patch:
+      summary: Refresh Check-In (Update Capabilities)
+      description: >
+        Updates the Director's capabilities on an active check-in and triggers
+        a template re-plan. Use this when the Director gains new features,
+        connects new hardware, updates extensions, or wants to force a refresh
+        of the AI-generated sequence templates mid-session — without wrapping
+        and re-checking-in.
+
+        The check-in TTL is refreshed. Existing templates are replaced by the
+        Planner using the updated capabilities. The current templates continue
+        serving requests while the re-plan runs in the background.
+
+        When `raceContext` is supplied, the Planner uses it to scope the
+        re-generated templates to the correct session type (Practice / Qualify /
+        Race). If omitted, the Planner falls back to the `raceContext` captured
+        at the original POST check-in. The Director **should** include
+        `raceContext` whenever it has live iRacing session data — this enables
+        session-type-scoped re-plans when iRacing connects after check-in.
+      tags:
+        - Director
+      parameters:
+        - in: path
+          name: raceSessionId
+          schema:
+            type: string
+            format: uuid
+          required: true
+          description: The ID of the active race session.
+        - in: header
+          name: X-Checkin-Id
+          schema:
+            type: string
+          required: true
+          description: The check-in ID received from the POST checkin response.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - capabilities
+              properties:
+                capabilities:
+                  $ref: '#/components/schemas/DirectorCapabilities'
+                raceContext:
+                  $ref: '#/components/schemas/RaceContext'
+                  description: >
+                    Optional live race context at refresh time. When provided,
+                    the Planner uses it to scope the re-generated templates to
+                    the correct session type (Practice / Qualify / Race).
+                    If omitted, the Planner re-plans using the raceContext
+                    captured at the original POST check-in.
+                sequences:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/PortableSequence'
+                  description: >
+                    Optional updated local sequence library. If provided, these
+                    are used as training examples for the re-plan.
+      responses:
+        '200':
+          description: Capabilities updated and template re-plan triggered.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [refreshed]
+                  checkinId:
+                    type: string
+                  sessionConfig:
+                    $ref: '#/components/schemas/SessionOperationalConfig'
+                  warnings:
+                    type: array
+                    items:
+                      type: string
+        '400':
+          description: Invalid request body or missing X-Checkin-Id.
+        '401':
+          description: Not authenticated.
+        '403':
+          description: >
+            RaceDirector role required, or X-Checkin-Id does not match
+            the active check-in.
+        '404':
+          description: No active check-in or session not found.
   /api/director/v1/sessions:
     get:
       summary: List Active Sessions for Director
