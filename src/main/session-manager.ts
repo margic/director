@@ -328,10 +328,33 @@ export class SessionManager extends EventEmitter {
     const capabilities = this.buildCapabilities?.() ?? { intents: [], connections: {} };
     const directorId = configService.getOrCreateDirectorId();
 
+    // Always include raceContext — live spec requires it (issue #142).
+    // When iRacing is not yet running, send a disconnected snapshot so the Planner
+    // generates a full template set; the PATCH /checkin triggered on iRacing connect
+    // will carry updated capabilities so the Planner re-plans with real session data.
+    let raceContextValue: import('./director-types').RaceContext | null = null;
+    if (this.getRaceContext) {
+      try {
+        raceContextValue = this.getRaceContext();
+      } catch (err) {
+        console.warn('[SessionManager] Failed to get raceContext for check-in:', err);
+      }
+    }
+    const raceContext: import('./director-types').RaceContext = raceContextValue ?? {
+      sessionType: '',
+      sessionFlags: 'disconnected',
+      lapsRemain: -1,
+      carCount: 0,
+      drivers: [],
+      contextTimestamp: new Date().toISOString(),
+    };
+    console.log(`[SessionManager] Including raceContext in check-in (sessionType=${raceContext.sessionType || '(disconnected)'})`);
+
     const body: SessionCheckinRequest = {
       directorId,
       version: app.getVersion(),
       capabilities,
+      raceContext,
     };
 
     // Include local sequences for Planner training
@@ -345,30 +368,6 @@ export class SessionManager extends EventEmitter {
       } catch (err) {
         console.warn('[SessionManager] Failed to gather local sequences:', err);
       }
-    }
-
-    // Always include raceContext — live spec requires it (issue #142).
-    // When iRacing is not yet running, send a disconnected snapshot so the Planner
-    // generates a full template set; the PATCH /checkin triggered on iRacing connect
-    // will carry updated capabilities so the Planner re-plans with real session data.
-    {
-      let raceContext: import('./director-types').RaceContext | null = null;
-      if (this.getRaceContext) {
-        try {
-          raceContext = this.getRaceContext();
-        } catch (err) {
-          console.warn('[SessionManager] Failed to get raceContext for check-in:', err);
-        }
-      }
-      body.raceContext = raceContext ?? {
-        sessionType: '',
-        sessionFlags: 'disconnected',
-        lapsRemain: -1,
-        carCount: 0,
-        drivers: [],
-        contextTimestamp: new Date().toISOString(),
-      };
-      console.log(`[SessionManager] Including raceContext in check-in (sessionType=${body.raceContext.sessionType || '(disconnected)'})`);
     }
 
     const url = `${apiConfig.baseUrl}${apiConfig.endpoints.checkin(raceSessionId)}`;
