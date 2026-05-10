@@ -288,8 +288,13 @@ export interface SessionCheckinRequest {
   capabilities: DirectorCapabilities;
   /** Optional: local sequence library for Planner training (max 50, 100KB) */
   sequences?: PortableSequence[];
-  /** Optional: live simulator snapshot at check-in time (issue #114). Enables Planner phase-weighting. */
-  raceContext?: RaceContext;
+  /**
+   * Live simulator snapshot at check-in time. Required by live spec (issue #142).
+   * Send sessionType='' / sessionFlags='disconnected' when iRacing is not yet running —
+   * the Planner will generate a full template set and re-plan when PATCH /checkin is called
+   * after iRacing connects.
+   */
+  raceContext: RaceContext;
 }
 
 export interface SessionCheckinResponse {
