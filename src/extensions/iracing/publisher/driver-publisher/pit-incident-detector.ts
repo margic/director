@@ -54,7 +54,7 @@ export function detectPitAndIncidents(
   const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
 
   const playerCarIdx = ctx.playerCarIdx;
-  if (playerCarIdx === undefined || playerCarIdx < 0) {
+  if (playerCarIdx < 0) {
     if (!unsetPlayerCarIdxWarned) {
       unsetPlayerCarIdxWarned = true;
       // eslint-disable-next-line no-console

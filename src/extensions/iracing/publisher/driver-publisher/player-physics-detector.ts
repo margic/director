@@ -92,7 +92,7 @@ export function detectPlayerPhysics(
   if (prev === null) return [];
 
   const playerCarIdx = ctx.playerCarIdx;
-  if (playerCarIdx === undefined || playerCarIdx < 0) {
+  if (playerCarIdx < 0) {
     if (!unsetPlayerCarIdxWarned) {
       unsetPlayerCarIdxWarned = true;
       // eslint-disable-next-line no-console
