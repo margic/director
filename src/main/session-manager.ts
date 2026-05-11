@@ -325,7 +325,7 @@ export class SessionManager extends EventEmitter {
       return this.getState();
     }
 
-    const capabilities = this.buildCapabilities?.() ?? { intents: [], connections: {} };
+    const capabilities = this.buildCapabilities?.() ?? { extensions: [], connections: {} };
     const directorId = configService.getOrCreateDirectorId();
 
     // Always include raceContext — live spec requires it (issue #142).
@@ -525,7 +525,7 @@ export class SessionManager extends EventEmitter {
       return this.getState();
     }
 
-    const capabilities = this.buildCapabilities?.() ?? { intents: [], connections: {} };
+    const capabilities = this.buildCapabilities?.() ?? { extensions: [], connections: {} };
 
     // Include raceContext when available so the Planner can scope re-generated
     // templates to the correct session type (issue #142 / racecontrol#319).
