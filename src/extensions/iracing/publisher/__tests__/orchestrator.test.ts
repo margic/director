@@ -863,6 +863,8 @@ describe('migrateConfig: publisher.scope migration (DIR-4)', () => {
     orch.activate();
     // saveSetting should NOT be called for publisher.scope since it is already set
     expect(director.savedSettings['publisher.scope']).toBeUndefined();
+    // The original scope value in settings is preserved
+    expect(director.settings['publisher.scope']).toBe('both');
     // Legacy flag should still be deleted
     expect(director.deletedSettings).toContain('publisher.driver.enabled');
   });
