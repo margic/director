@@ -66,10 +66,15 @@ export const SLOW_CAR_COOLDOWN_TICKS     = 1800;
 // Context
 // ---------------------------------------------------------------------------
 
+/** Module-level latch — log "playerCarIdx unset" warning at most once. */
+let unsetPlayerCarIdxWarned = false;
+
 export interface PlayerPhysicsDetectorContext {
   rigId: string;
   raceSessionId: string;
-  playerCarIdx?: number;
+  /** iRacing DriverInfo.DriverCarIdx — required: detectors are scoped to the
+   *  player car only (Issue: scope driver-rig detectors to playerCarIdx). */
+  playerCarIdx: number;
   /** Car number strings for SLOW_CAR_AHEAD targetCarNumber payload. */
   carNumberByCarIdx?: Map<number, string>;
 }
@@ -87,7 +92,14 @@ export function detectPlayerPhysics(
   if (prev === null) return [];
 
   const playerCarIdx = ctx.playerCarIdx;
-  if (playerCarIdx === undefined || playerCarIdx < 0) return [];
+  if (playerCarIdx < 0) {
+    if (!unsetPlayerCarIdxWarned) {
+      unsetPlayerCarIdxWarned = true;
+      // eslint-disable-next-line no-console
+      console.warn('[player-physics-detector] playerCarIdx unset; skipping frame');
+    }
+    return [];
+  }
 
   const events: PublisherEvent[] = [];
   const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };

@@ -255,6 +255,9 @@ describe('onTelemetryFrame — detector pipeline', () => {
   it('runs all detectors and forwards events to the transport', async () => {
     // PIT_ENTRY comes from the driver publisher; enable it.
     const { orch, director, batches } = makeActiveOrchestrator({ 'publisher.driver.enabled': true });
+    // Driver-rig scope: detectors are scoped to playerCarIdx — must set it
+    // before the player car is the one we transition.
+    orch.setSessionMetadata({ playerCarIdx: 0 });
 
     // Frame 1: baseline race state — no events expected from frame transitions
     const f1 = makeFrame({
@@ -281,6 +284,7 @@ describe('onTelemetryFrame — detector pipeline', () => {
   it('emits iracing.publisherEventEmitted once per detector event', () => {
     // INCIDENT_POINT comes from the driver publisher; enable it.
     const { orch, director } = makeActiveOrchestrator({ 'publisher.driver.enabled': true });
+    orch.setSessionMetadata({ playerCarIdx: 0 });
     const f1 = makeFrame({ playerIncidentCount: 0 });
     orch.onTelemetryFrame(f1);
     director.emittedEvents.length = 0;

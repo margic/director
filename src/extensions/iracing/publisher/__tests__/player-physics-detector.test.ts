@@ -56,8 +56,8 @@ describe('detectPlayerPhysics — guards', () => {
     expect(detect(null, makeFrame())).toEqual([]);
   });
 
-  it('returns no events when playerCarIdx is not provided', () => {
-    const ctx: PlayerPhysicsDetectorContext = { rigId: 'rig-01', raceSessionId: 'rs-1' };
+  it('returns no events when playerCarIdx is unset (sentinel -1)', () => {
+    const ctx: PlayerPhysicsDetectorContext = { rigId: 'rig-01', raceSessionId: 'rs-1', playerCarIdx: -1 };
     const f = makeFrame();
     expect(detect(f, cloneFrame(f), state, ctx)).toEqual([]);
   });
