@@ -12,6 +12,8 @@ import {
   withBackOnTrack,
   withIncidentPoint,
   scenarioB,
+  seedRoster,
+  ALL_CAR_INDICES,
 } from './frame-fixtures';
 
 // ---------------------------------------------------------------------------
@@ -30,7 +32,9 @@ function makeCtx(playerCarIdx = 0): PitIncidentDetectorContext {
 const CTX = makeCtx(0);
 
 function makeState() {
-  return createSessionState('session-abc', 1);
+  const s = createSessionState('session-abc', 1);
+  seedRoster(s, ALL_CAR_INDICES);
+  return s;
 }
 
 function detect(

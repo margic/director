@@ -8,6 +8,8 @@ import {
   withOvertake,
   withBattleGap,
   scenarioA,
+  seedRoster,
+  ALL_CAR_INDICES,
 } from './frame-fixtures';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +19,9 @@ import {
 const CTX = { rigId: 'rig-01', raceSessionId: 'session-abc' };
 
 function makeState() {
-  return createSessionState('session-abc', 1);
+  const s = createSessionState('session-abc', 1);
+  seedRoster(s, ALL_CAR_INDICES);
+  return s;
 }
 
 /** Prime state by running null→base to seed carState positions. */

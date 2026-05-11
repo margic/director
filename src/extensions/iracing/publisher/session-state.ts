@@ -318,18 +318,24 @@ export function battleKey(carA: number, carB: number): string {
 }
 
 /**
- * Returns a CarRefInput for the given carIdx, resolved from the session roster.
- * Falls back to `{ carIdx }` only (no carNumber/driverName) when the car is not
- * yet in the roster so that detectors always emit events (with partial metadata)
- * rather than silently dropping them before the roster is populated.
+ * Returns a PublisherCarRef for the given carIdx, resolved from the session roster.
+ * Returns `undefined` when the car is not yet in the roster so that callers
+ * can skip emitting events without class context.
  */
 export function carRefFromRoster(
   state: SessionState,
   carIdx: number,
-): { carIdx: number; carNumber?: string; driverName?: string } {
+): PublisherCarRef | undefined {
   const ref = state.knownRoster.get(carIdx);
-  if (!ref) return { carIdx };
-  return { carIdx, carNumber: ref.carNumber, driverName: ref.driverName };
+  if (!ref) return undefined;
+  return {
+    carIdx,
+    carNumber:         ref.carNumber,
+    driverName:        ref.driverName,
+    teamName:          ref.teamName,
+    carClassShortName: ref.carClassShortName,
+    carClassId:        ref.carClassId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +348,7 @@ export interface CarRefInput {
   driverName?: string;
   teamName?: string;
   carClassShortName?: string;
+  carClassId?: number;
 }
 
 export interface EventBuilderOptions {

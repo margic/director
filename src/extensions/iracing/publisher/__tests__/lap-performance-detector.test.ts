@@ -19,7 +19,7 @@ import {
 } from '../driver-publisher/lap-performance-driver';
 import { createSessionState, type SessionState } from '../session-state';
 import type { TelemetryFrame } from '../session-state';
-import { makeFrame, cloneFrame, CAR_COUNT } from './frame-fixtures';
+import { makeFrame, cloneFrame, CAR_COUNT, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
 
 // Combined context — covers both session and driver slices
 interface LapPerformanceContext extends SessionLapPerformanceContext {
@@ -61,6 +61,7 @@ let state: SessionState;
 
 beforeEach(() => {
   state = createSessionState('rs-1', 1);
+  seedRoster(state, ALL_CAR_INDICES);
 });
 
 /** Helper — bump completed lap count + set lap times on a per-car slot. */

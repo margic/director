@@ -4,6 +4,7 @@ import {
   getOrCreateCarState,
   battleKey,
   buildEvent,
+  carRefFromRoster,
   type TelemetryFrame,
 } from '../session-state';
 
@@ -203,5 +204,54 @@ describe('session state reset', () => {
     const stateB = createSessionState('session-1', 2);
     expect(stateB.carStates.size).toBe(0);
     expect(stateB.sessionBestLapTime).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// carRefFromRoster
+// ---------------------------------------------------------------------------
+
+describe('carRefFromRoster', () => {
+  it('returns undefined when carIdx is not in the roster', () => {
+    const state = createSessionState('rs-1', 1);
+    expect(carRefFromRoster(state, 0)).toBeUndefined();
+  });
+
+  it('returns a PublisherCarRef with all fields when carIdx is in the roster', () => {
+    const state = createSessionState('rs-1', 1);
+    state.knownRoster.set(5, {
+      carIdx: 5,
+      carNumber: '55',
+      driverName: 'Test Driver',
+      carClassShortName: 'GT3',
+      carClassId: 101,
+    });
+    const ref = carRefFromRoster(state, 5);
+    expect(ref).toBeDefined();
+    expect(ref!.carIdx).toBe(5);
+    expect(ref!.carNumber).toBe('55');
+    expect(ref!.driverName).toBe('Test Driver');
+    expect(ref!.carClassShortName).toBe('GT3');
+    expect(ref!.carClassId).toBe(101);
+  });
+
+  it('returns both carClassShortName and carClassId from roster entry', () => {
+    const state = createSessionState('rs-1', 1);
+    state.knownRoster.set(3, {
+      carIdx: 3,
+      carNumber: '3',
+      driverName: 'Driver Three',
+      carClassShortName: 'GTE',
+      carClassId: 202,
+    });
+    const ref = carRefFromRoster(state, 3)!;
+    expect(ref.carClassShortName).toBe('GTE');
+    expect(ref.carClassId).toBe(202);
+  });
+
+  it('returns undefined for a different carIdx not in the roster', () => {
+    const state = createSessionState('rs-1', 1);
+    state.knownRoster.set(2, { carIdx: 2, carNumber: '2', driverName: 'Two', carClassShortName: 'GT3', carClassId: 100 });
+    expect(carRefFromRoster(state, 7)).toBeUndefined();
   });
 });

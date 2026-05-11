@@ -23,7 +23,7 @@ import {
   type PlayerPhysicsDetectorContext,
 } from '../driver-publisher/player-physics-detector';
 import { createSessionState, type SessionState } from '../session-state';
-import { makeFrame, cloneFrame } from './frame-fixtures';
+import { makeFrame, cloneFrame, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
 
 const PLAYER = 0;
 
@@ -36,6 +36,7 @@ const CTX: PlayerPhysicsDetectorContext = {
 let state: SessionState;
 beforeEach(() => {
   state = createSessionState('rs-1', 1);
+  seedRoster(state, ALL_CAR_INDICES);
 });
 
 function detect(
