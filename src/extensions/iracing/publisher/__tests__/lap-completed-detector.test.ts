@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { detectLapCompleted } from '../session-publisher/lap-completed-detector';
 import { createSessionState } from '../session-state';
-import { makeFrame } from './frame-fixtures';
+import { makeFrame, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -10,7 +10,9 @@ import { makeFrame } from './frame-fixtures';
 const CTX = { rigId: 'rig-01', raceSessionId: 'session-abc' };
 
 function makeState() {
-  return createSessionState('session-abc', 1);
+  const s = createSessionState('session-abc', 1);
+  seedRoster(s, ALL_CAR_INDICES);
+  return s;
 }
 
 // Typed helper so we get the payload type properly

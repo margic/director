@@ -11,7 +11,7 @@
  *   - Enums / bitmask constants — SessionStateEnum, FlagBits, TrackSurface
  */
 
-import type { TelemetryFrame } from '../session-state';
+import type { TelemetryFrame, SessionState } from '../session-state';
 
 // ---------------------------------------------------------------------------
 // Constants — mirror iRacing enum values
@@ -68,6 +68,38 @@ export const TrackSurface = {
   PitLane:          4,
 } as const;
 export type TrackSurfaceValue = (typeof TrackSurface)[keyof typeof TrackSurface];
+
+// ---------------------------------------------------------------------------
+// Roster helpers — seed SessionState.knownRoster for tests
+// ---------------------------------------------------------------------------
+
+/** All car index slots (0–63). Useful for seeding a full roster in tests. */
+export const ALL_CAR_INDICES = Array.from({ length: CAR_COUNT }, (_, i) => i);
+
+/**
+ * Seed the knownRoster of a SessionState with entries for the given car
+ * indices. Required because carRefFromRoster() returns undefined for cars not
+ * in the roster (detectors skip events without class context).
+ *
+ * Defaults: carClassShortName='GT3', carClassId=100.
+ */
+export function seedRoster(
+  state: SessionState,
+  carIndices: number[],
+  opts: { carClassShortName?: string; carClassId?: number } = {},
+): void {
+  const carClassShortName = opts.carClassShortName ?? 'GT3';
+  const carClassId        = opts.carClassId        ?? 100;
+  for (const carIdx of carIndices) {
+    state.knownRoster.set(carIdx, {
+      carIdx,
+      carNumber: String(carIdx),
+      driverName: `Driver ${carIdx}`,
+      carClassShortName,
+      carClassId,
+    });
+  }
+}
 
 // ---------------------------------------------------------------------------
 // makeFrame — factory for a minimal valid TelemetryFrame

@@ -137,6 +137,10 @@ export class DriverPublisherOrchestrator {
     }
 
     const ctx = { rigId: this.rigId, raceSessionId: this.raceSessionId };
+    // Driver-pipeline detectors are scoped to the player car only — pass a
+    // sentinel (-1) when the player carIdx hasn't been resolved yet so each
+    // detector can short-circuit and log a warning exactly once.
+    const playerCarIdx = this.playerCarIdx ?? -1;
     const events: PublisherEvent[] = [];
 
     // Identity — resolve on every frame; only emits on first resolve or change.
@@ -150,14 +154,17 @@ export class DriverPublisherOrchestrator {
       }
     }
 
-    events.push(...detectPitAndIncidents(this.prevFrame, frame, this.state, ctx));
+    events.push(...detectPitAndIncidents(this.prevFrame, frame, this.state, {
+      ...ctx,
+      playerCarIdx,
+    }));
     events.push(...detectPitStopDetail(this.prevFrame, frame, this.state, {
       ...ctx,
-      playerCarIdx: this.playerCarIdx,
+      playerCarIdx,
     }));
     events.push(...detectDriverLapPerformance(this.prevFrame, frame, this.state, {
       ...ctx,
-      playerCarIdx: this.playerCarIdx,
+      playerCarIdx,
     }));
     events.push(...detectIncidentsAndMilestones(this.prevFrame, frame, this.state, {
       ...ctx,
@@ -170,7 +177,7 @@ export class DriverPublisherOrchestrator {
     }));
     events.push(...detectPlayerPhysics(this.prevFrame, frame, this.state, {
       ...ctx,
-      playerCarIdx:      this.playerCarIdx,
+      playerCarIdx,
       carNumberByCarIdx: this.carNumberByCarIdx.size > 0 ? this.carNumberByCarIdx : undefined,
     }));
 

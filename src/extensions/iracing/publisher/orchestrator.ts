@@ -1,5 +1,5 @@
 /**
- * orchestrator.ts — DIR-3
+ * orchestrator.ts — DIR-4
  *
  * Top-level publisher orchestrator. Owns:
  *   - The single PublisherTransport instance (shared by both pipelines)
@@ -9,23 +9,25 @@
  *   - Routing of telemetry frames to SessionPublisherOrchestrator and
  *     DriverPublisherOrchestrator
  *   - Session bind / release lifecycle (DIR-2)
- *   - Config migration of legacy keys on startup (DIR-2+3 / S3)
+ *   - Config migration of legacy keys on startup (DIR-2+3+4 / S3)
  *   - Auto-generated rigId (DIR-3)
+ *   - publisher.scope: 'session' | 'driver' | 'both' (DIR-4)
  *
- * Activation model (DIR-2/3):
+ * Activation model (DIR-2/3/4):
  *   - activate()         → starts transport, heartbeat, lifecycle infra;
- *                          generates rigId if absent.
+ *                          generates rigId if absent; migrates legacy config.
  *                          Does NOT start either sub-pipeline on its own.
- *   - bindSession(id)    → starts Session Publisher pipeline. If
- *                          publisher.driver.enabled is true, also starts
- *                          the Driver Publisher. If iRacing is not yet
- *                          connected, the id is "armed" and the pipelines
- *                          start automatically when the connection arrives.
+ *   - bindSession(id)    → activates pipelines based on publisher.scope:
+ *                            'session' → SessionPublisher only (default)
+ *                            'driver'  → DriverPublisher only
+ *                            'both'    → both (dev/demo only — logs warning)
+ *                          If iRacing is not yet connected, the id is "armed"
+ *                          and the pipelines start when the connection arrives.
  *   - releaseSession()   → stops both pipelines, sends PUBLISHER_GOODBYE,
  *                          flushes remaining events. Transport stays live.
  *   - registerDriver(id) → Driver-only rig flow: calls the Race Control
- *                          register endpoint and activates the Driver
- *                          Publisher on success.
+ *                          register endpoint, persists publisher.scope='driver',
+ *                          and activates the Driver Publisher on success.
  *   - deactivate()       → stops everything (both pipelines + transport).
  *
  * Single-transport invariant: exactly one PublisherTransport instance exists
@@ -68,6 +70,18 @@ export interface PublisherOrchestratorConfig {
 }
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/**
+ * Determines which sub-pipeline(s) activate on bindSession / registerDriver.
+ *   'session' — Director Loop rig: SessionPublisher only (default).
+ *   'driver'  — Driver rig in Publisher Mode: DriverPublisher only.
+ *   'both'    — Reserved for development / single-rig demos (logs a warning).
+ */
+export type PublisherScope = 'session' | 'driver' | 'both';
+
+// ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
@@ -75,12 +89,14 @@ const DEFAULT_RC_BASE_URL       = 'https://simracecenter.com';
 const DEFAULT_BATCH_INTERVAL_MS = 2000;
 const HEARTBEAT_INTERVAL_MS     = 30_000;
 
-/** Legacy config keys removed in DIR-2 and DIR-3 (S3 migration). */
+/** Legacy config keys removed in DIR-2, DIR-3, and DIR-4 (S3 migration). */
 const LEGACY_KEYS = [
   'publisher.enabled',
   'publisher.publisherCode',
   'publisher.raceSessionId',
   'publisher.identityDisplayName',
+  'publisher.session.enabled',
+  'publisher.driver.enabled',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -156,8 +172,10 @@ export class PublisherOrchestrator {
 
   /**
    * Called from the internal `iracing.publisher.bindSession` intent handler.
-   * Starts (or rebinds) the Session Publisher pipeline. If
-   * publisher.driver.enabled is true, also starts the Driver Publisher.
+   * Activates pipeline(s) based on publisher.scope:
+   *   'session' (default) → SessionPublisher only.
+   *   'driver'            → DriverPublisher only.
+   *   'both'              → both (dev/demo).
    *
    * Pass null or empty string to release the session (identical semantics to
    * releaseSession()).
@@ -368,6 +386,9 @@ export class PublisherOrchestrator {
 
       if (resp.status === 200) {
         this.cfg.director.saveSetting?.('publisher.driver.sessionId', raceSessionId);
+        // Persist scope before activating so the setting is in place if the
+        // app restarts mid-session (DIR-4).
+        this.cfg.director.saveSetting?.('publisher.scope', 'driver');
         this.driverPublisher?.activate(raceSessionId, this.rigId);
         if (this.currentRoster.size > 0) {
           this.driverPublisher?.updateRoster(Array.from(this.currentRoster.values()));
@@ -440,6 +461,8 @@ export class PublisherOrchestrator {
   /**
    * S3 config migration — runs once at startup.
    * Drops legacy keys and migrates identityDisplayName if the new key is unset.
+   * DIR-4: migrates two-flag model (publisher.driver/session.enabled) to
+   * publisher.scope.
    */
   private migrateConfig(): void {
     const settings = this.cfg.director.settings;
@@ -449,6 +472,24 @@ export class PublisherOrchestrator {
         this.cfg.director.saveSetting?.('publisher.driver.displayName', legacyDisplayName);
       }
     }
+
+    // Migrate two-flag model → publisher.scope (DIR-4).
+    // Only write the new key if it is not already present.
+    if (settings['publisher.scope'] === undefined) {
+      const driverEnabled  = settings['publisher.driver.enabled'];
+      const sessionEnabled = settings['publisher.session.enabled'];
+      let scope: PublisherScope;
+      if (driverEnabled === true && sessionEnabled === true) {
+        scope = 'both';
+      } else if (driverEnabled === true && sessionEnabled === false) {
+        scope = 'driver';
+      } else {
+        scope = 'session';
+      }
+      this.cfg.director.saveSetting?.('publisher.scope', scope);
+      this.cfg.director.log('info', `Publisher config migration: set publisher.scope='${scope}'`);
+    }
+
     for (const key of LEGACY_KEYS) {
       if (settings[key] !== undefined) {
         this.cfg.director.deleteSetting?.(key);
@@ -532,39 +573,42 @@ export class PublisherOrchestrator {
   }
 
   /**
-   * Activate both pipelines with the current raceSessionId.
+   * Activate pipelines with the current raceSessionId based on publisher.scope.
    * Called when bindSession fires and we are connected, or when we connect
    * after being armed.
    *
-   * Note: Driver Publisher activation will be separated from Session Publisher
-   * in DIR-3 (opt-in flow). For DIR-2 both pipelines start together on bind.
+   *   'session' (default) → activate SessionPublisher only.
+   *   'driver'            → activate DriverPublisher only.
+   *   'both'              → activate both (dev/demo only — logs a warning).
    */
   private startSessionPipeline(): void {
     if (!this.running || !this.sessionPublisher || !this.driverPublisher) return;
 
-    const sessionEnabled = this.cfg.director.settings['publisher.session.enabled'] !== false;
-    if (sessionEnabled) {
+    const scope = (this.cfg.director.settings['publisher.scope'] ?? 'session') as PublisherScope;
+
+    if (scope === 'both') {
+      this.cfg.director.log('warn', `Publisher scope=both — activating both pipelines (dev/demo only, not for production)`);
+    }
+
+    if (scope === 'session' || scope === 'both') {
       this.sessionPublisher.activate(this.raceSessionId, this.rigId);
     }
 
-    // Driver Publisher only activates via bindSession on Director Loop rigs
-    // when the operator has opted in (publisher.driver.enabled = true).
-    // On driver-only rigs it activates via registerDriver() instead.
-    if (this.cfg.director.settings['publisher.driver.enabled'] === true) {
+    if (scope === 'driver' || scope === 'both') {
       this.driverPublisher.activate(this.raceSessionId, this.rigId);
     }
 
-    // Seed roster into both pipelines.
+    // Seed roster into active pipelines.
     if (this.currentRoster.size > 0) {
       const drivers = Array.from(this.currentRoster.values());
-      this.sessionPublisher.updateRoster(drivers);
-      this.driverPublisher.updateRoster(drivers);
+      if (scope === 'session' || scope === 'both') this.sessionPublisher.updateRoster(drivers);
+      if (scope === 'driver'  || scope === 'both') this.driverPublisher.updateRoster(drivers);
     }
 
     // PUBLISHER_HELLO — signals RC to create the checkin record.
     this.dispatchLifecycleEvents(this.lifecycleDetector.onActivate(this.lifecycleCtx()));
 
-    this.cfg.director.log('info', `Publisher pipelines started for raceSessionId=${this.raceSessionId}`);
+    this.cfg.director.log('info', `Publisher pipeline(s) started for raceSessionId=${this.raceSessionId} scope=${scope}`);
   }
 
   /** Stop both pipelines and the transport. Called by deactivate(). */

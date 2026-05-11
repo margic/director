@@ -178,7 +178,15 @@ export class SessionPublisherOrchestrator {
 
   /** Called by the top-level orchestrator when the roster is refreshed. */
   updateRoster(drivers: PublisherCarRef[]): void {
-    this.currentRoster = new Map(drivers.map((d) => [d.carIdx, d]));
+    // Enrich each entry with class data from setSessionMetadata() so that
+    // carRefFromRoster() always returns both carClassShortName and carClassId.
+    const enriched = drivers.map((d) => {
+      const classId   = d.carClassId   ?? this.carClassByCarIdx.get(d.carIdx);
+      const className = d.carClassShortName
+        ?? (classId !== undefined ? this.carClassShortNames.get(classId) : undefined);
+      return { ...d, carClassId: classId, carClassShortName: className };
+    });
+    this.currentRoster = new Map(enriched.map((d) => [d.carIdx, d]));
     // Keep the live SessionState in sync so carRefFromRoster() reflects the
     // latest roster on every frame without waiting for the next detect call.
     if (this.state) {

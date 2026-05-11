@@ -46,6 +46,8 @@ export interface PublisherCarRef {
   driverName?: string;
   teamName?: string;
   carClassShortName?: string;
+  /** iRacing CarClassID — stable numeric identifier for the car class */
+  carClassId?: number;
 }
 
 export interface PublisherEventContext {

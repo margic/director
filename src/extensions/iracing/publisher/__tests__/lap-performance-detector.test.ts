@@ -19,17 +19,26 @@ import {
 } from '../driver-publisher/lap-performance-driver';
 import { createSessionState, type SessionState } from '../session-state';
 import type { TelemetryFrame } from '../session-state';
-import { makeFrame, cloneFrame, CAR_COUNT } from './frame-fixtures';
+import { makeFrame, cloneFrame, CAR_COUNT, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
 
 // Combined context — covers both session and driver slices
 interface LapPerformanceContext extends SessionLapPerformanceContext {
-  playerCarIdx?: number;
+  playerCarIdx: number;
   degradationThreshold?: number;
 }
 
 // Local wrapper that mirrors the old detectLapPerformance API.
 // Calls both split functions and merges the results so all existing
 // tests continue to work without modification.
+//
+// Driver runs FIRST so it can capture the prior `cs.stintBestLapTime`
+// (used to reset the player degradation latch). The session detector
+// then processes per-car STINT_BEST_LAP for every car. Tests that
+// specifically assert STINT_BEST_LAP behaviour call
+// `detectSessionLapPerformance` directly to avoid the shared-state
+// quirk where driver and session share `cs.stintBestLapTime` in this
+// test wrapper (in production they have independent SessionState
+// instances per orchestrator).
 function detectLapPerformance(
   prev: TelemetryFrame | null,
   curr: TelemetryFrame,
@@ -37,8 +46,8 @@ function detectLapPerformance(
   ctx: LapPerformanceContext,
 ) {
   return [
-    ...detectSessionLapPerformance(prev, curr, state, ctx),
     ...detectDriverLapPerformance(prev, curr, state, ctx),
+    ...detectSessionLapPerformance(prev, curr, state, ctx),
   ];
 }
 
@@ -52,6 +61,7 @@ let state: SessionState;
 
 beforeEach(() => {
   state = createSessionState('rs-1', 1);
+  seedRoster(state, ALL_CAR_INDICES);
 });
 
 /** Helper — bump completed lap count + set lap times on a per-car slot. */
@@ -118,13 +128,22 @@ describe('detectLapPerformance — PERSONAL_BEST_LAP', () => {
     expect(events.find(e => e.type === 'PERSONAL_BEST_LAP')).toBeUndefined();
   });
 
-  it('skips player events when playerCarIdx is undefined', () => {
-    const noPlayerCtx = { ...ctx, playerCarIdx: undefined };
+  it('skips ALL events when playerCarIdx is unset (sentinel -1)', () => {
+    // Driver-rig scope: when playerCarIdx hasn't been resolved, the driver
+    // detectors return [] and log once. PERSONAL_BEST_LAP and
+    // LAP_TIME_DEGRADATION are driver-pipeline events — neither should
+    // fire from a driver rig that doesn't know its own carIdx.
+    // (STINT_BEST_LAP is now a session-pipeline event — Issue #147.)
+    const noPlayerCtx = { ...ctx, playerCarIdx: -1 };
     const f0 = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 1, lastLapTime: 91, bestLapTime: 91 }] });
-    detectLapPerformance(null, f0, state, noPlayerCtx);
+    detectDriverLapPerformance(null, f0, state, noPlayerCtx);
     const f1 = bumpLap(f0, 0, 2, 89, 89);
-    const events = detectLapPerformance(f0, f1, state, noPlayerCtx);
+    const events = detectDriverLapPerformance(f0, f1, state, noPlayerCtx);
     expect(events.find(e => e.type === 'PERSONAL_BEST_LAP')).toBeUndefined();
+    expect(events.find(e => e.type === 'LAP_TIME_DEGRADATION')).toBeUndefined();
+    // Defensive: STINT_BEST_LAP is now session-scoped (Issue #147) — the
+    // driver pipeline must never emit it, even when playerCarIdx is set.
+    expect(events.find(e => e.type === 'STINT_BEST_LAP')).toBeUndefined();
   });
 });
 
@@ -161,16 +180,16 @@ describe('detectLapPerformance — SESSION_BEST_LAP', () => {
 });
 
 // ---------------------------------------------------------------------------
-// STINT_BEST_LAP
+// STINT_BEST_LAP — session-pipeline event (Issue #147)
 // ---------------------------------------------------------------------------
 
-describe('detectLapPerformance — STINT_BEST_LAP', () => {
+describe('detectSessionLapPerformance — STINT_BEST_LAP', () => {
   it('emits on first completed lap (initial stint best)', () => {
     const f0 = makeFrame();
-    detectLapPerformance(null, f0, state, ctx);
+    detectSessionLapPerformance(null, f0, state, ctx);
 
     const f1 = bumpLap(f0, 0, 1, 92, 92);
-    const events = detectLapPerformance(f0, f1, state, ctx);
+    const events = detectSessionLapPerformance(f0, f1, state, ctx);
     const sb = events.find(e => e.type === 'STINT_BEST_LAP' && e.car?.carIdx === 0);
     expect(sb).toBeDefined();
     expect(sb!.payload).toMatchObject({ lapNumber: 1, lapTime: 92 });
@@ -179,16 +198,37 @@ describe('detectLapPerformance — STINT_BEST_LAP', () => {
 
   it('emits again only when subsequent lap improves', () => {
     const f0 = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 1, lastLapTime: 92, bestLapTime: 92 }] });
-    detectLapPerformance(null, f0, state, ctx);
+    detectSessionLapPerformance(null, f0, state, ctx);
     state.carStates.get(0)!.stintBestLapTime = 92;
 
     const f1 = bumpLap(f0, 0, 2, 93, 92);
-    expect(detectLapPerformance(f0, f1, state, ctx).find(e => e.type === 'STINT_BEST_LAP')).toBeUndefined();
+    expect(detectSessionLapPerformance(f0, f1, state, ctx).find(e => e.type === 'STINT_BEST_LAP')).toBeUndefined();
 
     const f2 = bumpLap(f1, 0, 3, 90, 90);
-    const events = detectLapPerformance(f1, f2, state, ctx);
+    const events = detectSessionLapPerformance(f1, f2, state, ctx);
     expect(events.find(e => e.type === 'STINT_BEST_LAP')).toBeDefined();
     expect(state.carStates.get(0)?.stintBestLapTime).toBe(90);
+  });
+
+  it('emits STINT_BEST_LAP for non-player cars (session scope)', () => {
+    // Issue #147: STINT_BEST_LAP is session-scoped — every car whose
+    // CarIdxLastLapTime improves on its current stint best should fire,
+    // regardless of which carIdx is the player rig.
+    const f0 = makeFrame({ cars: [
+      { carIdx: 0, lapsCompleted: 1, lastLapTime: 90, bestLapTime: 90 },
+      { carIdx: 1, lapsCompleted: 1, lastLapTime: 91, bestLapTime: 91 },
+    ]});
+    detectSessionLapPerformance(null, f0, state, ctx);
+    state.carStates.get(0)!.stintBestLapTime = 90;
+    state.carStates.get(1)!.stintBestLapTime = 91;
+
+    const f1 = bumpLap(f0, 1, 2, 88, 88);
+    const events = detectSessionLapPerformance(f0, f1, state, ctx);
+
+    const sb = events.find(e => e.type === 'STINT_BEST_LAP');
+    expect(sb).toBeDefined();
+    expect(sb!.car?.carIdx).toBe(1);
+    expect(state.carStates.get(1)?.stintBestLapTime).toBe(88);
   });
 });
 

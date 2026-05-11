@@ -36,6 +36,7 @@ interface DriverEntry {
   teamName: string;
   carName: string;
   carClassName: string;
+  carClassId: number;
 }
 
 interface SessionInfoResult {
@@ -485,6 +486,7 @@ function readSessionInfo(director: ExtensionAPI): SessionInfoResult | null {
                     teamName: d.TeamName ?? '',
                     carName: d.CarScreenName ?? '',
                     carClassName: d.CarClassShortName ?? '',
+                    carClassId:   d.CarClassID ?? 0,
                 }));
         } else {
             director.log('warn', 'No DriverInfo.Drivers found in session info');
@@ -890,6 +892,7 @@ function pollSessionData(director: ExtensionAPI) {
                     driverName: d.userName,
                     teamName: d.teamName,
                     carClassShortName: d.carClassName,
+                    carClassId:        d.carClassId,
                 })),
             );
         }

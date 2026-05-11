@@ -22,14 +22,18 @@ import type { TelemetryFrame, SessionState } from '../session-state';
 import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
 import type { PublisherEvent } from '../event-types';
 
-const CAR_COUNT = 64;
-
 // iRacing TrackSurface enum values
 const TRACK_OFF_TRACK = -1;
+
+/** Module-level latch — log "playerCarIdx unset" warning at most once. */
+let unsetPlayerCarIdxWarned = false;
 
 export interface PitIncidentDetectorContext {
   rigId: string;
   raceSessionId: string;
+  /** iRacing DriverInfo.DriverCarIdx — required: detectors are scoped to the
+   *  player car only (Issue: scope driver-rig detectors to playerCarIdx). */
+  playerCarIdx: number;
   /** Optional: display name for the player car (identity override) */
   playerDisplayName?: string;
   /** Optional: iRacing user name for IDENTITY_RESOLVED */
@@ -49,10 +53,21 @@ export function detectPitAndIncidents(
   const events: PublisherEvent[] = [];
   const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
 
+  const playerCarIdx = ctx.playerCarIdx;
+  if (playerCarIdx < 0) {
+    if (!unsetPlayerCarIdxWarned) {
+      unsetPlayerCarIdxWarned = true;
+      // eslint-disable-next-line no-console
+      console.warn('[pit-incident-detector] playerCarIdx unset; skipping frame');
+    }
+    return events;
+  }
+
   // -------------------------------------------------------------------------
-  // Per-car scan
+  // Player car only — driver pipeline is scoped to ctx.playerCarIdx.
   // -------------------------------------------------------------------------
-  for (let i = 0; i < CAR_COUNT; i++) {
+  {
+    const i = playerCarIdx;
     const cs = getOrCreateCarState(state, i);
     const currOnPit    = curr.carIdxOnPitRoad[i] !== 0;
     const currSurface  = curr.carIdxTrackSurface[i];
@@ -65,7 +80,7 @@ export function detectPitAndIncidents(
       cs.pitEntryLap      = curr.carIdxLapCompleted[i];
       cs.pitEntryPosition = curr.carIdxPosition[i];
       // Record fuel at pit entry for player car (used by Tier 2)
-      if (i === 0) cs.fuelLevelOnPitEntry = curr.fuelLevel;
+      cs.fuelLevelOnPitEntry = curr.fuelLevel;
 
       if (car) {
         events.push(buildEvent(
@@ -175,7 +190,7 @@ export function detectPitAndIncidents(
   // -------------------------------------------------------------------------
   if (prev !== null && curr.playerIncidentCount > prev.playerIncidentCount) {
     const delta = curr.playerIncidentCount - prev.playerIncidentCount;
-    const car   = carRefFromRoster(state, 0);
+    const car   = carRefFromRoster(state, playerCarIdx);
     if (car) {
       events.push(buildEvent(
         'INCIDENT_POINT',
@@ -195,7 +210,7 @@ export function detectPitAndIncidents(
   // identity override service has resolved.
   // -------------------------------------------------------------------------
   if (!state.identityResolved && ctx.iracingUserName && ctx.playerDisplayName) {
-    const baseRef = carRefFromRoster(state, 0);
+    const baseRef = carRefFromRoster(state, playerCarIdx);
     if (baseRef) {
       state.identityResolved = true;
       const car = { ...baseRef, driverName: ctx.playerDisplayName };
