@@ -136,7 +136,19 @@ export type PublisherEventType =
   | 'WEATHER_CHANGE'
   | 'TRACK_TEMP_DRIFT'
   | 'WIND_SHIFT'
-  | 'TIME_OF_DAY_PHASE';
+  | 'TIME_OF_DAY_PHASE'
+  // §9 Race-narrative additions (#151–#156). All driver-pipeline events,
+  // gated on playerCarIdx. Backward-compatible — additive only.
+  | 'GAP_CLOSING'
+  | 'GAP_OPENING'
+  | 'CLASS_POSITION_GAIN'
+  | 'CLASS_POSITION_LOSS'
+  | 'IN_PIT_WINDOW'
+  | 'FUEL_PROJECTION'
+  | 'PACE_DROP'
+  | 'SECTOR_PERSONAL_BEST'
+  | 'TYRE_TEMP_DRIFT'
+  | 'ENGINE_WARNING';
 
 // CLOUD-EMITTED — publisher never produces these. Listed here for documentation only.
 // 'FOCUS_VS_FOCUS_BATTLE' | 'FOCUS_GROUP_ON_TRACK' | 'FOCUS_GROUP_SPLIT'
@@ -252,6 +264,18 @@ export interface EventPayloadMap {
   TRACK_TEMP_DRIFT: TrackTempDriftPayload;
   WIND_SHIFT: WindShiftPayload;
   TIME_OF_DAY_PHASE: TimeOfDayPhasePayload;
+
+  // §9 Race-narrative (#151–#156)
+  GAP_CLOSING: GapTrendPayload;
+  GAP_OPENING: GapTrendPayload;
+  CLASS_POSITION_GAIN: ClassPositionChangePayload;
+  CLASS_POSITION_LOSS: ClassPositionChangePayload;
+  IN_PIT_WINDOW: InPitWindowPayload;
+  FUEL_PROJECTION: FuelProjectionPayload;
+  PACE_DROP: PaceDropPayload;
+  SECTOR_PERSONAL_BEST: SectorPersonalBestPayload;
+  TYRE_TEMP_DRIFT: TyreTempDriftPayload;
+  ENGINE_WARNING: EngineWarningPayload;
 }
 
 // ---------------------------------------------------------------------------
@@ -545,4 +569,69 @@ export interface TimeOfDayPhasePayload {
   phase: TimeOfDayPhase;
   /** Solar altitude in radians (positive = above horizon) */
   solarAltitudeRad: number;
+}
+
+// ---------------------------------------------------------------------------
+// §9 Race-narrative payloads (#151–#156)
+// ---------------------------------------------------------------------------
+
+export interface GapTrendPayload {
+  /** Self-describing ref for the target car (the one being closed on / opening). */
+  targetCar: PublisherCarRef;
+  /** Current gap in seconds. */
+  gapSec: number;
+  /** Closing rate in seconds per lap (positive = closing). */
+  closingRateSecPerLap: number;
+  /** Direction of the trend relative to the player car. */
+  direction: 'ahead' | 'behind';
+}
+
+export interface ClassPositionChangePayload {
+  previousClassPos: number;
+  newClassPos: number;
+  carClassId: number;
+  carClassShortName: string;
+  reason: 'overtake' | 'pit_cycle' | 'other';
+}
+
+export interface InPitWindowPayload {
+  lapsRemainingInStint: number;
+  estimatedStintLaps: number;
+}
+
+export interface FuelProjectionPayload {
+  projectedLaps: number;
+  fuelLevel: number;
+  fuelPerLap: number;
+  /** Threshold (laps) below which projection alerts. */
+  thresholdLaps: number;
+}
+
+export interface PaceDropPayload {
+  /** % drop vs stint best of the slowest sample lap (positive). */
+  deltaPct: number;
+  /** Last 2 lap times (seconds). */
+  lapTimes: number[];
+  stintBestSec: number;
+}
+
+export interface SectorPersonalBestPayload {
+  sector: 1 | 2 | 3;
+  deltaSec: number;
+}
+
+export type TyreId = 'LF' | 'RF' | 'LR' | 'RR';
+
+export interface TyreTempDriftPayload {
+  tyre: TyreId;
+  tempC: number;
+  baselineC: number;
+  deltaC: number;
+}
+
+export interface EngineWarningPayload {
+  /** Raw EngineWarnings bitmask. */
+  warningFlags: number;
+  /** Decoded warning names (e.g. 'WaterTempWarning', 'OilPressureWarning'). */
+  warningNames: string[];
 }

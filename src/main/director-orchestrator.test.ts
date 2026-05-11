@@ -510,4 +510,86 @@ describe('DirectorOrchestrator', () => {
       expect(mockSessionManager.refreshCheckin).not.toHaveBeenCalled();
     });
   });
+
+  describe('getRaceContext - class-aware battles (#150)', () => {
+    /** Helper: emit a raceStateChanged event with the given cars list. */
+    function emitRaceState(cars: any[]) {
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: {
+          sessionFlags: 0,
+          sessionType: 'Race',
+          totalSessionLaps: 50,
+          sessionLapsRemain: 25,
+          cars,
+        },
+      });
+    }
+
+    it('does not pair a GT3 with the LMP2 directly ahead in mixed-class field', () => {
+      // 6 cars by overall position: LMP2 leads, then a GT3 0.5s back, then more.
+      // Same-class adjacency tests: GT3-GT3 close, LMP2-LMP2 close.
+      const cars = [
+        // overall pos 1: LMP2 #1 (leader, no gap)
+        { carNumber: '1',  carClass: 'LMP2', classPosition: 1, position: 1, gapToCarAhead: 0,   lapsCompleted: 10 },
+        // overall pos 2: GT3 #10, 0.5s behind LMP2 #1 — must NOT be a battle
+        { carNumber: '10', carClass: 'GT3',  classPosition: 1, position: 2, gapToCarAhead: 0.5, lapsCompleted: 10 },
+        // overall pos 3: LMP2 #2, 1.0s behind GT3 #10 (=> 1.5s behind LMP2 #1)
+        { carNumber: '2',  carClass: 'LMP2', classPosition: 2, position: 3, gapToCarAhead: 1.0, lapsCompleted: 10 },
+        // overall pos 4: GT3 #11, 0.4s behind LMP2 #2 (=> 1.4s gap to GT3 #10) — NOT a battle
+        { carNumber: '11', carClass: 'GT3',  classPosition: 2, position: 4, gapToCarAhead: 0.4, lapsCompleted: 10 },
+        // overall pos 5: GT3 #12, 0.3s behind GT3 #11 — IS a same-class battle
+        { carNumber: '12', carClass: 'GT3',  classPosition: 3, position: 5, gapToCarAhead: 0.3, lapsCompleted: 10 },
+        // overall pos 6: LMP2 #3, 4.0s back — no battles
+        { carNumber: '3',  carClass: 'LMP2', classPosition: 3, position: 6, gapToCarAhead: 4.0, lapsCompleted: 10 },
+      ];
+      emitRaceState(cars);
+
+      const ctx = (orchestrator as any).getRaceContext();
+
+      expect(ctx.battles).toBeDefined();
+      // Only the GT3 #11 vs GT3 #12 pair (gap 0.3) qualifies.
+      expect(ctx.battles).toHaveLength(1);
+      expect(ctx.battles[0]).toEqual({ cars: ['11', '12'], gapSec: 0.3 });
+    });
+
+    it('detects multiple same-class battles in different classes', () => {
+      const cars = [
+        { carNumber: '1',  carClass: 'LMP2', classPosition: 1, position: 1, gapToCarAhead: 0,   lapsCompleted: 10 },
+        { carNumber: '2',  carClass: 'LMP2', classPosition: 2, position: 2, gapToCarAhead: 0.6, lapsCompleted: 10 }, // LMP2 battle
+        { carNumber: '10', carClass: 'GT3',  classPosition: 1, position: 3, gapToCarAhead: 5.0, lapsCompleted: 10 },
+        { carNumber: '11', carClass: 'GT3',  classPosition: 2, position: 4, gapToCarAhead: 0.8, lapsCompleted: 10 }, // GT3 battle
+      ];
+      emitRaceState(cars);
+
+      const ctx = (orchestrator as any).getRaceContext();
+
+      expect(ctx.battles).toHaveLength(2);
+      expect(ctx.battles).toContainEqual({ cars: ['1', '2'], gapSec: 0.6 });
+      expect(ctx.battles).toContainEqual({ cars: ['10', '11'], gapSec: 0.8 });
+    });
+
+    it('sums the gap across other-class cars between two same-class cars', () => {
+      // LMP2 #1, GT3 #10 (0.4s back), LMP2 #2 (0.4s back) → LMP2#1↔LMP2#2 gap = 0.8s, IS battle
+      const cars = [
+        { carNumber: '1',  carClass: 'LMP2', classPosition: 1, position: 1, gapToCarAhead: 0,   lapsCompleted: 10 },
+        { carNumber: '10', carClass: 'GT3',  classPosition: 1, position: 2, gapToCarAhead: 0.4, lapsCompleted: 10 },
+        { carNumber: '2',  carClass: 'LMP2', classPosition: 2, position: 3, gapToCarAhead: 0.4, lapsCompleted: 10 },
+      ];
+      emitRaceState(cars);
+
+      const ctx = (orchestrator as any).getRaceContext();
+      expect(ctx.battles).toEqual([{ cars: ['1', '2'], gapSec: 0.8 }]);
+    });
+
+    it('returns no battles when same-class gap is >= 1.0s', () => {
+      const cars = [
+        { carNumber: '1',  carClass: 'LMP2', classPosition: 1, position: 1, gapToCarAhead: 0,   lapsCompleted: 10 },
+        { carNumber: '2',  carClass: 'LMP2', classPosition: 2, position: 2, gapToCarAhead: 1.5, lapsCompleted: 10 },
+      ];
+      emitRaceState(cars);
+
+      const ctx = (orchestrator as any).getRaceContext();
+      expect(ctx.battles).toBeUndefined();
+    });
+  });
 });

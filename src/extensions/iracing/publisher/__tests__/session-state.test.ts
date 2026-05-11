@@ -45,6 +45,17 @@ function makeFrame(overrides: Partial<TelemetryFrame> = {}): TelemetryFrame {
     steeringWheelPctTorque: 0,
     solarAltitude: 0.3,
     carIdxSpeed: new Float32Array(64).fill(40),
+    sessionLapsRemain: -1,
+    sessionLapsTotal: -1,
+    sessionTimeRemain: -1,
+    lapDeltaToBestLap: 0,
+    lapDeltaToBestLapOk: 0,
+    engineWarnings: 0,
+    fuelUsePerHour: 0,
+    lfTempCM: 0,
+    rfTempCM: 0,
+    lrTempCM: 0,
+    rrTempCM: 0,
     ...overrides,
   };
 }
