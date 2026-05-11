@@ -141,6 +141,18 @@ export interface FrameOptions {
   steeringWheelAngle?: number;
   steeringWheelPctTorque?: number;
   solarAltitude?: number;
+  // Race-narrative additions (#151–#156)
+  sessionLapsRemain?: number;
+  sessionLapsTotal?: number;
+  sessionTimeRemain?: number;
+  lapDeltaToBestLap?: number;
+  lapDeltaToBestLapOk?: number;
+  engineWarnings?: number;
+  fuelUsePerHour?: number;
+  lfTempCM?: number;
+  rfTempCM?: number;
+  lrTempCM?: number;
+  rrTempCM?: number;
   // Per-car slot overrides
   cars?: CarSlotOverride[];
 }
@@ -205,6 +217,17 @@ export function makeFrame(opts: FrameOptions = {}): TelemetryFrame {
     steeringWheelAngle:       opts.steeringWheelAngle       ?? 0,
     steeringWheelPctTorque:   opts.steeringWheelPctTorque   ?? 0,
     solarAltitude:            opts.solarAltitude            ?? 0.3, // midday
+    sessionLapsRemain:        opts.sessionLapsRemain        ?? -1,
+    sessionLapsTotal:         opts.sessionLapsTotal         ?? -1,
+    sessionTimeRemain:        opts.sessionTimeRemain        ?? -1,
+    lapDeltaToBestLap:        opts.lapDeltaToBestLap        ?? 0,
+    lapDeltaToBestLapOk:      opts.lapDeltaToBestLapOk      ?? 0,
+    engineWarnings:           opts.engineWarnings           ?? 0,
+    fuelUsePerHour:           opts.fuelUsePerHour           ?? 0,
+    lfTempCM:                 opts.lfTempCM                 ?? 0,
+    rfTempCM:                 opts.rfTempCM                 ?? 0,
+    lrTempCM:                 opts.lrTempCM                 ?? 0,
+    rrTempCM:                 opts.rrTempCM                 ?? 0,
   };
 }
 

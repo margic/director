@@ -77,6 +77,32 @@ export interface TelemetryFrame {
   solarAltitude: number;
   /** iRacing: CarIdxSpeed (m/s) per car */
   carIdxSpeed: Float32Array;
+
+  // Race-narrative additions (#151–#156). All default to 0 / -1 when the
+  // raw read is missing so existing fixtures and the koffi reader stay
+  // backwards compatible.
+  /** iRacing: SessionLapsRemainEx (or SessionLapsRemain) — laps left in session, -1 = unknown/unlimited */
+  sessionLapsRemain: number;
+  /** iRacing: SessionLapsTotal — total laps for the session, -1 = unknown/timed */
+  sessionLapsTotal: number;
+  /** iRacing: SessionTimeRemain (seconds) — -1 = unknown/lap-limited */
+  sessionTimeRemain: number;
+  /** iRacing: LapDeltaToBestLap (seconds, signed) — current vs personal best, mid-lap */
+  lapDeltaToBestLap: number;
+  /** iRacing: LapDeltaToBestLap_OK (bool/int) — whether the delta is valid */
+  lapDeltaToBestLapOk: number;
+  /** iRacing: EngineWarnings bitmask */
+  engineWarnings: number;
+  /** iRacing: FuelUsePerHour (litres/hour) */
+  fuelUsePerHour: number;
+  /** iRacing: LFtempCM (left front centre tyre temperature, Celsius) */
+  lfTempCM: number;
+  /** iRacing: RFtempCM (right front centre tyre temperature, Celsius) */
+  rfTempCM: number;
+  /** iRacing: LRtempCM (left rear centre tyre temperature, Celsius) */
+  lrTempCM: number;
+  /** iRacing: RRtempCM (right rear centre tyre temperature, Celsius) */
+  rrTempCM: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +149,26 @@ export interface CarState {
   stintStartLap: number;
   /** Stint milestone percents (25 / 50 / 75) already fired this stint. */
   firedStintMilestones: Set<number>;
+
+  // ---- Race-narrative trend fields (#151) ----
+  /** Rolling window (last 5) of CarIdxF2Time samples (gap to car ahead). */
+  recentGapToAhead: number[];
+  /** Closing rate vs car ahead in seconds-per-lap (positive = closing). */
+  closingRateToAhead: number;
+  /** Rolling window (last 5) of gap-to-car-behind samples. */
+  recentGapToBehind: number[];
+  /** Closing rate vs car behind in seconds-per-lap (positive = behind closing on us). */
+  closingRateToBehind: number;
+  /** Laps completed since the most recent pit exit. */
+  lapsSinceLastPit: number;
+  /** Estimated number of laps remaining in the current fuel load (player only). */
+  estimatedFuelLapsRemaining: number;
+  /** True when the player is within the last 5 laps of the estimated stint. */
+  inPitWindow: boolean;
+  /** Last 3 sampled classPosition values for hysteresis on CLASS_POSITION_GAIN/LOSS. */
+  classPositionHistory: number[];
+  /** Stint lap times (seconds) — accumulated since the start of the current stint. */
+  stintLapTimes: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +274,41 @@ export interface SessionState {
   spinDetectedCooldownUntilTick: number;
   /** Emit BIG_HIT at most once per this many ticks. */
   bigHitCooldownUntilTick: number;
+
+  // ---- Race-narrative additions (#151–#156) ----
+  /** Race phase derived from SessionLapsRemain/Total or SessionTimeRemain. */
+  racePhase: 'unknown' | 'opening' | 'midrace' | 'endgame' | 'final-laps';
+  /** Cars within 1.0 s of each other, grouped by carClassId. Rebuilt per frame. */
+  classGroups: Map<number, number[][]>;
+  /** Per-car pit strategy summary keyed by carIdx. */
+  pitStrategySummary: Map<number, {
+    estStintLaps: number;
+    lapsRemainingInStint: number;
+    undercutOpportunityAgainst: number | null;
+  }>;
+  /** Estimated player stint length in laps (from setSessionMetadata). */
+  estimatedStintLaps: number;
+  /** Whether IN_PIT_WINDOW has fired for the current stint. */
+  inPitWindowFired: boolean;
+  /** SessionTime of the last GAP_CLOSING/GAP_OPENING emission per direction. */
+  lastGapTrendEmittedAt: { ahead: number; behind: number };
+  /** Direction of the last GAP_CLOSING/GAP_OPENING emission per direction. */
+  lastGapTrendDirection: { ahead: 'closing' | 'opening' | 'none'; behind: 'closing' | 'opening' | 'none' };
+  /** Last classPosition value emitted for CLASS_POSITION_GAIN/LOSS gating. */
+  lastEmittedClassPosition: number;
+  /** Lap number on which FUEL_PROJECTION last fired (one per lap cap). */
+  fuelProjectionLastLap: number;
+  /** Latch — PACE_DROP fired this stint (cleared on stint reset). */
+  paceDropFired: boolean;
+  /** Last sectorIdx in which SECTOR_PERSONAL_BEST fired (for cooldown). */
+  sectorPersonalBestLastSector: number;
+  /** Last lap on which SECTOR_PERSONAL_BEST fired. */
+  sectorPersonalBestLastLap: number;
+  /** Rolling 5-sample baselines per tyre and last emit times for TYRE_TEMP_DRIFT. */
+  tyreTempBaseline: { LF: number[]; RF: number[]; LR: number[]; RR: number[] };
+  tyreTempDriftLastEmit: { LF: number; RF: number; LR: number; RR: number };
+  /** Last EngineWarnings bitmask seen — change-detection for ENGINE_WARNING. */
+  lastEngineWarnings: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -259,6 +340,15 @@ function makeDefaultCarState(): CarState {
     pitExitLapsCompleted: null,
     stintStartLap: 0,
     firedStintMilestones: new Set(),
+    recentGapToAhead: [],
+    closingRateToAhead: 0,
+    recentGapToBehind: [],
+    closingRateToBehind: 0,
+    lapsSinceLastPit: 0,
+    estimatedFuelLapsRemaining: 0,
+    inPitWindow: false,
+    classPositionHistory: [],
+    stintLapTimes: [],
   };
 }
 
@@ -299,6 +389,21 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     slowCarAheadCooldownUntilTick: 0,
     spinDetectedCooldownUntilTick: 0,
     bigHitCooldownUntilTick: 0,
+    racePhase: 'unknown',
+    classGroups: new Map(),
+    pitStrategySummary: new Map(),
+    estimatedStintLaps: 0,
+    inPitWindowFired: false,
+    lastGapTrendEmittedAt: { ahead: -Infinity, behind: -Infinity },
+    lastGapTrendDirection: { ahead: 'none', behind: 'none' },
+    lastEmittedClassPosition: 0,
+    fuelProjectionLastLap: -1,
+    paceDropFired: false,
+    sectorPersonalBestLastSector: -1,
+    sectorPersonalBestLastLap: -1,
+    tyreTempBaseline: { LF: [], RF: [], LR: [], RR: [] },
+    tyreTempDriftLastEmit: { LF: 0, RF: 0, LR: 0, RR: 0 },
+    lastEngineWarnings: 0,
   };
 }
 
