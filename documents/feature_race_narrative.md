@@ -282,11 +282,11 @@ Phased so each phase is independently shippable and testable.
 
 ### Phase 1 — Stop the bleeding (the bug fix)
 
-1. **Director #N1** Driver-publisher detectors: scope to `playerCarIdx` only.
-2. **Director #N2** Move `STINT_BEST_LAP` emission from
+1. **Director [#146](https://github.com/margic/director/issues/146)** Driver-publisher detectors: scope to `playerCarIdx` only.
+2. **Director [#147](https://github.com/margic/director/issues/147)** Move `STINT_BEST_LAP` emission from
    `driver-publisher/lap-performance-driver.ts` to
    `session-publisher/lap-performance-session.ts`.
-3. **Director #N3** Introduce `publisher.scope` setting and migrate the two
+3. **Director [#148](https://github.com/margic/director/issues/148)** Introduce `publisher.scope` setting and migrate the two
    legacy flags. `registerDriver()` sets `scope = 'driver'`.
 
 After Phase 1 the duplicate session events from driver rigs are gone, and
@@ -296,30 +296,30 @@ loop that was overwriting state.
 
 ### Phase 2 — Class awareness end-to-end
 
-4. **Director #N4** Make `carRefFromRoster()` always populate
+4. **Director [#149](https://github.com/margic/director/issues/149)** Make `carRefFromRoster()` always populate
    `carClassShortName` and add `carClassId` to `PublisherCarRef`.
-5. **Director #N5** Class-aware `RaceContext.battles` — pair cars by
+5. **Director [#150](https://github.com/margic/director/issues/150)** Class-aware `RaceContext.battles` — pair cars by
    class group, not just adjacent overall position.
-6. **RaceControl #R1** Accept and persist `carClassId` on event refs;
+6. **RaceControl [margic/racecontrol#324](https://github.com/margic/racecontrol/issues/324)** Accept and persist `carClassId` on event refs;
    include in raceEvents projection.
 
 ### Phase 3 — Race-state model
 
-7. **Director #N6** Extend `CarState` and `SessionState` with the trend
+7. **Director [#151](https://github.com/margic/director/issues/151)** Extend `CarState` and `SessionState` with the trend
    fields in §4. Add a `RaceStateAggregator` that updates the rolling
    series on every frame.
-8. **Director #N7** Compute and persist `racePhase` and `classGroups`.
+8. **Director [#152](https://github.com/margic/director/issues/152)** Compute and persist `racePhase` and `classGroups`.
 
 ### Phase 4 — Narrative events
 
-9. **Director #N8** Implement `GAP_CLOSING` / `GAP_OPENING` (and emit them
+9. **Director [#153](https://github.com/margic/director/issues/153)** Implement `GAP_CLOSING` / `GAP_OPENING` (and emit them
    from a new `gap-trend-detector.ts`).
-10. **Director #N9** Implement `CLASS_POSITION_GAIN` / `CLASS_POSITION_LOSS`.
-11. **Director #N10** Implement `IN_PIT_WINDOW` and `FUEL_PROJECTION` using
+10. **Director [#154](https://github.com/margic/director/issues/154)** Implement `CLASS_POSITION_GAIN` / `CLASS_POSITION_LOSS`.
+11. **Director [#155](https://github.com/margic/director/issues/155)** Implement `IN_PIT_WINDOW` and `FUEL_PROJECTION` using
     the new pit-strategy summary.
-12. **Director #N11** Implement `PACE_DROP`, `SECTOR_PERSONAL_BEST`,
+12. **Director [#156](https://github.com/margic/director/issues/156)** Implement `PACE_DROP`, `SECTOR_PERSONAL_BEST`,
     `TYRE_TEMP_DRIFT`, `ENGINE_WARNING`.
-13. **RaceControl #R2** Add the new event type literals to the OpenAPI spec
+13. **RaceControl [margic/racecontrol#325](https://github.com/margic/racecontrol/issues/325)** Add the new event type literals to the OpenAPI spec
     and the validator.
 
 Each new event type ships with detector unit tests in
@@ -359,12 +359,9 @@ These are ready-to-file. Title format follows the existing `margic/director`
 convention ("subsystem: imperative summary"). Body uses the same headings
 as recent issues in the repo.
 
-> NOTE: the agent that produced this document does **not** have a
-> `create_issue` tool available, so these are committed as drafts here.
-> The expectation is that a maintainer opens each one verbatim from the
-> blocks below.
+> NOTE: All issues below have been created. Links are included in each heading.
 
-### Issue N1 — `publisher: scope driver-rig detectors to playerCarIdx only`
+### Issue [#146](https://github.com/margic/director/issues/146) — `publisher: scope driver-rig detectors to playerCarIdx only`
 
 ```text
 ## Context
@@ -398,7 +395,7 @@ relocation (Issue N2).
 Refs: documents/feature_race_narrative.md §5.1
 ```
 
-### Issue N2 — `publisher: move STINT_BEST_LAP to session-publisher`
+### Issue [#147](https://github.com/margic/director/issues/147) — `publisher: move STINT_BEST_LAP to session-publisher`
 
 ```text
 ## Context
@@ -420,7 +417,7 @@ session publisher only.
 Refs: documents/feature_race_narrative.md §5.1, §8 Phase 1
 ```
 
-### Issue N3 — `publisher: introduce publisher.scope setting`
+### Issue [#148](https://github.com/margic/director/issues/148) — `publisher: introduce publisher.scope setting`
 
 ```text
 ## Context
@@ -456,7 +453,7 @@ scope value, asserting which sub-orchestrator is active.
 Refs: documents/feature_race_narrative.md §5
 ```
 
-### Issue N4 — `publisher: always populate carClass on PublisherCarRef`
+### Issue [#149](https://github.com/margic/director/issues/149) — `publisher: always populate carClass on PublisherCarRef`
 
 ```text
 ## Context
@@ -484,7 +481,7 @@ sees `"class": ""` in raceEvents projection.
 Refs: documents/feature_race_narrative.md §5.2, §8 Phase 2
 ```
 
-### Issue N5 — `director: class-aware battles in RaceContext`
+### Issue [#150](https://github.com/margic/director/issues/150) — `director: class-aware battles in RaceContext`
 
 ```text
 ## Context
@@ -509,7 +506,7 @@ src/main/director-orchestrator.ts (lines 230-238)
 Refs: documents/feature_race_narrative.md §8 Phase 2
 ```
 
-### Issue N6 — `publisher: extend CarState/SessionState with trend fields`
+### Issue [#151](https://github.com/margic/director/issues/151) — `publisher: extend CarState/SessionState with trend fields`
 
 ```text
 ## Context
@@ -548,10 +545,10 @@ SessionPublisherOrchestrator.onTelemetryFrame() at the top of the pipeline.
 Refs: documents/feature_race_narrative.md §4, §8 Phase 3
 ```
 
-### Issue N7 — `publisher: compute racePhase and classGroups`
+### Issue [#152](https://github.com/margic/director/issues/152) — `publisher: compute racePhase and classGroups`
 
 ```text
-Subset of N6 — split out so it can ship independently if the trend
+Subset of #151 — split out so it can ship independently if the trend
 window work blocks. racePhase derives from SessionLapsRemain/Total or
 SessionTimeRemain. classGroups recomputes per frame from
 CarIdxClassPosition + CarIdxF2Time.
@@ -559,7 +556,7 @@ CarIdxClassPosition + CarIdxF2Time.
 Refs: documents/feature_race_narrative.md §4
 ```
 
-### Issue N8 — `publisher: emit GAP_CLOSING / GAP_OPENING events`
+### Issue [#153](https://github.com/margic/director/issues/153) — `publisher: emit GAP_CLOSING / GAP_OPENING events`
 
 ```text
 ## Context
@@ -587,7 +584,7 @@ src/extensions/iracing/publisher/driver-publisher/gap-trend-detector.ts
 Refs: documents/feature_race_narrative.md §6, §8 Phase 4
 ```
 
-### Issue N9 — `publisher: emit CLASS_POSITION_GAIN / LOSS`
+### Issue [#154](https://github.com/margic/director/issues/154) — `publisher: emit CLASS_POSITION_GAIN / LOSS`
 
 ```text
 Use PlayerCarClassPosition + 2-frame hysteresis. Payload:
@@ -598,7 +595,7 @@ Wire alongside the existing POSITION_CHANGE detector but driver-scoped.
 Refs: documents/feature_race_narrative.md §6
 ```
 
-### Issue N10 — `publisher: emit IN_PIT_WINDOW and FUEL_PROJECTION`
+### Issue [#155](https://github.com/margic/director/issues/155) — `publisher: emit IN_PIT_WINDOW and FUEL_PROJECTION`
 
 ```text
 ## Context
@@ -616,7 +613,7 @@ and when fuel projection drops below their remaining stint plan.
 Refs: documents/feature_race_narrative.md §6
 ```
 
-### Issue N11 — `publisher: emit PACE_DROP, SECTOR_PERSONAL_BEST, TYRE_TEMP_DRIFT, ENGINE_WARNING`
+### Issue [#156](https://github.com/margic/director/issues/156) — `publisher: emit PACE_DROP, SECTOR_PERSONAL_BEST, TYRE_TEMP_DRIFT, ENGINE_WARNING`
 
 ```text
 Combined narrative-polish issue. Each event implemented in its own
@@ -634,7 +631,7 @@ Refs: documents/feature_race_narrative.md §6
 
 ## Appendix B — Race Control issues to create (`margic/racecontrol`)
 
-### Issue R1 — `telemetry: accept carClassId on PublisherCarRef`
+### Issue [margic/racecontrol#324](https://github.com/margic/racecontrol/issues/324) — `telemetry: accept carClassId on PublisherCarRef`
 
 ```text
 ## Context
@@ -656,7 +653,7 @@ and persist with null class.
 Refs: margic/director documents/feature_race_narrative.md §7
 ```
 
-### Issue R2 — `telemetry: register new event type literals`
+### Issue [margic/racecontrol#325](https://github.com/margic/racecontrol/issues/325) — `telemetry: register new event type literals`
 
 ```text
 ## Context
