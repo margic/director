@@ -227,27 +227,36 @@ app.on('ready', () => {
 
     const scenes: string[] = obsPayload?.scenes ?? [];
 
-    // #112: only include broadcast intents in capabilities — exclude operational/query
-    const broadcastIntents = allIntents
-      .filter(entry => (entry.intent.category ?? 'broadcast') === 'broadcast')
-      .map(entry => ({
+    // #112: only include broadcast intents — exclude operational/query
+    // #163: group by extensionId into extensions[] (replaces flat intents[])
+    const broadcastIntents = allIntents.filter(entry => (entry.intent.category ?? 'broadcast') === 'broadcast');
+
+    const extensionMap = new Map<string, import('./director-types').DirectorExtensionCapabilities>();
+    for (const entry of broadcastIntents) {
+      if (!extensionMap.has(entry.extensionId)) {
+        extensionMap.set(entry.extensionId, { extensionId: entry.extensionId, intents: [] });
+      }
+      extensionMap.get(entry.extensionId)!.intents.push({
         intent: entry.intent.intent,
-        extensionId: entry.extensionId,
         active: entry.enabled,
         schema: entry.intent.schema as Record<string, unknown> | undefined,
         description: entry.intent.description,
-      }));
+      });
+    }
 
-    // #113: collect per-extension aiContext prose for the Planner
-    const extensionContexts = catalog.getExtensionAiContexts();
+    // #113: attach per-extension aiContext prose for the Planner
+    for (const { extensionId, aiContext } of catalog.getExtensionAiContexts()) {
+      if (extensionMap.has(extensionId)) {
+        extensionMap.get(extensionId)!.aiContext = aiContext;
+      }
+    }
 
     return {
-      intents: broadcastIntents,
+      extensions: Array.from(extensionMap.values()),
       connections,
       ...(cameraGroups.length > 0 && { cameraGroups }),
       ...(scenes.length > 0 && { scenes }),
       ...(drivers.length > 0 && { drivers }),
-      ...(extensionContexts.length > 0 && { extensionContexts }),
     };
   });
   sessionManager.setLocalSequencesGetter(async () => {

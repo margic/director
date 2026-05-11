@@ -272,10 +272,13 @@ components:
     DirectorCapabilities:
       type: object
       properties:
-        intents:
+        extensions:
           type: array
+          description: |
+            Per-extension capability grouping. Replaces the flat intents[] array
+            (Race Control breaking change, racecontrol#299 / director#163).
           items:
-            $ref: '#/components/schemas/IntentCapability'
+            $ref: '#/components/schemas/DirectorExtensionCapabilities'
         connections:
           type: object
           additionalProperties:
@@ -305,8 +308,47 @@ components:
           items:
             $ref: '#/components/schemas/CapabilityDriver'
       required:
-        - intents
+        - extensions
         - connections
+    DirectorExtensionCapabilities:
+      type: object
+      description: Per-extension capability grouping sent in the check-in payload.
+      properties:
+        extensionId:
+          type: string
+          description: Extension identifier (e.g., "director-iracing")
+        intents:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectorIntentRegistration'
+        aiContext:
+          type: string
+          description: |
+            Optional prose description of this extension's capabilities,
+            injected verbatim into the AI Planner prompt under EXTENSION CONTEXT.
+      required:
+        - extensionId
+        - intents
+    DirectorIntentRegistration:
+      type: object
+      description: A single intent registration within an extension's capability entry.
+      properties:
+        intent:
+          type: string
+          description: Intent identifier (e.g., "broadcast.showLiveCam")
+        active:
+          type: boolean
+          description: Whether the handler is currently registered and executable
+        schema:
+          type: object
+          additionalProperties: true
+          description: Optional JSON Schema for the intent's payload
+        description:
+          type: string
+          description: Optional per-intent description for AI prompts
+      required:
+        - intent
+        - active
     CameraGroup:
       type: object
       description: An iRacing camera group entry mapping a human-readable name to its numeric SDK ID.
@@ -336,26 +378,6 @@ components:
       required:
         - carNumber
         - userName
-    IntentCapability:
-      type: object
-      properties:
-        intent:
-          type: string
-          description: Intent identifier (e.g., "broadcast.showLiveCam")
-        extensionId:
-          type: string
-          description: Extension providing this intent
-        active:
-          type: boolean
-          description: Whether the handler is currently registered and executable
-        schema:
-          type: object
-          additionalProperties: true
-          description: Optional JSON Schema for the intent's payload
-      required:
-        - intent
-        - extensionId
-        - active
     ConnectionHealth:
       type: object
       properties:

@@ -243,13 +243,21 @@ export interface ConnectionHealth {
   metadata?: Record<string, unknown>;
 }
 
-export interface IntentCapability {
+/** A single intent registration within an extension's capability entry (issue #163). */
+export interface DirectorIntentRegistration {
   intent: string;
-  extensionId: string;
   active: boolean;
   schema?: Record<string, unknown>;
   /** Human-readable description passed verbatim to the Planner LLM (issue #112). */
   description?: string;
+}
+
+/** Per-extension capability grouping — replaces the flat IntentCapability[] (issue #163). */
+export interface DirectorExtensionCapabilities {
+  extensionId: string;
+  intents: DirectorIntentRegistration[];
+  /** Optional prose injected into the AI Planner prompt under EXTENSION CONTEXT (issue #113). */
+  aiContext?: string;
 }
 
 /** iRacing camera group — maps a human-readable name to its numeric SDK ID. */
@@ -266,7 +274,8 @@ export interface CapabilityDriver {
 }
 
 export interface DirectorCapabilities {
-  intents: IntentCapability[];
+  /** Per-extension capability grouping — replaces the flat intents[] (issue #163). */
+  extensions: DirectorExtensionCapabilities[];
   connections: Record<string, ConnectionHealth>;
   /** iRacing camera groups cached from the SDK at check-in time. */
   cameraGroups?: CameraGroup[];
@@ -274,12 +283,6 @@ export interface DirectorCapabilities {
   scenes?: string[];
   /** Drivers in the current simulator session at check-in time. */
   drivers?: CapabilityDriver[];
-  /**
-   * Per-extension AI context prose blocks (issue #113).
-   * Race Control injects these verbatim into the Planner prompt
-   * under a dedicated EXTENSION CONTEXT section.
-   */
-  extensionContexts?: Array<{ extensionId: string; aiContext: string }>;
 }
 
 export interface SessionCheckinRequest {
