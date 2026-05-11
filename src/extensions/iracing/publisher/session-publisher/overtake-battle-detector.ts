@@ -128,31 +128,32 @@ export function detectOvertakeAndBattle(
     if (reported.has(key)) continue;
     reported.add(key);
 
+    const overtakeCar   = carRefFromRoster(state, i);
+    const overtakenCar  = carRefFromRoster(state, displaced);
+    if (!overtakeCar || !overtakenCar) continue;
+
     const overtakePayload = {
       overtakingCarIdx: i,
-      overtakenCar:     carRefFromRoster(state, displaced),
+      overtakenCar,
       newPosition:      currPos,
       lap:              curr.carIdxLapCompleted[i],
       lapDistPct:       curr.carIdxLapDistPct[i],
     };
 
-    const overtakeCar = carRefFromRoster(state, i);
-    if (overtakeCar) {
-      events.push(buildEvent('OVERTAKE', overtakeCar, overtakePayload, opts));
+    events.push(buildEvent('OVERTAKE', overtakeCar, overtakePayload, opts));
 
-      // Tier 2 (#97): OVERTAKE_FOR_LEAD — the pass is for the overall session lead.
-      if (currPos === 1) {
-        events.push(buildEvent('OVERTAKE_FOR_LEAD', overtakeCar, overtakePayload, opts));
-      }
+    // Tier 2 (#97): OVERTAKE_FOR_LEAD — the pass is for the overall session lead.
+    if (currPos === 1) {
+      events.push(buildEvent('OVERTAKE_FOR_LEAD', overtakeCar, overtakePayload, opts));
+    }
 
-      // Tier 2 (#97): OVERTAKE_FOR_CLASS — chaser just took the class lead.
-      // We emit this in addition to OVERTAKE_FOR_LEAD so a "lead for overall and
-      // class" pass produces all three (OVERTAKE, OVERTAKE_FOR_LEAD, OVERTAKE_FOR_CLASS).
-      const prevClassPos = prev.carIdxClassPosition[i];
-      const currClassPos = curr.carIdxClassPosition[i];
-      if (currClassPos === 1 && prevClassPos > 1) {
-        events.push(buildEvent('OVERTAKE_FOR_CLASS', overtakeCar, overtakePayload, opts));
-      }
+    // Tier 2 (#97): OVERTAKE_FOR_CLASS — chaser just took the class lead.
+    // We emit this in addition to OVERTAKE_FOR_LEAD so a "lead for overall and
+    // class" pass produces all three (OVERTAKE, OVERTAKE_FOR_LEAD, OVERTAKE_FOR_CLASS).
+    const prevClassPos = prev.carIdxClassPosition[i];
+    const currClassPos = curr.carIdxClassPosition[i];
+    if (currClassPos === 1 && prevClassPos > 1) {
+      events.push(buildEvent('OVERTAKE_FOR_CLASS', overtakeCar, overtakePayload, opts));
     }
   }
 
@@ -202,13 +203,14 @@ export function detectOvertakeAndBattle(
         battle.closingAnnounced     = false;
 
         const engagedCar = carRefFromRoster(state, i);
-        if (engagedCar) {
+        const leaderCarRef = carRefFromRoster(state, leaderIdx);
+        if (engagedCar && leaderCarRef) {
           events.push(buildEvent(
             'BATTLE_ENGAGED',
             engagedCar,
             {
-              chaserCar:             carRefFromRoster(state, i),
-              leaderCar:             carRefFromRoster(state, leaderIdx),
+              chaserCar:             engagedCar,
+              leaderCar:             leaderCarRef,
               gapSec:                gap,
               closingRateSecPerLap:  closingRate,
               status:                STATUS_ENGAGED,
@@ -238,13 +240,14 @@ export function detectOvertakeAndBattle(
           closingRatePerLap >= CLOSING_RATE_PER_LAP_THRESHOLD
         ) {
           const closingCar = carRefFromRoster(state, i);
-          if (closingCar) {
+          const closingLeaderRef = carRefFromRoster(state, leaderIdx);
+          if (closingCar && closingLeaderRef) {
             events.push(buildEvent(
               'BATTLE_CLOSING',
               closingCar,
               {
-                chaserCar:             carRefFromRoster(state, i),
-                leaderCar:             carRefFromRoster(state, leaderIdx),
+                chaserCar:             closingCar,
+                leaderCar:             closingLeaderRef,
                 gapSec:                gap,
                 closingRateSecPerLap:  closingRatePerLap,
                 status:                'CLOSING',
@@ -268,14 +271,16 @@ export function detectOvertakeAndBattle(
       battle.gapSec = gap;
 
       if (battle.brokenFrames >= BATTLE_BROKEN_FRAMES && battle.status === STATUS_ENGAGED) {
-        const brokenCar = carRefFromRoster(state, i);
-        if (brokenCar) {
+        const brokenCar     = carRefFromRoster(state, i);
+        const brokenChaser  = carRefFromRoster(state, battle.chaserCarIdx);
+        const brokenLeader  = carRefFromRoster(state, battle.leaderCarIdx);
+        if (brokenCar && brokenChaser && brokenLeader) {
           events.push(buildEvent(
             'BATTLE_BROKEN',
             brokenCar,
             {
-              chaserCar:             carRefFromRoster(state, battle.chaserCarIdx),
-              leaderCar:             carRefFromRoster(state, battle.leaderCarIdx),
+              chaserCar:             brokenChaser,
+              leaderCar:             brokenLeader,
               gapSec:                gap,
               closingRateSecPerLap:  battle.closingRateSecPerLap,
               status:                'BROKEN',
@@ -361,32 +366,38 @@ export function detectOvertakeAndBattle(
 
       // LAPPED_TRAFFIC_AHEAD — fired from the lapper's perspective.
       if (!state.trafficAnnouncements.has(laKey)) {
-        const lapperCar = carRefFromRoster(state, lapperIdx);
-        events.push(buildEvent(
-          'LAPPED_TRAFFIC_AHEAD',
-          lapperCar,
-          {
-            lappedCar:      carRefFromRoster(state, lappedIdx),
-            distanceMeters: approxDistanceMeters,
-          },
-          opts,
-        ));
-        state.trafficAnnouncements.set(laKey, 'LAPPED_AHEAD');
+        const lapperCar   = carRefFromRoster(state, lapperIdx);
+        const lappedCar   = carRefFromRoster(state, lappedIdx);
+        if (lapperCar && lappedCar) {
+          events.push(buildEvent(
+            'LAPPED_TRAFFIC_AHEAD',
+            lapperCar,
+            {
+              lappedCar,
+              distanceMeters: approxDistanceMeters,
+            },
+            opts,
+          ));
+          state.trafficAnnouncements.set(laKey, 'LAPPED_AHEAD');
+        }
       }
 
       // BEING_LAPPED — fired from the lapped car's perspective.
       if (!state.trafficAnnouncements.has(blKey)) {
-        const lappedCar = carRefFromRoster(state, lappedIdx);
-        events.push(buildEvent(
-          'BEING_LAPPED',
-          lappedCar,
-          {
-            lappingCar:     carRefFromRoster(state, lapperIdx),
-            distanceMeters: approxDistanceMeters,
-          },
-          opts,
-        ));
-        state.trafficAnnouncements.set(blKey, 'BEING_LAPPED');
+        const lappedCar   = carRefFromRoster(state, lappedIdx);
+        const lappingCar  = carRefFromRoster(state, lapperIdx);
+        if (lappedCar && lappingCar) {
+          events.push(buildEvent(
+            'BEING_LAPPED',
+            lappedCar,
+            {
+              lappingCar,
+              distanceMeters: approxDistanceMeters,
+            },
+            opts,
+          ));
+          state.trafficAnnouncements.set(blKey, 'BEING_LAPPED');
+        }
       }
     }
   }

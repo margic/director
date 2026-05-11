@@ -28,7 +28,7 @@ import {
 } from '../session-publisher/roster-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import type { PublisherCarRef } from '../event-types';
-import { makeFrame, cloneFrame, withPitExit } from './frame-fixtures';
+import { makeFrame, cloneFrame, withPitExit, seedRoster } from './frame-fixtures';
 
 const SWAP_CTX: DriverSwapDetectorContext = {
   rigId: 'rig-01',
@@ -46,7 +46,11 @@ const ROSTER_CTX: RosterDetectorContext = {
 const CTX = ROSTER_CTX;
 
 let state: SessionState;
-beforeEach(() => { state = createSessionState('rs-1', 1); });
+beforeEach(() => {
+  // Note: DRIVER_SWAP tests seed car 0 individually; ROSTER_UPDATED tests
+  // manage their own knownRoster via detectRoster's currentRoster parameter.
+  state = createSessionState('rs-1', 1);
+});
 
 function detect(
   prev: ReturnType<typeof makeFrame> | null,
@@ -82,6 +86,8 @@ describe('detectDriverSwapAndRoster — seeding', () => {
 
 describe('DRIVER_SWAP_COMPLETED', () => {
   function pendingSwapState(s: SessionState, sessionTimeAtInitiation = 100): void {
+    // Seed the player car so carRefFromRoster resolves for event emission.
+    seedRoster(s, [0]);
     s.driverSwapPending = true;
     s.pendingSwapOutgoingDriverId = 'driver-out';
     s.pendingSwapIncomingDriverId = 'driver-in';
@@ -249,11 +255,11 @@ describe('ROSTER_UPDATED', () => {
   });
 
   it('fires with both added and removed in a single diff', () => {
-    const initial = new Map([[1, ref(1)], [2, ref(2)]]);
+    const initial = new Map([[0, ref(0)], [1, ref(1)], [2, ref(2)]]);
     const f0 = makeFrame(); const f1 = cloneFrame(f0);
     detectRoster(f0, f1, state, { ...CTX, currentRoster: initial });
 
-    const updated = new Map([[2, ref(2)], [7, ref(7)]]); // 1 removed, 7 added
+    const updated = new Map([[0, ref(0)], [2, ref(2)], [7, ref(7)]]); // 1 removed, 7 added
     const f2 = cloneFrame(f1); const f3 = cloneFrame(f2);
     const events = detectRoster(f2, f3, state, { ...CTX, currentRoster: updated });
     const ev = events.find(e => e.type === 'ROSTER_UPDATED');

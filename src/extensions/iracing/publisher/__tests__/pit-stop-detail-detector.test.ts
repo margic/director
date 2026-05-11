@@ -22,16 +22,17 @@ import {
   withPitStall,
   withPitExit,
   withLapCompleted,
+  seedRoster,
+  ALL_CAR_INDICES,
 } from './frame-fixtures';
 
 const CTX: PitStopDetailContext = { rigId: 'rig-01', raceSessionId: 'rs-1', playerCarIdx: 0 };
 
 let state: SessionState;
-beforeEach(() => { state = createSessionState('rs-1', 1); });
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+beforeEach(() => {
+  state = createSessionState('rs-1', 1);
+  seedRoster(state, ALL_CAR_INDICES);
+});
 
 function detect(
   prev: ReturnType<typeof makeFrame> | null,

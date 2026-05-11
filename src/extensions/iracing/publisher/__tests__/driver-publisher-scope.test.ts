@@ -25,12 +25,14 @@ import {
   type DriverLapPerformanceContext,
 } from '../driver-publisher/lap-performance-driver';
 import { createSessionState } from '../session-state';
-import { makeFrame, cloneFrame, CAR_COUNT, TrackSurface } from './frame-fixtures';
+import { makeFrame, cloneFrame, CAR_COUNT, TrackSurface, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
 
 const PLAYER_CAR_IDX = 7;
 
 function makeState() {
-  return createSessionState('rs-multi', 1);
+  const s = createSessionState('rs-multi', 1);
+  seedRoster(s, ALL_CAR_INDICES);
+  return s;
 }
 
 /** Build a frame where every car has identical baseline state. */

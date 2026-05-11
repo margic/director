@@ -13,7 +13,7 @@ import {
   type IncidentStintContext,
 } from '../driver-publisher/incident-stint-detector';
 import { createSessionState, type SessionState } from '../session-state';
-import { makeFrame, cloneFrame, withPitExit } from './frame-fixtures';
+import { makeFrame, cloneFrame, withPitExit, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
 
 const CTX: IncidentStintContext = {
   rigId: 'rig-01',
@@ -22,7 +22,10 @@ const CTX: IncidentStintContext = {
 };
 
 let state: SessionState;
-beforeEach(() => { state = createSessionState('rs-1', 1); });
+beforeEach(() => {
+  state = createSessionState('rs-1', 1);
+  seedRoster(state, ALL_CAR_INDICES);
+});
 
 function detect(
   prev: ReturnType<typeof makeFrame> | null,
