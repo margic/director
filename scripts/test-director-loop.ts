@@ -95,15 +95,44 @@ async function testCheckIn(): Promise<string | null> {
 
   const url = `${CONFIG.apiBaseUrl}/api/director/v1/sessions/${CONFIG.testSessionId}/checkin`;
 
-  // Build realistic capabilities payload
+  // Build realistic capabilities payload (#163: extensions[] replaces flat intents[])
   const capabilities = {
-    intents: [
-      { intent: 'system.wait', extensionId: 'builtin', active: true },
-      { intent: 'system.log', extensionId: 'builtin', active: true },
-      { intent: 'broadcast.showLiveCam', extensionId: 'iracing-extension', active: true },
-      { intent: 'obs.switchScene', extensionId: 'obs-extension', active: true },
-      { intent: 'communication.announce', extensionId: 'discord-extension', active: true },
-      { intent: 'communication.talkToChat', extensionId: 'youtube-extension', active: true },
+    extensions: [
+      {
+        extensionId: 'builtin',
+        intents: [
+          { intent: 'system.wait', active: true },
+          { intent: 'system.log', active: true },
+        ],
+      },
+      {
+        extensionId: 'iracing-extension',
+        intents: [
+          { intent: 'broadcast.showLiveCam', active: true },
+        ],
+        aiContext: 'The iRacing extension controls Race Director cameras and instant replay playback.',
+      },
+      {
+        extensionId: 'obs-extension',
+        intents: [
+          { intent: 'obs.switchScene', active: true },
+        ],
+        aiContext: 'The OBS extension switches the active OBS Studio video scene.',
+      },
+      {
+        extensionId: 'discord-extension',
+        intents: [
+          { intent: 'communication.announce', active: true },
+        ],
+        aiContext: 'The Discord extension announces messages via text-to-speech in the race team voice channel.',
+      },
+      {
+        extensionId: 'youtube-extension',
+        intents: [
+          { intent: 'communication.talkToChat', active: true },
+        ],
+        aiContext: 'The YouTube extension posts messages to the live stream chat.',
+      },
     ],
     connections: {
       obs: { connected: true, version: '30.0.0' },
