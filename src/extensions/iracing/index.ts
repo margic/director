@@ -755,6 +755,21 @@ function buildTelemetryFrame(): TelemetryFrame | null {
         steeringWheelPctTorque: readVarFloat('SteeringWheelPctTorque', buf.offset),
         solarAltitude:          readVarFloat('SolarAltitude',          buf.offset),
         carIdxSpeed:            readVarFloat('CarIdxSpeed',            buf.offset),
+
+        // Race-narrative additions (#151–#156). Each may be missing on
+        // older iRacing builds — assembleTelemetryFrame defaults to 0/-1.
+        sessionLapsRemain:   readVarInt('SessionLapsRemainEx', buf.offset)
+                          ?? readVarInt('SessionLapsRemain',   buf.offset),
+        sessionLapsTotal:    readVarInt('SessionLapsTotal',    buf.offset),
+        sessionTimeRemain:   readVarFloat('SessionTimeRemain', buf.offset),
+        lapDeltaToBestLap:   readVarFloat('LapDeltaToBestLap', buf.offset),
+        lapDeltaToBestLapOk: readVarInt('LapDeltaToBestLap_OK', buf.offset),
+        engineWarnings:      readVarInt('EngineWarnings',      buf.offset),
+        fuelUsePerHour:      readVarFloat('FuelUsePerHour',    buf.offset),
+        lfTempCM:            readVarFloat('LFtempCM',          buf.offset),
+        rfTempCM:            readVarFloat('RFtempCM',          buf.offset),
+        lrTempCM:            readVarFloat('LRtempCM',          buf.offset),
+        rrTempCM:            readVarFloat('RRtempCM',          buf.offset),
     };
 
     return assembleTelemetryFrame(reads);

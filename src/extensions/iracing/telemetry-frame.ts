@@ -48,6 +48,20 @@ export interface RawTelemetryReads {
   steeringWheelPctTorque: number[] | null;
   solarAltitude:          number[] | null;
   carIdxSpeed:            number[] | null;
+
+  // Race-narrative additions (#151–#156). All optional — koffi reads are
+  // added incrementally; missing values default to 0/-1 in assembleTelemetryFrame.
+  sessionLapsRemain?:   number[] | null;
+  sessionLapsTotal?:    number[] | null;
+  sessionTimeRemain?:   number[] | null;
+  lapDeltaToBestLap?:   number[] | null;
+  lapDeltaToBestLapOk?: number[] | null;
+  engineWarnings?:      number[] | null;
+  fuelUsePerHour?:      number[] | null;
+  lfTempCM?:            number[] | null;
+  rfTempCM?:            number[] | null;
+  lrTempCM?:            number[] | null;
+  rrTempCM?:            number[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +107,18 @@ export function assembleTelemetryFrame(r: RawTelemetryReads): TelemetryFrame {
     steeringWheelPctTorque: r.steeringWheelPctTorque?.[0] ?? 0,
     solarAltitude:          r.solarAltitude?.[0]          ?? 0,
     carIdxSpeed:            Float32Array.from(r.carIdxSpeed ?? []),
+
+    sessionLapsRemain:   r.sessionLapsRemain?.[0]   ?? -1,
+    sessionLapsTotal:    r.sessionLapsTotal?.[0]    ?? -1,
+    sessionTimeRemain:   r.sessionTimeRemain?.[0]   ?? -1,
+    lapDeltaToBestLap:   r.lapDeltaToBestLap?.[0]   ?? 0,
+    lapDeltaToBestLapOk: r.lapDeltaToBestLapOk?.[0] ?? 0,
+    engineWarnings:      r.engineWarnings?.[0]      ?? 0,
+    fuelUsePerHour:      r.fuelUsePerHour?.[0]      ?? 0,
+    lfTempCM:            r.lfTempCM?.[0]            ?? 0,
+    rfTempCM:            r.rfTempCM?.[0]            ?? 0,
+    lrTempCM:            r.lrTempCM?.[0]            ?? 0,
+    rrTempCM:            r.rrTempCM?.[0]            ?? 0,
   };
 }
 

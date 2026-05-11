@@ -234,6 +234,10 @@ describe('STINT_MILESTONE', () => {
       stoppedFrames: 0, isStoppedOnTrack: false, stoppedStartSessionTime: null,
       pitStallArrivalFuelLevel: null, onOutLap: false, pitExitLapsCompleted: null,
       stintStartLap: 0, firedStintMilestones: new Set([25, 50, 75]),
+      recentGapToAhead: [], closingRateToAhead: 0,
+      recentGapToBehind: [], closingRateToBehind: 0,
+      lapsSinceLastPit: 0, estimatedFuelLapsRemaining: 0, inPitWindow: false,
+      classPositionHistory: [], stintLapTimes: [],
     });
 
     // Pit exit frame

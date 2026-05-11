@@ -31,6 +31,11 @@ import { detectDriverLapPerformance } from './lap-performance-driver';
 import { detectPlayerPhysics } from './player-physics-detector';
 import { buildIdentityEvents } from './identity-event-builder';
 import { IdentityOverrideService } from './identity-override';
+import { aggregateRaceState } from '../shared/race-state-aggregator';
+import { detectGapTrend } from './gap-trend-detector';
+import { detectClassPositionChange } from './class-position-detector';
+import { detectPitWindow } from './pit-window-detector';
+import { detectNarrativePolish } from './narrative-polish-detector';
 import {
   createSessionState,
   buildEvent,
@@ -143,6 +148,15 @@ export class DriverPublisherOrchestrator {
     const playerCarIdx = this.playerCarIdx ?? -1;
     const events: PublisherEvent[] = [];
 
+    // Race-narrative state aggregator (#151–#152) — must run BEFORE
+    // detectors so they can consume the rolling windows / derived state.
+    if (playerCarIdx >= 0) {
+      aggregateRaceState(this.prevFrame, frame, this.state, {
+        playerCarIdx,
+        estimatedStintLaps: this.estimatedStintLaps,
+      });
+    }
+
     // Identity — resolve on every frame; only emits on first resolve or change.
     if (this.iracingUserName) {
       const identityResult = this.identity.resolve(this.iracingUserName, this.identityDisplayName);
@@ -180,6 +194,12 @@ export class DriverPublisherOrchestrator {
       playerCarIdx,
       carNumberByCarIdx: this.carNumberByCarIdx.size > 0 ? this.carNumberByCarIdx : undefined,
     }));
+
+    // Race-narrative detectors (#153–#156) — all gated on playerCarIdx.
+    events.push(...detectGapTrend(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
+    events.push(...detectClassPositionChange(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
+    events.push(...detectPitWindow(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
+    events.push(...detectNarrativePolish(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
 
     this.dispatchEvents(events);
 
