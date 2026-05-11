@@ -6,11 +6,12 @@
  *
  *   SESSION_BEST_LAP  — lowest CarIdxBestLapTime across all cars improves
  *   CLASS_BEST_LAP    — lowest CarIdxBestLapTime within a CarClassID improves
+ *   STINT_BEST_LAP    — per-car CarIdxLastLapTime improves on the car's
+ *                       current stint best (Issue #147)
  *
  * Extracted from the monolithic lap-performance-detector.ts during DIR-1
- * refactoring. Logic and state fields are identical; only the driver-specific
- * events (PERSONAL_BEST_LAP, LAP_TIME_DEGRADATION, STINT_BEST_LAP) have
- * been removed — they live in driver-publisher/lap-performance-driver.ts.
+ * refactoring. Driver-specific events (PERSONAL_BEST_LAP,
+ * LAP_TIME_DEGRADATION) live in driver-publisher/lap-performance-driver.ts.
  */
 
 import type { TelemetryFrame, SessionState } from '../session-state';
@@ -61,12 +62,35 @@ export function detectSessionLapPerformance(
   // recompute when necessary.
   let anyLapCompleted = false;
 
+  // -------------------------------------------------------------------------
+  // STINT_BEST_LAP — per-car CarIdxLastLapTime improves on the car's
+  // current stint best. Emitted from the session pipeline (Issue #147)
+  // because every rig watching the field should observe these for every
+  // car, not just the player car.
+  // -------------------------------------------------------------------------
   for (let i = 0; i < CAR_COUNT; i++) {
     const prevLaps = prev.carIdxLapCompleted[i];
     const currLaps = curr.carIdxLapCompleted[i];
-    if (currLaps > prevLaps) {
-      anyLapCompleted = true;
+    if (currLaps <= prevLaps) continue;
+    anyLapCompleted = true;
+
+    const cs      = getOrCreateCarState(state, i);
+    const lastLap = curr.carIdxLastLapTime[i];
+    if (lastLap > 0 && (cs.stintBestLapTime === 0 || lastLap < cs.stintBestLapTime)) {
+      cs.stintBestLapTime = lastLap;
+      const stintBestCar = carRefFromRoster(state, i);
+      if (stintBestCar) {
+        events.push(buildEvent(
+          'STINT_BEST_LAP',
+          stintBestCar,
+          { lapNumber: currLaps, lapTime: lastLap },
+          opts,
+        ));
+      }
     }
+
+    cs.lastLapTime   = lastLap;
+    cs.lapsCompleted = currLaps;
   }
 
   if (!anyLapCompleted) {
