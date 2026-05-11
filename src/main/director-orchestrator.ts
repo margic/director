@@ -226,15 +226,39 @@ export class DirectorOrchestrator extends EventEmitter {
       .filter((c: any) => c.onPitRoad)
       .map((c: any) => String(c.carNumber ?? ''));
 
-    // Active battles: pairs of cars within 1.0s of each other
+    // Active battles: same-class adjacent pairs within 1.0s.
+    // Issue #150 — group cars by class first; in multi-class sessions a GT3
+    // sitting 0.5s behind an LMP2 is not a real battle. We sum the
+    // overall-order `gapToCarAhead` values between two same-class cars to
+    // get the inter-class gap (cars[] is already overall-position sorted).
     const battles: Array<{ cars: string[]; gapSec: number }> = [];
-    for (let i = 1; i < cars.length; i++) {
-      const gap = cars[i].gapToCarAhead ?? 0;
-      if (gap > 0 && gap < 1.0) {
-        battles.push({
-          cars: [String(cars[i - 1].carNumber ?? ''), String(cars[i].carNumber ?? '')],
-          gapSec: Math.round(gap * 1000) / 1000,
-        });
+    const carsByClass = new Map<string, number[]>(); // carClass → indices into cars[] (overall order)
+    for (let i = 0; i < cars.length; i++) {
+      const cls = String(cars[i].carClass ?? '');
+      if (!carsByClass.has(cls)) carsByClass.set(cls, []);
+      carsByClass.get(cls)!.push(i);
+    }
+    for (const indices of carsByClass.values()) {
+      // indices are already in overall-position order, which matches classPosition order
+      // for cars within the same class.
+      for (let k = 1; k < indices.length; k++) {
+        const aheadIdx = indices[k - 1];
+        const behindIdx = indices[k];
+        // Sum gap-to-ahead from aheadIdx+1 through behindIdx (inclusive) to get
+        // the cumulative gap across any other-class cars between them.
+        let gap = 0;
+        let valid = true;
+        for (let j = aheadIdx + 1; j <= behindIdx; j++) {
+          const g = cars[j].gapToCarAhead ?? 0;
+          if (g <= 0) { valid = false; break; }
+          gap += g;
+        }
+        if (valid && gap < 1.0) {
+          battles.push({
+            cars: [String(cars[aheadIdx].carNumber ?? ''), String(cars[behindIdx].carNumber ?? '')],
+            gapSec: Math.round(gap * 1000) / 1000,
+          });
+        }
       }
     }
 
