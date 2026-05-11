@@ -366,13 +366,14 @@ export function detectOvertakeAndBattle(
 
       // LAPPED_TRAFFIC_AHEAD — fired from the lapper's perspective.
       if (!state.trafficAnnouncements.has(laKey)) {
-        const lapperCar = carRefFromRoster(state, lapperIdx);
-        if (lapperCar) {
+        const lapperCar   = carRefFromRoster(state, lapperIdx);
+        const lappedCar   = carRefFromRoster(state, lappedIdx);
+        if (lapperCar && lappedCar) {
           events.push(buildEvent(
             'LAPPED_TRAFFIC_AHEAD',
             lapperCar,
             {
-              lappedCar:      carRefFromRoster(state, lappedIdx),
+              lappedCar,
               distanceMeters: approxDistanceMeters,
             },
             opts,
@@ -383,13 +384,14 @@ export function detectOvertakeAndBattle(
 
       // BEING_LAPPED — fired from the lapped car's perspective.
       if (!state.trafficAnnouncements.has(blKey)) {
-        const lappedCar = carRefFromRoster(state, lappedIdx);
-        if (lappedCar) {
+        const lappedCar   = carRefFromRoster(state, lappedIdx);
+        const lappingCar  = carRefFromRoster(state, lapperIdx);
+        if (lappedCar && lappingCar) {
           events.push(buildEvent(
             'BEING_LAPPED',
             lappedCar,
             {
-              lappingCar:     carRefFromRoster(state, lapperIdx),
+              lappingCar,
               distanceMeters: approxDistanceMeters,
             },
             opts,
