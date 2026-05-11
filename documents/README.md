@@ -41,6 +41,8 @@ Then per-extension and per-integration specs:
 
 - `feature_iracing_extension.md`
 - `feature_iracing_publisher.md`
+- `feature_race_narrative.md` (PROPOSED — planning artefact for the
+  driver-rig scope fix and richer narrative events)
 - `feature_obs_integration.md`
 - `feature_overlay_system.md`
 - `feature_talk_to_drivers.md` (Discord + TTS)
