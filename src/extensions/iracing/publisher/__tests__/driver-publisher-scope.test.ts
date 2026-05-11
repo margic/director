@@ -127,7 +127,7 @@ describe('driver-rig scope: every car changes state on the same tick', () => {
     expect(begins[0].car?.carIdx).toBe(PLAYER_CAR_IDX);
   });
 
-  it('detectDriverLapPerformance emits exactly one STINT_BEST_LAP for the player car', () => {
+  it('detectDriverLapPerformance no longer emits STINT_BEST_LAP (now session-scoped, Issue #147)', () => {
     const state = makeState();
     const ctx: DriverLapPerformanceContext = {
       rigId: 'rig-01',
@@ -148,10 +148,11 @@ describe('driver-rig scope: every car changes state on the same tick', () => {
 
     const events = detectDriverLapPerformance(prev, curr, state, ctx);
 
+    // STINT_BEST_LAP is now emitted by the session pipeline only.
     const stintBests = events.filter(e => e.type === 'STINT_BEST_LAP');
-    expect(stintBests).toHaveLength(1);
-    expect(stintBests[0].car?.carIdx).toBe(PLAYER_CAR_IDX);
+    expect(stintBests).toHaveLength(0);
 
+    // PERSONAL_BEST_LAP remains driver-scoped to the player car.
     const personalBests = events.filter(e => e.type === 'PERSONAL_BEST_LAP');
     expect(personalBests).toHaveLength(1);
     expect(personalBests[0].car?.carIdx).toBe(PLAYER_CAR_IDX);

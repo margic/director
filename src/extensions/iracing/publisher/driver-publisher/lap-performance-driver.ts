@@ -5,12 +5,16 @@
  * Emits events only meaningful from the player's own rig:
  *
  *   PERSONAL_BEST_LAP    — player car CarIdxBestLapTime improves
- *   STINT_BEST_LAP       — per-car CarIdxLastLapTime improves on stintBestLapTime
  *   LAP_TIME_DEGRADATION — rolling avg of player CarIdxLastLapTime > stint-best * (1+threshold)
  *
  * Extracted from the monolithic lap-performance-detector.ts during DIR-1
- * refactoring. SESSION_BEST_LAP and CLASS_BEST_LAP belong to the session
- * pipeline and live in session-publisher/lap-performance-session.ts.
+ * refactoring. SESSION_BEST_LAP, CLASS_BEST_LAP and STINT_BEST_LAP belong
+ * to the session pipeline and live in
+ * session-publisher/lap-performance-session.ts (Issue #147).
+ *
+ * The player's per-car `stintBestLapTime` is still tracked here (without
+ * emitting an event) because `LAP_TIME_DEGRADATION` compares the rolling
+ * average against the player's stint best.
  */
 
 import type { TelemetryFrame, SessionState } from '../session-state';
@@ -80,18 +84,11 @@ export function detectDriverLapPerformance(
   const cs      = getOrCreateCarState(state, i);
   const lastLap = curr.carIdxLastLapTime[i];
 
-  // STINT_BEST_LAP — player last lap improves on stint best
+  // Track player's stint best for LAP_TIME_DEGRADATION below. The
+  // STINT_BEST_LAP event itself is emitted by the session pipeline
+  // (lap-performance-session.ts, Issue #147).
   if (lastLap > 0 && (cs.stintBestLapTime === 0 || lastLap < cs.stintBestLapTime)) {
     cs.stintBestLapTime = lastLap;
-    const stintBestCar = carRefFromRoster(state, i);
-    if (stintBestCar) {
-      events.push(buildEvent(
-        'STINT_BEST_LAP',
-        stintBestCar,
-        { lapNumber: currLaps, lapTime: lastLap },
-        opts,
-      ));
-    }
     // Reset the player degradation latch — the stint just got a fresh best.
     state.playerDegradationFired = false;
   }
