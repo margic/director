@@ -253,8 +253,8 @@ describe('onConnectionChange', () => {
 
 describe('onTelemetryFrame — detector pipeline', () => {
   it('runs all detectors and forwards events to the transport', async () => {
-    // PIT_ENTRY comes from the driver publisher; enable it.
-    const { orch, director, batches } = makeActiveOrchestrator({ 'publisher.driver.enabled': true });
+    // PIT_ENTRY comes from the driver publisher; use scope='both' to enable it.
+    const { orch, director, batches } = makeActiveOrchestrator({ 'publisher.scope': 'both' });
     // Driver-rig scope: detectors are scoped to playerCarIdx — must set it
     // before the player car is the one we transition.
     orch.setSessionMetadata({ playerCarIdx: 0 });
@@ -282,8 +282,8 @@ describe('onTelemetryFrame — detector pipeline', () => {
   });
 
   it('emits iracing.publisherEventEmitted once per detector event', () => {
-    // INCIDENT_POINT comes from the driver publisher; enable it.
-    const { orch, director } = makeActiveOrchestrator({ 'publisher.driver.enabled': true });
+    // INCIDENT_POINT comes from the driver publisher; use scope='both' to enable it.
+    const { orch, director } = makeActiveOrchestrator({ 'publisher.scope': 'both' });
     orch.setSessionMetadata({ playerCarIdx: 0 });
     const f1 = makeFrame({ playerIncidentCount: 0 });
     orch.onTelemetryFrame(f1);
@@ -360,8 +360,8 @@ describe('iracing.publisherStateChanged', () => {
   });
 
   it('includes pipeline discriminator with active state and event counts (DIR-2/3)', async () => {
-    // With publisher.driver.enabled = true, both pipelines are active.
-    const { orch, director } = makeActiveOrchestrator({ 'publisher.driver.enabled': true });
+    // With publisher.scope = 'both', both pipelines are active.
+    const { orch, director } = makeActiveOrchestrator({ 'publisher.scope': 'both' });
     await vi.advanceTimersByTimeAsync(1100);
     const statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
     expect(statusEvents.length).toBeGreaterThan(0);
@@ -580,7 +580,7 @@ describe('releaseSession (DIR-2)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Driver Publisher opt-in (DIR-3)
+// Driver Publisher opt-in (DIR-3) — now covered by publisher.scope (DIR-4)
 // ---------------------------------------------------------------------------
 
 describe('Driver Publisher opt-in via publisher.driver.enabled (DIR-3)', () => {
@@ -593,11 +593,11 @@ describe('Driver Publisher opt-in via publisher.driver.enabled (DIR-3)', () => {
     expect(orch.isAnyPipelineActive).toBe(true); // Session Publisher
     // No way to introspect driver-only from outside — verify via
     // iracing.publisherStateChanged event.
-    // driver.active defaults to false when publisher.driver.enabled is unset.
+    // driver.active defaults to false when publisher.scope defaults to 'session'.
   });
 
-  it('activates Driver Publisher via bindSession when publisher.driver.enabled is true', async () => {
-    const { orch, director } = makeOrchestrator({ 'publisher.driver.enabled': true });
+  it('activates both pipelines via bindSession when publisher.scope is both', async () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'both' });
     orch.activate();
     orch.onConnectionChange(true);
     orch.bindSession('session-xyz');
@@ -666,6 +666,8 @@ describe('registerDriver (DIR-3)', () => {
     await orchWithRegFetch.registerDriver('register-session');
 
     expect(director.savedSettings['publisher.driver.sessionId']).toBe('register-session');
+    // DIR-4: registerDriver must persist scope='driver'
+    expect(director.savedSettings['publisher.scope']).toBe('driver');
   });
 
   it('emits failure result on 404 and does not activate Driver Publisher', async () => {
@@ -817,5 +819,124 @@ describe('single-transport invariant (DIR-1)', () => {
 
     orch.releaseSession();
     expect(orch.isAnyPipelineActive).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// publisher.scope migration (DIR-4)
+// ---------------------------------------------------------------------------
+
+describe('migrateConfig: publisher.scope migration (DIR-4)', () => {
+  it("migrates driver=true, session=true → scope='both'", () => {
+    const { orch, director } = makeOrchestrator({
+      'publisher.driver.enabled':  true,
+      'publisher.session.enabled': true,
+    });
+    orch.activate();
+    expect(director.savedSettings['publisher.scope']).toBe('both');
+    expect(director.deletedSettings).toContain('publisher.driver.enabled');
+    expect(director.deletedSettings).toContain('publisher.session.enabled');
+  });
+
+  it("migrates driver=true, session=false → scope='driver'", () => {
+    const { orch, director } = makeOrchestrator({
+      'publisher.driver.enabled':  true,
+      'publisher.session.enabled': false,
+    });
+    orch.activate();
+    expect(director.savedSettings['publisher.scope']).toBe('driver');
+    expect(director.deletedSettings).toContain('publisher.driver.enabled');
+    expect(director.deletedSettings).toContain('publisher.session.enabled');
+  });
+
+  it("defaults to scope='session' when no legacy flags are present", () => {
+    const { orch, director } = makeOrchestrator();
+    orch.activate();
+    expect(director.savedSettings['publisher.scope']).toBe('session');
+  });
+
+  it('does not overwrite an already-set publisher.scope', () => {
+    const { orch, director } = makeOrchestrator({
+      'publisher.scope':           'both',
+      'publisher.driver.enabled':  true, // legacy flag present alongside new key
+    });
+    orch.activate();
+    // saveSetting should NOT be called for publisher.scope since it is already set
+    expect(director.savedSettings['publisher.scope']).toBeUndefined();
+    // The original scope value in settings is preserved
+    expect(director.settings['publisher.scope']).toBe('both');
+    // Legacy flag should still be deleted
+    expect(director.deletedSettings).toContain('publisher.driver.enabled');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// publisher.scope — activation contract (DIR-4)
+// ---------------------------------------------------------------------------
+
+describe("publisher.scope = 'session' (DIR-4)", () => {
+  it('activates SessionPublisher only on bindSession', async () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'session' });
+    orch.activate();
+    orch.onConnectionChange(true);
+    orch.bindSession('session-xyz');
+    await vi.advanceTimersByTimeAsync(1100);
+    const statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    const last = statusEvents[statusEvents.length - 1];
+    expect(last?.payload.pipelines.session.active).toBe(true);
+    expect(last?.payload.pipelines.driver.active).toBe(false);
+  });
+
+  it('is the default when publisher.scope is not configured', async () => {
+    // No scope in settings — migration saves 'session' but the settings object
+    // still has undefined; the ?? 'session' fallback in startSessionPipeline
+    // ensures session-only behaviour.
+    const { orch, director } = makeOrchestrator();
+    orch.activate();
+    orch.onConnectionChange(true);
+    orch.bindSession('session-xyz');
+    await vi.advanceTimersByTimeAsync(1100);
+    const statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    const last = statusEvents[statusEvents.length - 1];
+    expect(last?.payload.pipelines.session.active).toBe(true);
+    expect(last?.payload.pipelines.driver.active).toBe(false);
+  });
+});
+
+describe("publisher.scope = 'driver' (DIR-4)", () => {
+  it('activates DriverPublisher only on bindSession', async () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'driver' });
+    orch.activate();
+    orch.onConnectionChange(true);
+    orch.bindSession('session-xyz');
+    await vi.advanceTimersByTimeAsync(1100);
+    const statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    const last = statusEvents[statusEvents.length - 1];
+    expect(last?.payload.pipelines.driver.active).toBe(true);
+    expect(last?.payload.pipelines.session.active).toBe(false);
+  });
+});
+
+describe("publisher.scope = 'both' (DIR-4)", () => {
+  it('activates both SessionPublisher and DriverPublisher on bindSession', async () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'both' });
+    orch.activate();
+    orch.onConnectionChange(true);
+    orch.bindSession('session-xyz');
+    await vi.advanceTimersByTimeAsync(1100);
+    const statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    const last = statusEvents[statusEvents.length - 1];
+    expect(last?.payload.pipelines.session.active).toBe(true);
+    expect(last?.payload.pipelines.driver.active).toBe(true);
+  });
+
+  it("logs a warning when scope is 'both'", () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'both' });
+    orch.activate();
+    orch.onConnectionChange(true);
+    orch.bindSession('session-xyz');
+    expect(
+      director.logs.some((l) => l.level === 'warn' && l.message.includes('both')),
+    ).toBe(true);
   });
 });

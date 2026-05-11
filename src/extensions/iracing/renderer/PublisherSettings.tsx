@@ -9,6 +9,7 @@ import { Radio, ArrowLeftRight, RefreshCw, AlertCircle, CheckCircle2, ChevronDow
 // ---------------------------------------------------------------------------
 
 type PublisherStatusKind = 'active' | 'idle' | 'connecting' | 'error';
+type PublisherScope = 'session' | 'driver' | 'both';
 
 interface PipelineStatus {
   active: boolean;
@@ -70,6 +71,7 @@ export const PublisherSettings = () => {
   // Settings loaded from config
   const [sessionEnabled, setSessionEnabled]         = useState(true);
   const [driverEnabled, setDriverEnabled]           = useState(false);
+  const [scope, setScope]                           = useState<PublisherScope>('session');
   const [rigId, setRigId]                           = useState('');
   const [driverSessionId, setDriverSessionId]       = useState('');
   const [registeredDriverName, setRegisteredDriverName] = useState('');
@@ -110,15 +112,17 @@ export const PublisherSettings = () => {
     const load = async () => {
       if (!window.electronAPI?.config) return;
       try {
-        const [sessEnabled, drvEnabled, id, sessId, driverDisplayName] = await Promise.all([
+        const [sessEnabled, drvEnabled, publisherScope, id, sessId, driverDisplayName] = await Promise.all([
           window.electronAPI.config.get('publisher.session.enabled'),
           window.electronAPI.config.get('publisher.driver.enabled'),
+          window.electronAPI.config.get('publisher.scope'),
           window.electronAPI.config.get('publisher.rigId'),
           window.electronAPI.config.get('publisher.driver.sessionId'),
           window.electronAPI.config.get('publisher.driver.displayName'),
         ]);
         setSessionEnabled(sessEnabled !== false);
         setDriverEnabled(drvEnabled ?? false);
+        setScope((publisherScope as PublisherScope | undefined) ?? 'session');
         setRigId(id ?? '');
         setDriverSessionId(sessId ?? '');
         if (driverDisplayName) setRegisteredDriverName(driverDisplayName);
@@ -357,9 +361,18 @@ export const PublisherSettings = () => {
       {/* ── Stats ─────────────────────────────────────────────────────────── */}
       <Card className="bg-card border-border">
         <CardHeader className="pb-3">
-          <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest">
-            Publisher Stats
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest">
+              Publisher Stats
+            </CardTitle>
+            {/* Scope badge — read-only, reflects publisher.scope config value */}
+            <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-rajdhani uppercase tracking-wider font-bold
+              ${scope === 'driver'  ? 'border-[color:var(--color-primary)]/40 bg-[color:var(--color-primary)]/10 text-[color:var(--color-primary)]'
+              : scope === 'both'   ? 'border-[color:var(--color-yellow-flag)]/40 bg-[color:var(--color-yellow-flag)]/10 text-[color:var(--color-yellow-flag)]'
+              : 'border-[color:var(--color-secondary)]/40 bg-[color:var(--color-secondary)]/10 text-[color:var(--color-secondary)]'}`}>
+              Scope: {scope}
+            </span>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Counters row */}
