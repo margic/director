@@ -27,8 +27,6 @@ import type { TelemetryFrame, SessionState } from '../session-state';
 import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
 import type { PublisherEvent } from '../event-types';
 
-const CAR_COUNT = 64;
-
 const TRACK_PIT_STALL = 2; // iRacing: irsdk_TrkLoc PitStall
 
 const FUEL_LOW_THRESHOLDS = [0.10, 0.05] as const;
@@ -36,11 +34,15 @@ const FUEL_LOW_THRESHOLDS = [0.10, 0.05] as const;
 /** Minimum FuelLevel increase (litres) that triggers FUEL_LEVEL_CHANGE. */
 export const DEFAULT_FUEL_JUMP_THRESHOLD_L = 1.0;
 
+/** Module-level latch — log "playerCarIdx unset" warning at most once. */
+let unsetPlayerCarIdxWarned = false;
+
 export interface PitStopDetailContext {
   rigId: string;
   raceSessionId: string;
-  /** iRacing DriverInfo.DriverCarIdx — required for player-specific events. */
-  playerCarIdx?: number;
+  /** iRacing DriverInfo.DriverCarIdx — required: detectors are scoped to the
+   *  player car only (Issue: scope driver-rig detectors to playerCarIdx). */
+  playerCarIdx: number;
   /**
    * Minimum FuelLevel increase (litres) to fire FUEL_LEVEL_CHANGE.
    * Defaults to DEFAULT_FUEL_JUMP_THRESHOLD_L (1.0 L).
@@ -59,6 +61,17 @@ export function detectPitStopDetail(
   ctx: PitStopDetailContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
+
+  const playerCarIdx = ctx.playerCarIdx;
+  if (playerCarIdx === undefined || playerCarIdx < 0) {
+    if (!unsetPlayerCarIdxWarned) {
+      unsetPlayerCarIdxWarned = true;
+      // eslint-disable-next-line no-console
+      console.warn('[pit-stop-detail-detector] playerCarIdx unset; skipping frame');
+    }
+    return events;
+  }
+
   if (prev === null) {
     // Seed player fuel tracking on first frame.
     if (state.playerFuelAtLapStart === 0) {
@@ -68,13 +81,13 @@ export function detectPitStopDetail(
   }
 
   const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
-  const playerCarIdx = ctx.playerCarIdx ?? 0;
   const fuelJumpThreshold = ctx.fuelJumpThresholdL ?? DEFAULT_FUEL_JUMP_THRESHOLD_L;
 
   // -------------------------------------------------------------------------
-  // Per-car: PIT_STOP_BEGIN, PIT_STOP_END, OUT_LAP
+  // Player car only: PIT_STOP_BEGIN, PIT_STOP_END, OUT_LAP
   // -------------------------------------------------------------------------
-  for (let i = 0; i < CAR_COUNT; i++) {
+  {
+    const i = playerCarIdx;
     const cs = getOrCreateCarState(state, i);
     const prevSurface = prev.carIdxTrackSurface[i];
     const currSurface = curr.carIdxTrackSurface[i];
@@ -87,7 +100,7 @@ export function detectPitStopDetail(
     // -----------------------------------------------------------------------
     if (currSurface === TRACK_PIT_STALL && prevSurface !== TRACK_PIT_STALL) {
       cs.pitStallArrivalTime        = curr.sessionTime;
-      cs.pitStallArrivalFuelLevel   = i === playerCarIdx ? curr.fuelLevel : 0;
+      cs.pitStallArrivalFuelLevel   = curr.fuelLevel;
 
       if (car) {
         events.push(buildEvent(
@@ -110,7 +123,7 @@ export function detectPitStopDetail(
         ? curr.sessionTime - cs.pitStallArrivalTime
         : 0;
 
-      const fuelLevelDelta = (i === playerCarIdx && cs.pitStallArrivalFuelLevel !== null)
+      const fuelLevelDelta = cs.pitStallArrivalFuelLevel !== null
         ? curr.fuelLevel - cs.pitStallArrivalFuelLevel
         : 0;
 

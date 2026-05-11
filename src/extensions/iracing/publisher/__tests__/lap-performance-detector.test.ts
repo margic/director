@@ -23,7 +23,7 @@ import { makeFrame, cloneFrame, CAR_COUNT } from './frame-fixtures';
 
 // Combined context — covers both session and driver slices
 interface LapPerformanceContext extends SessionLapPerformanceContext {
-  playerCarIdx?: number;
+  playerCarIdx: number;
   degradationThreshold?: number;
 }
 
@@ -118,13 +118,18 @@ describe('detectLapPerformance — PERSONAL_BEST_LAP', () => {
     expect(events.find(e => e.type === 'PERSONAL_BEST_LAP')).toBeUndefined();
   });
 
-  it('skips player events when playerCarIdx is undefined', () => {
-    const noPlayerCtx = { ...ctx, playerCarIdx: undefined };
+  it('skips ALL events when playerCarIdx is unset (sentinel -1)', () => {
+    // Driver-rig scope: when playerCarIdx hasn't been resolved, the driver
+    // detectors return [] and log once. STINT_BEST_LAP, PERSONAL_BEST_LAP,
+    // and LAP_TIME_DEGRADATION are all driver-pipeline events — none should
+    // fire from a driver rig that doesn't know its own carIdx.
+    const noPlayerCtx = { ...ctx, playerCarIdx: -1 };
     const f0 = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 1, lastLapTime: 91, bestLapTime: 91 }] });
-    detectLapPerformance(null, f0, state, noPlayerCtx);
+    detectDriverLapPerformance(null, f0, state, noPlayerCtx);
     const f1 = bumpLap(f0, 0, 2, 89, 89);
-    const events = detectLapPerformance(f0, f1, state, noPlayerCtx);
+    const events = detectDriverLapPerformance(f0, f1, state, noPlayerCtx);
     expect(events.find(e => e.type === 'PERSONAL_BEST_LAP')).toBeUndefined();
+    expect(events.find(e => e.type === 'STINT_BEST_LAP')).toBeUndefined();
   });
 });
 
