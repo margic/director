@@ -356,3 +356,42 @@ describe('full race lifecycle sequence', () => {
     expect(allEvents).toContain('SESSION_ENDED');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Regression: #167 — RACE_CHECKERED must not flood on repeated Checkered frames
+// ---------------------------------------------------------------------------
+
+describe('regression #167 — RACE_CHECKERED fires exactly once across N checkered frames', () => {
+  it('emits RACE_CHECKERED exactly once across 10 consecutive Checkered frames', () => {
+    const state = makeState();
+    // Start in Racing
+    let prev = makeFrame({ sessionState: SessionStateEnum.Racing, sessionFlags: FlagBits.Green });
+    detect(null, prev, state);
+
+    // First Checkered frame — transition
+    const firstCheckered = makeFrame({
+      sessionState: SessionStateEnum.Checkered,
+      sessionFlags: FlagBits.Checkered,
+      sessionTick: 100,
+    });
+
+    let total = 0;
+    const eventsOnFirst = detect(prev, firstCheckered, state);
+    total += eventsOnFirst.filter(e => e.type === 'RACE_CHECKERED').length;
+    prev = firstCheckered;
+
+    // 9 more frames at the same sessionState=5 + flag set — should fire zero times
+    for (let tick = 101; tick <= 109; tick++) {
+      const f = makeFrame({
+        sessionState: SessionStateEnum.Checkered,
+        sessionFlags: FlagBits.Checkered,
+        sessionTick: tick,
+      });
+      const ev = detect(prev, f, state);
+      total += ev.filter(e => e.type === 'RACE_CHECKERED').length;
+      prev = f;
+    }
+
+    expect(total).toBe(1);
+  });
+});
