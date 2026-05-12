@@ -158,6 +158,10 @@ export class SessionPublisherOrchestrator {
       this.state = createSessionState(this.raceSessionId, frame.sessionUniqueId);
       this.prevFrame = null;
     } else {
+      // Update lastSessionState so the lifecycle detector's flag-bit guards
+      // (e.g. checkeredAlreadyFired) function correctly on subsequent frames.
+      // See: session-lifecycle-detector.ts — "caller's responsibility".
+      this.state.lastSessionState = frame.sessionState;
       this.prevFrame = frame;
     }
   }
