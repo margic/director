@@ -458,7 +458,7 @@ export const PublisherSettings = () => {
                 value: 'session' as PublisherScope,
                 label: 'Director',
                 tagline: 'Broadcast / spectator rig',
-                blurb: "Publishes flags, overtakes, all cars' laps, and roster.",
+                blurb: "Publishes flags, overtakes, all cars' laps, and roster. One per session — additional Director rigs duplicate every broadcast event.",
               },
               {
                 value: 'driver' as PublisherScope,
