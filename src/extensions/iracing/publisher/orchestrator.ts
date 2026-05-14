@@ -182,7 +182,7 @@ export class PublisherOrchestrator {
    */
   bindSession(raceSessionId: string | null): void {
     if (!raceSessionId) {
-      this.releaseSession();
+      this.releaseSession('bindSession-null');
       return;
     }
 
@@ -213,10 +213,42 @@ export class PublisherOrchestrator {
    * Stops the Session Publisher, sends PUBLISHER_GOODBYE, and flushes the
    * transport. The transport itself stays live (Driver Publisher may still be
    * active after DIR-3).
+   *
+   * @param reason  Optional caller tag — recorded in the log and surfaced via
+   *                the `iracing.publisherStopped` event so the operator can
+   *                see *why* the pipeline deactivated. Investigation aid for
+   *                silent-stop bugs (the publisher going quiet mid-race
+   *                without an obvious cause).
    */
-  releaseSession(): void {
+  releaseSession(reason: string = 'unspecified'): void {
+    const previousRaceSessionId = this.raceSessionId;
+    const wasArmed = this.armedSessionId !== null;
     this.armedSessionId = null;
-    if (!this.sessionPublisher?.isActive && !this.driverPublisher?.isActive) return;
+    if (!this.sessionPublisher?.isActive && !this.driverPublisher?.isActive) {
+      // Nothing was active — still log at info level so we capture a no-op
+      // release for forensic timelines (helps reconstruct silent-stop bugs).
+      if (wasArmed || previousRaceSessionId) {
+        this.cfg.director.log(
+          'info',
+          `Publisher releaseSession (no-op, no active pipeline) — reason='${reason}' previousRaceSessionId='${previousRaceSessionId}' wasArmed=${wasArmed}`,
+        );
+      }
+      return;
+    }
+
+    // Capture stack trace so we can identify the call site if the operator
+    // reports a silent stop. Constructing an Error solely for `.stack` is
+    // intentional — there's no other portable way in Node.js to get a
+    // formatted stack at an arbitrary point. Logged via console.log because
+    // director.log only takes a single-line string.
+    const callerStack = new Error('releaseSession call site').stack ?? '';
+    this.cfg.director.log(
+      'info',
+      `Publisher releaseSession called — reason='${reason}' raceSessionId='${previousRaceSessionId}'`,
+    );
+    // Single console line keeps log streams parseable while preserving the
+    // stack for post-mortem analysis.
+    console.log(`[publisher-orchestrator] releaseSession stack:\n${callerStack}`);
 
     // PUBLISHER_GOODBYE — enqueue before flush so it ships in the final batch.
     this.dispatchLifecycleEvents(this.lifecycleDetector.onDeactivate(this.lifecycleCtx()));
@@ -230,7 +262,17 @@ export class PublisherOrchestrator {
     }
 
     this.raceSessionId = '';
-    this.cfg.director.log('info', 'Publisher session released');
+    this.cfg.director.log('info', `Publisher session released (reason='${reason}')`);
+
+    // Surface the deactivation to the renderer / UI so the operator can see
+    // when (and why) the pipeline went silent. This is the missing signal
+    // that made the original bug invisible during a live race.
+    this.cfg.director.emitEvent('iracing.publisherStopped', {
+      raceSessionId: previousRaceSessionId,
+      rigId:         this.rigId,
+      reason,
+      timestamp:     this.nowFn(),
+    });
   }
 
   /**
@@ -620,7 +662,14 @@ export class PublisherOrchestrator {
       );
     }
 
-    // 30s heartbeat
+    // 30s heartbeat. NOTE: This timer runs in the iRacing extension's
+    // utilityProcess (see src/main/extension-host) — a separate Node.js
+    // process, NOT a renderer BrowserWindow. setInterval here is therefore
+    // NOT subject to background/throttling that affects minimised renderer
+    // windows. If heartbeats stop arriving in production, the cause is
+    // upstream (releaseSession() called, raceSessionId cleared, transport
+    // backoff) — not timer throttling. See `releaseSession` for caller-tag
+    // logging that helps diagnose silent stops.
     this.heartbeatTimer = setInterval(() => this.tickHeartbeat(), HEARTBEAT_INTERVAL_MS);
 
     this.cfg.director.log('info', 'Publisher infrastructure started');
