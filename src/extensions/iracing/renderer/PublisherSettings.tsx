@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Switch } from '@/components/ui/switch';
-import { Radio, ArrowLeftRight, RefreshCw, AlertCircle, CheckCircle2, ChevronDown } from 'lucide-react';
+import { Radio, ArrowLeftRight, RefreshCw, AlertCircle, CheckCircle2, ChevronDown, AlertTriangle, Info } from 'lucide-react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,12 +68,14 @@ const MAX_RECENT_EVENTS = 5;
 
 export const PublisherSettings = () => {
   // Settings loaded from config
-  const [sessionEnabled, setSessionEnabled]         = useState(true);
-  const [driverEnabled, setDriverEnabled]           = useState(false);
   const [scope, setScope]                           = useState<PublisherScope>('session');
   const [rigId, setRigId]                           = useState('');
   const [driverSessionId, setDriverSessionId]       = useState('');
   const [registeredDriverName, setRegisteredDriverName] = useState('');
+
+  // UI-only — "Two-rig setup?" expander
+  const [showHelp, setShowHelp]                     = useState(false);
+  const [scopeChanging, setScopeChanging]           = useState(false);
 
   // Live status
   const [publisherStatus, setPublisherStatus]       = useState<PublisherStatus | null>(null);
@@ -112,16 +113,12 @@ export const PublisherSettings = () => {
     const load = async () => {
       if (!window.electronAPI?.config) return;
       try {
-        const [sessEnabled, drvEnabled, publisherScope, id, sessId, driverDisplayName] = await Promise.all([
-          window.electronAPI.config.get('publisher.session.enabled'),
-          window.electronAPI.config.get('publisher.driver.enabled'),
+        const [publisherScope, id, sessId, driverDisplayName] = await Promise.all([
           window.electronAPI.config.get('publisher.scope'),
           window.electronAPI.config.get('publisher.rigId'),
           window.electronAPI.config.get('publisher.driver.sessionId'),
           window.electronAPI.config.get('publisher.driver.displayName'),
         ]);
-        setSessionEnabled(sessEnabled !== false);
-        setDriverEnabled(drvEnabled ?? false);
         setScope((publisherScope as PublisherScope | undefined) ?? 'session');
         setRigId(id ?? '');
         setDriverSessionId(sessId ?? '');
@@ -217,25 +214,22 @@ export const PublisherSettings = () => {
   // Handlers
   // ---------------------------------------------------------------------------
 
-  const handleToggleSession = useCallback(async (checked: boolean) => {
-    setSessionEnabled(checked);
+  const handleSelectScope = useCallback(async (next: PublisherScope) => {
+    if (next === scope) return;
+    setScope(next);
+    setScopeChanging(true);
     try {
-      await window.electronAPI?.config?.set('publisher.session.enabled', checked);
-      await window.electronAPI?.extensions?.executeIntent('iracing.publisher.setSessionEnabled', { enabled: checked });
+      // Persist to config so the orchestrator picks it up if no session is bound.
+      await window.electronAPI?.config?.set('publisher.scope', next);
+      // Dispatch the intent — the orchestrator restarts pipelines if a session
+      // is bound and iRacing is connected.
+      await window.electronAPI?.extensions?.executeIntent('iracing.publisher.setScope', { scope: next });
     } catch (e) {
-      console.error('Failed to toggle Session Publisher', e);
+      console.error('Failed to set Rig Mode', e);
+    } finally {
+      setScopeChanging(false);
     }
-  }, []);
-
-  const handleToggleDriver = useCallback(async (checked: boolean) => {
-    setDriverEnabled(checked);
-    try {
-      await window.electronAPI?.config?.set('publisher.driver.enabled', checked);
-      await window.electronAPI?.extensions?.executeIntent('iracing.publisher.setDriverEnabled', { enabled: checked });
-    } catch (e) {
-      console.error('Failed to toggle Driver Publisher', e);
-    }
-  }, []);
+  }, [scope]);
 
   const handleRegenerate = useCallback(async () => {
     if (!confirmRegenerate) {
@@ -439,81 +433,221 @@ export const PublisherSettings = () => {
         </CardContent>
       </Card>
 
-      {/* ── Session Publisher ──────────────────────────────────────────────── */}
+      {/* ── Rig Mode (primary control) ─────────────────────────────────────── */}
       <Card className="bg-card border-border">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
-              <Radio className={`w-3.5 h-3.5 ${publisherStatus?.pipelines?.session?.active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`} />
-              Session Publisher
+            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest">
+              Rig Mode
             </CardTitle>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground font-rajdhani uppercase">
-                {sessionEnabled ? 'Enabled' : 'Disabled'}
-              </span>
-              <Switch checked={sessionEnabled} onCheckedChange={handleToggleSession} />
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowHelp((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-[10px] font-rajdhani uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            >
+              <Info className="w-3 h-3" />
+              Two-rig setup?
+            </button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <p className="text-xs text-muted-foreground">
-            Starts automatically when a Director session is active. Publishes flags, overtakes,
-            battles, laps, roster and environment for all cars in the field.
-          </p>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex items-center gap-1.5 text-xs font-rajdhani uppercase tracking-wider font-bold
-              ${!sessionEnabled ? 'text-muted-foreground'
-                : publisherStatus?.pipelines?.session?.active ? 'text-[color:var(--color-green-flag)]'
-                : 'text-muted-foreground'}`}>
-              <span className={`w-2 h-2 rounded-full inline-block
-                ${!sessionEnabled ? 'bg-muted-foreground/40'
-                  : publisherStatus?.pipelines?.session?.active ? 'bg-[color:var(--color-green-flag)]'
-                  : 'bg-muted-foreground'}`} />
-              {!sessionEnabled ? 'Disabled' : publisherStatus?.pipelines?.session?.active ? 'Active' : 'Idle'}
-            </span>
+        <CardContent className="space-y-4">
+          {/* Three-option Rig Mode selector */}
+          <div role="radiogroup" aria-label="Rig Mode" className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {([
+              {
+                value: 'session' as PublisherScope,
+                label: 'Director',
+                tagline: 'Broadcast / spectator rig',
+                blurb: "Publishes flags, overtakes, all cars' laps, and roster.",
+              },
+              {
+                value: 'driver' as PublisherScope,
+                label: 'Driver',
+                tagline: 'Player car telemetry',
+                blurb: 'Publishes pit, fuel, stint best, incidents, and physics for the local player car.',
+              },
+              {
+                value: 'both' as PublisherScope,
+                label: 'Combined',
+                tagline: 'Single-rig dev/demo',
+                blurb: 'Publishes both — not for production multi-rig setups.',
+              },
+            ]).map((opt) => {
+              const selected = scope === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  disabled={scopeChanging}
+                  onClick={() => handleSelectScope(opt.value)}
+                  className={`text-left rounded-md border p-3 transition-colors disabled:opacity-60
+                    ${selected
+                      ? 'border-[color:var(--color-primary)] bg-[color:var(--color-primary)]/10'
+                      : 'border-border bg-background/40 hover:border-muted-foreground/40'}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm font-rajdhani uppercase tracking-widest font-bold
+                      ${selected ? 'text-[color:var(--color-primary)]' : 'text-foreground'}`}>
+                      {opt.label}
+                    </span>
+                    <span className={`w-2.5 h-2.5 rounded-full border
+                      ${selected ? 'bg-[color:var(--color-primary)] border-[color:var(--color-primary)]'
+                                 : 'bg-transparent border-muted-foreground/60'}`} />
+                  </div>
+                  <div className="mt-1 text-[10px] uppercase font-rajdhani tracking-wider text-muted-foreground">
+                    {opt.tagline}
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground leading-snug">
+                    {opt.blurb}
+                  </p>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Combined-mode warning */}
+          {scope === 'both' && (
+            <div className="flex items-start gap-2 rounded-md border border-[color:var(--color-yellow-flag)] bg-[color:var(--color-yellow-flag)]/10 px-3 py-2">
+              <AlertTriangle className="w-4 h-4 text-[color:var(--color-yellow-flag)] shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-rajdhani uppercase tracking-widest font-bold text-[color:var(--color-yellow-flag)]">
+                  Combined Mode — dev/demo only
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Both pipelines run on this rig. In a multi-rig setup this duplicates broadcast events.
+                  Use Director or Driver in production.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Driver-mode-needs-registration callout */}
+          {(scope === 'driver' || scope === 'both') && !driverSessionId && (
+            <div className="flex items-start gap-2 rounded-md border border-[color:var(--color-yellow-flag)] bg-[color:var(--color-yellow-flag)]/10 px-3 py-2">
+              <AlertCircle className="w-4 h-4 text-[color:var(--color-yellow-flag)] shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-rajdhani uppercase tracking-widest font-bold text-[color:var(--color-yellow-flag)]">
+                  Driver Mode requires registration
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Select a session and your driver profile below, then click <strong>Register</strong> to activate the Driver Publisher.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* "Two-rig setup?" expander */}
+          {showHelp && (
+            <div className="rounded-md border border-border bg-background/40 p-3 space-y-2">
+              <p className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+                Choosing a Rig Mode
+              </p>
+              <p className="text-xs text-muted-foreground leading-snug">
+                <strong className="text-foreground">Director</strong> — the broadcast / spectator rig. Publishes field-wide
+                events (flags, overtakes, all cars' laps, roster, environment). One per race session.
+              </p>
+              <p className="text-xs text-muted-foreground leading-snug">
+                <strong className="text-foreground">Driver</strong> — a rig where a driver is racing. Publishes player-car-only
+                events (stint best laps, pit stops, fuel, incidents, physics). One per driver. Requires registration.
+              </p>
+              <p className="text-xs text-muted-foreground leading-snug">
+                <strong className="text-foreground">Combined</strong> — runs both pipelines on a single rig. Intended only for
+                development or single-machine demos.
+              </p>
+              <p className="text-xs text-muted-foreground leading-snug">
+                See <code className="font-jetbrains text-[10px]">documents/feature_iracing_publisher.md</code> for full details.
+              </p>
+            </div>
+          )}
+
+          {/* Pipeline status rows (read-only) */}
+          <div className="space-y-2">
+            <div className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
+              Pipeline Status
+            </div>
+            <div className="rounded-md border border-border divide-y divide-border">
+              {/* Session Publisher row */}
+              {(() => {
+                const enabledByMode = scope === 'session' || scope === 'both';
+                const active = !!publisherStatus?.pipelines?.session?.active;
+                const label =
+                  !enabledByMode ? 'Disabled by mode'
+                  : active        ? 'Active'
+                                  : 'Idle';
+                const dotClass =
+                  !enabledByMode ? 'bg-muted-foreground/40'
+                  : active        ? 'bg-[color:var(--color-green-flag)]'
+                                  : 'bg-muted-foreground';
+                const textClass =
+                  !enabledByMode ? 'text-muted-foreground'
+                  : active        ? 'text-[color:var(--color-green-flag)]'
+                                  : 'text-muted-foreground';
+                return (
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="flex items-center gap-2 text-xs font-rajdhani uppercase tracking-widest text-foreground">
+                      <Radio className={`w-3.5 h-3.5 ${active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`} />
+                      Session Publisher
+                    </span>
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-rajdhani uppercase tracking-wider font-bold ${textClass}`}>
+                      <span className={`w-2 h-2 rounded-full inline-block ${dotClass}`} />
+                      {label}
+                    </span>
+                  </div>
+                );
+              })()}
+              {/* Driver Publisher row */}
+              {(() => {
+                const enabledByMode = scope === 'driver' || scope === 'both';
+                const active = !!publisherStatus?.pipelines?.driver?.active;
+                const awaitingReg = enabledByMode && !active && !driverSessionId;
+                const label =
+                  !enabledByMode ? 'Disabled by mode'
+                  : active        ? 'Active'
+                  : awaitingReg   ? 'Awaiting registration'
+                                  : 'Idle';
+                const dotClass =
+                  !enabledByMode ? 'bg-muted-foreground/40'
+                  : active        ? 'bg-[color:var(--color-green-flag)]'
+                  : awaitingReg   ? 'bg-[color:var(--color-yellow-flag)]'
+                                  : 'bg-muted-foreground';
+                const textClass =
+                  !enabledByMode ? 'text-muted-foreground'
+                  : active        ? 'text-[color:var(--color-green-flag)]'
+                  : awaitingReg   ? 'text-[color:var(--color-yellow-flag)]'
+                                  : 'text-muted-foreground';
+                return (
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="flex items-center gap-2 text-xs font-rajdhani uppercase tracking-widest text-foreground">
+                      <Radio className={`w-3.5 h-3.5 ${active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`} />
+                      Driver Publisher
+                    </span>
+                    <span className={`inline-flex items-center gap-1.5 text-xs font-rajdhani uppercase tracking-wider font-bold ${textClass}`}>
+                      <span className={`w-2 h-2 rounded-full inline-block ${dotClass}`} />
+                      {label}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
             {publisherStatus?.raceSessionId && (
-              <span className="text-xs font-jetbrains text-muted-foreground truncate" title={publisherStatus.raceSessionId}>
-                Session: {publisherStatus.raceSessionId.slice(0, 24)}{publisherStatus.raceSessionId.length > 24 ? '…' : ''}
-              </span>
+              <div className="text-xs font-jetbrains text-muted-foreground truncate" title={publisherStatus.raceSessionId}>
+                Bound session: {publisherStatus.raceSessionId.slice(0, 24)}{publisherStatus.raceSessionId.length > 24 ? '…' : ''}
+              </div>
             )}
           </div>
         </CardContent>
       </Card>
 
-      {/* ── Driver Publisher ───────────────────────────────────────────────── */}
+      {/* ── Rig Identity ───────────────────────────────────────────────────── */}
       <Card className="bg-card border-border">
         <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
-              <Radio className={`w-3.5 h-3.5 ${publisherStatus?.pipelines?.driver?.active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`} />
-              Driver Publisher
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground font-rajdhani uppercase">
-                {driverEnabled ? 'Enabled' : 'Disabled'}
-              </span>
-              <Switch checked={driverEnabled} onCheckedChange={handleToggleDriver} />
-            </div>
-          </div>
+          <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest">
+            Rig Identity
+          </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-5">
-          <p className="text-xs text-muted-foreground">
-            Publishes fuel, incidents, pit stops, personal bests and stint data for the player car on this rig.
-          </p>
-          <div className="flex items-center gap-3">
-            <span className={`inline-flex items-center gap-1.5 text-xs font-rajdhani uppercase tracking-wider font-bold
-              ${publisherStatus?.pipelines?.driver?.active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`}>
-              <span className={`w-2 h-2 rounded-full inline-block ${publisherStatus?.pipelines?.driver?.active ? 'bg-[color:var(--color-green-flag)]' : 'bg-muted-foreground'}`} />
-              {publisherStatus?.pipelines?.driver?.active ? 'Active' : 'Idle'}
-            </span>
-            {driverEnabled && !publisherStatus?.pipelines?.driver?.active && !driverSessionId && (
-              <span className="text-xs text-[color:var(--color-yellow-flag)] font-rajdhani">
-                No session bound — register below to start publishing.
-              </span>
-            )}
-          </div>
-
-          {/* Rig ID */}
+        <CardContent className="space-y-3">
           <div className="space-y-1.5">
             <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Rig ID</label>
             <div className="flex gap-2 items-center">
@@ -556,17 +690,25 @@ export const PublisherSettings = () => {
               Auto-generated unique ID for this rig. Only regenerate if advised by Race Control support.
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Driver Registration (only in Driver / Combined modes) ──────────── */}
+      {(scope === 'driver' || scope === 'both') && (
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-muted-foreground text-xs uppercase font-rajdhani tracking-widest flex items-center gap-2">
+            <Radio className={`w-3.5 h-3.5 ${publisherStatus?.pipelines?.driver?.active ? 'text-[color:var(--color-green-flag)]' : 'text-muted-foreground'}`} />
+            Register this rig
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <p className="text-xs text-muted-foreground">
+            Choose a session and your driver profile, then click <strong>Register</strong> to start the Driver Publisher.
+          </p>
 
           {/* Driver registration */}
           <div className="rounded-md border border-border bg-background/30 p-4 space-y-3">
-              <p className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">
-                Register this rig
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Choose a session and your driver profile, then click{' '}
-                <strong>Register</strong> to start the Driver Publisher.
-              </p>
-
               {/* Session selector */}
               <div className="space-y-1.5">
                 <label className="text-[10px] uppercase font-rajdhani tracking-widest text-muted-foreground">Session</label>
@@ -673,6 +815,7 @@ export const PublisherSettings = () => {
             </div>
         </CardContent>
       </Card>
+      )}
 
       {/* ── Driver Swap Controls ───────────────────────────────────────────── */}
       {publisherStatus && (publisherStatus.pipelines?.session?.active || publisherStatus.pipelines?.driver?.active) && (

@@ -234,9 +234,63 @@ export class PublisherOrchestrator {
   }
 
   /**
+   * Hot-switch the publisher rig mode (DIR-4).
+   *
+   * Persists `publisher.scope` and, if a session is bound and iRacing is
+   * connected, restarts the publisher pipeline(s) so the new scope takes
+   * effect immediately:
+   *   1. Deactivates any currently-active sub-orchestrators.
+   *   2. Re-runs the equivalent of `startSessionPipeline()` against the
+   *      bound `raceSessionId` with the new scope.
+   *   3. The transport stays live across the transition; PUBLISHER_HELLO is
+   *      re-emitted by `startSessionPipeline()`.
+   *
+   * Invalid scopes are rejected (logs a warning, no state change).
+   */
+  setScope(scope: PublisherScope): void {
+    if (scope !== 'session' && scope !== 'driver' && scope !== 'both') {
+      this.cfg.director.log('warn', `Publisher setScope: invalid scope '${String(scope)}' — ignoring`);
+      return;
+    }
+
+    const currentScope = (this.cfg.director.settings['publisher.scope'] ?? 'session') as PublisherScope;
+
+    // Persist the new scope (in settings and on disk) before any pipeline work.
+    this.cfg.director.settings['publisher.scope'] = scope;
+    this.cfg.director.saveSetting?.('publisher.scope', scope);
+
+    if (currentScope === scope) {
+      this.cfg.director.log('info', `Publisher scope unchanged (${scope}) — no restart`);
+      return;
+    }
+
+    // If we're not running, or no session is bound, or iRacing isn't connected,
+    // there's no live pipeline to restart — the new scope will take effect on
+    // the next bindSession()/onConnectionChange() path.
+    if (!this.running || !this.raceSessionId || !this.connected) {
+      this.cfg.director.log('info', `Publisher scope set to '${scope}' (no active pipeline to restart)`);
+      return;
+    }
+
+    this.cfg.director.log('info', `Publisher scope changing '${currentScope}' → '${scope}' — restarting pipelines`);
+
+    // Stop any currently active sub-orchestrators. Do NOT emit PUBLISHER_GOODBYE
+    // here — the rig is still bound to the same session, just switching modes.
+    this.sessionPublisher?.deactivate();
+    this.driverPublisher?.deactivate();
+
+    // Re-activate per the new scope. startSessionPipeline reads
+    // publisher.scope from settings, which we just updated.
+    this.startSessionPipeline();
+  }
+
+  /**
    * Hot-toggle the Session Publisher pipeline.
    * Persists the setting and immediately starts/stops the pipeline if a
    * session is bound and iRacing is connected.
+   *
+   * @deprecated DIR-4: superseded by setScope(). Kept for backward compatibility
+   *             of legacy intent handlers; UI no longer calls this.
    */
   setSessionEnabled(enabled: boolean): void {
     this.cfg.director.saveSetting?.('publisher.session.enabled', enabled);
