@@ -581,6 +581,66 @@ describe('releaseSession (DIR-2)', () => {
       director.emittedEvents.find((e) => e.payload?.type === 'PUBLISHER_HELLO'),
     ).toBeDefined();
   });
+
+  it('emits iracing.publisherStopped with reason and previous raceSessionId', () => {
+    const { orch, director } = makeActiveOrchestrator();
+    director.emittedEvents.length = 0;
+
+    orch.releaseSession('test-reason');
+
+    const stopped = director.emittedEvents.find((e) => e.event === 'iracing.publisherStopped');
+    expect(stopped).toBeDefined();
+    expect(stopped?.payload).toMatchObject({
+      raceSessionId: 'session-abc',
+      reason:        'test-reason',
+      rigId:         'rig-01',
+    });
+    expect(typeof stopped?.payload?.timestamp).toBe('number');
+  });
+
+  it('defaults reason to "unspecified" when releaseSession() is called with no args', () => {
+    const { orch, director } = makeActiveOrchestrator();
+    director.emittedEvents.length = 0;
+
+    orch.releaseSession();
+
+    const stopped = director.emittedEvents.find((e) => e.event === 'iracing.publisherStopped');
+    expect(stopped?.payload?.reason).toBe('unspecified');
+  });
+
+  it('logs the caller reason when releaseSession deactivates an active pipeline', () => {
+    const { orch, director } = makeActiveOrchestrator();
+    director.logs.length = 0;
+
+    orch.releaseSession('intent:test');
+
+    const reasonLog = director.logs.find((l) =>
+      l.message.includes("reason='intent:test'") &&
+      l.message.includes('releaseSession called'),
+    );
+    expect(reasonLog).toBeDefined();
+  });
+
+  it('bindSession(null) propagates a "bindSession-null" reason to publisherStopped', () => {
+    const { orch, director } = makeActiveOrchestrator();
+    director.emittedEvents.length = 0;
+
+    orch.bindSession(null);
+
+    const stopped = director.emittedEvents.find((e) => e.event === 'iracing.publisherStopped');
+    expect(stopped?.payload?.reason).toBe('bindSession-null');
+  });
+
+  it('does not emit iracing.publisherStopped when no pipeline was active', () => {
+    const { orch, director } = makeOrchestrator();
+    orch.activate();
+    director.emittedEvents.length = 0;
+
+    orch.releaseSession('spurious');
+
+    const stopped = director.emittedEvents.find((e) => e.event === 'iracing.publisherStopped');
+    expect(stopped).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

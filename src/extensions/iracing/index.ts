@@ -241,7 +241,7 @@ export async function activate(director: ExtensionAPI) {
     director.registerIntentHandler(
         'iracing.publisher.releaseSession',
         async () => {
-            publisherOrchestrator?.releaseSession();
+            publisherOrchestrator?.releaseSession('intent:iracing.publisher.releaseSession');
             // Restart the polling loop so the interval drops back to 4Hz
             // now that the session publisher is no longer active.
             if (pBase) {
