@@ -71,11 +71,31 @@ Triggered by the internal directive
 `iracing.publisher.bindSession` after Director check-in.
 
 - Stores the id; **arms** it if iRacing is not yet connected.
-- Starts `SessionPublisherOrchestrator`. All session-scoped detectors
-  begin observing telemetry.
-- If `publisher.driver.enabled === true` and `publisher.driver.driverId`
-  is set, also starts the `DriverPublisherOrchestrator`.
+- Activates pipeline(s) according to `publisher.scope`:
+  - `'session'` *(default)* → `SessionPublisherOrchestrator` only.
+  - `'driver'` → `DriverPublisherOrchestrator` only.
+  - `'both'` → both (dev/demo only — logs a warning).
 - Emits `iracing.publisherStateChanged { status: 'active', raceSessionId }`.
+
+### `setScope(scope)` *(DIR-4)*
+
+Triggered by `iracing.publisher.setScope` from the Rig Mode selector in
+the Publisher Settings UI.
+
+1. Validates the value (`'session' | 'driver' | 'both'`).
+2. Persists `publisher.scope` via `director.saveSetting`.
+3. If a session is bound and iRacing is connected, deactivates the
+   running sub-orchestrators and re-runs the equivalent of
+   `startSessionPipeline()` so the new scope takes effect immediately.
+   The transport stays live across the transition; `PUBLISHER_HELLO`
+   is re-emitted by the restart.
+4. Emits `iracing.publisherStateChanged` so the UI updates.
+
+The legacy intents `iracing.publisher.setSessionEnabled` /
+`iracing.publisher.setDriverEnabled` are deprecated in favor of
+`setScope`; the corresponding `publisher.session.enabled` /
+`publisher.driver.enabled` config keys are no longer consulted by the
+orchestrator after the one-time migration in `migrateConfig()`.
 
 ### `releaseSession()`
 

@@ -105,9 +105,9 @@
       },
       {
         "intent": "iracing.publisher.setSessionEnabled",
-        "title": "Set Session Publisher Enabled",
+        "title": "Set Session Publisher Enabled (deprecated)",
         "category": "operational",
-        "description": "Hot-toggles the session publisher pipeline on or off.",
+        "description": "Deprecated (DIR-4): use iracing.publisher.setScope. Hot-toggles the session publisher pipeline on or off.",
         "schema": {
           "type": "object",
           "properties": {
@@ -118,15 +118,28 @@
       },
       {
         "intent": "iracing.publisher.setDriverEnabled",
-        "title": "Set Driver Publisher Enabled",
+        "title": "Set Driver Publisher Enabled (deprecated)",
         "category": "operational",
-        "description": "Hot-toggles the driver publisher pipeline on or off.",
+        "description": "Deprecated (DIR-4): use iracing.publisher.setScope. Hot-toggles the driver publisher pipeline on or off.",
         "schema": {
           "type": "object",
           "properties": {
             "enabled": { "type": "boolean" }
           },
           "required": ["enabled"]
+        }
+      },
+      {
+        "intent": "iracing.publisher.setScope",
+        "title": "Set Publisher Rig Mode",
+        "category": "operational",
+        "description": "Selects the publisher scope ('session', 'driver', or 'both'). Persists publisher.scope and restarts pipelines when a session is bound.",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "scope": { "type": "string", "enum": ["session", "driver", "both"] }
+          },
+          "required": ["scope"]
         }
       }
     ],

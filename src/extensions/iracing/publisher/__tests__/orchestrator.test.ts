@@ -946,6 +946,119 @@ describe("publisher.scope = 'both' (DIR-4)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// setScope — Rig Mode hot-switch (DIR-4 / Issue: Publisher UX redesign)
+// ---------------------------------------------------------------------------
+
+describe('setScope (Rig Mode hot-switch)', () => {
+  it('persists publisher.scope to settings and on disk', () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'session' });
+    orch.activate();
+    orch.setScope('driver');
+    expect(director.savedSettings['publisher.scope']).toBe('driver');
+    expect(director.settings['publisher.scope']).toBe('driver');
+  });
+
+  it('rejects invalid scope values without changing state', () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'session' });
+    orch.activate();
+    // Use any-cast to simulate an external bad caller.
+    (orch as any).setScope('bogus');
+    expect(director.settings['publisher.scope']).toBe('session');
+    expect(director.logs.some((l) => l.level === 'warn' && l.message.includes('invalid scope'))).toBe(true);
+  });
+
+  it('is a no-op when the scope is unchanged', async () => {
+    const { orch, director } = makeActiveOrchestrator({ 'publisher.scope': 'session' });
+    await vi.advanceTimersByTimeAsync(1100);
+    director.emittedEvents.length = 0;
+    orch.setScope('session');
+    // No PUBLISHER_GOODBYE / HELLO churn from the no-op path.
+    const hello = director.emittedEvents.find(
+      (e) => e.event === 'iracing.publisherEventEmitted' && e.payload?.type === 'PUBLISHER_HELLO',
+    );
+    expect(hello).toBeUndefined();
+  });
+
+  it("transitions 'session' → 'driver' by stopping session pipeline and starting driver pipeline", async () => {
+    const { orch, director } = makeActiveOrchestrator({ 'publisher.scope': 'session' });
+    await vi.advanceTimersByTimeAsync(1100);
+
+    // Sanity: starting from session-only.
+    let statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    expect(statusEvents[statusEvents.length - 1]?.payload.pipelines.session.active).toBe(true);
+    expect(statusEvents[statusEvents.length - 1]?.payload.pipelines.driver.active).toBe(false);
+
+    orch.setScope('driver');
+    await vi.advanceTimersByTimeAsync(1100);
+
+    statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    const last = statusEvents[statusEvents.length - 1];
+    expect(last?.payload.pipelines.driver.active).toBe(true);
+    expect(last?.payload.pipelines.session.active).toBe(false);
+  });
+
+  it("transitions 'driver' → 'session' by stopping driver pipeline and starting session pipeline", async () => {
+    const { orch, director } = makeActiveOrchestrator({ 'publisher.scope': 'driver' });
+    await vi.advanceTimersByTimeAsync(1100);
+
+    let statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    expect(statusEvents[statusEvents.length - 1]?.payload.pipelines.driver.active).toBe(true);
+
+    orch.setScope('session');
+    await vi.advanceTimersByTimeAsync(1100);
+
+    statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    const last = statusEvents[statusEvents.length - 1];
+    expect(last?.payload.pipelines.session.active).toBe(true);
+    expect(last?.payload.pipelines.driver.active).toBe(false);
+  });
+
+  it("transitions 'session' → 'both' to bring up driver pipeline alongside session", async () => {
+    const { orch, director } = makeActiveOrchestrator({ 'publisher.scope': 'session' });
+    await vi.advanceTimersByTimeAsync(1100);
+
+    orch.setScope('both');
+    await vi.advanceTimersByTimeAsync(1100);
+
+    const statusEvents = director.emittedEvents.filter((e) => e.event === 'iracing.publisherStateChanged');
+    const last = statusEvents[statusEvents.length - 1];
+    expect(last?.payload.pipelines.session.active).toBe(true);
+    expect(last?.payload.pipelines.driver.active).toBe(true);
+  });
+
+  it('persists new scope but does not start any pipeline when no session is bound', () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'session' });
+    orch.activate();
+    orch.onConnectionChange(true);
+    // No bindSession() — nothing live to restart.
+    director.emittedEvents.length = 0;
+    orch.setScope('driver');
+    expect(director.savedSettings['publisher.scope']).toBe('driver');
+    const hello = director.emittedEvents.find(
+      (e) => e.event === 'iracing.publisherEventEmitted' && e.payload?.type === 'PUBLISHER_HELLO',
+    );
+    expect(hello).toBeUndefined();
+  });
+
+  it('persists new scope but does not start any pipeline when iRacing is disconnected', () => {
+    const { orch, director } = makeOrchestrator({ 'publisher.scope': 'session' });
+    orch.activate();
+    // Bind without connection — pipeline is "armed" but not running.
+    orch.bindSession('session-xyz');
+    director.emittedEvents.length = 0;
+    orch.setScope('driver');
+    expect(director.savedSettings['publisher.scope']).toBe('driver');
+    // Pipeline-state events shouldn't show driver active until connect.
+    const statusEvents = director.emittedEvents.filter(
+      (e) => e.event === 'iracing.publisherStateChanged',
+    );
+    statusEvents.forEach((e) => {
+      expect(e.payload.pipelines.driver.active).toBe(false);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // setSessionMetadata → carClassByCarIdx / carClassShortNames wiring (issue)
 // ---------------------------------------------------------------------------
 
