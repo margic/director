@@ -71,11 +71,31 @@ Triggered by the internal directive
 `iracing.publisher.bindSession` after Director check-in.
 
 - Stores the id; **arms** it if iRacing is not yet connected.
-- Starts `SessionPublisherOrchestrator`. All session-scoped detectors
-  begin observing telemetry.
-- If `publisher.driver.enabled === true` and `publisher.driver.driverId`
-  is set, also starts the `DriverPublisherOrchestrator`.
+- Activates pipeline(s) according to `publisher.scope`:
+  - `'session'` *(default)* → `SessionPublisherOrchestrator` only.
+  - `'driver'` → `DriverPublisherOrchestrator` only.
+  - `'both'` → both (dev/demo only — logs a warning).
 - Emits `iracing.publisherStateChanged { status: 'active', raceSessionId }`.
+
+### `setScope(scope)` *(DIR-4)*
+
+Triggered by `iracing.publisher.setScope` from the Rig Mode selector in
+the Publisher Settings UI.
+
+1. Validates the value (`'session' | 'driver' | 'both'`).
+2. Persists `publisher.scope` via `director.saveSetting`.
+3. If a session is bound and iRacing is connected, deactivates the
+   running sub-orchestrators and re-runs the equivalent of
+   `startSessionPipeline()` so the new scope takes effect immediately.
+   The transport stays live across the transition; `PUBLISHER_HELLO`
+   is re-emitted by the restart.
+4. Emits `iracing.publisherStateChanged` so the UI updates.
+
+The legacy intents `iracing.publisher.setSessionEnabled` /
+`iracing.publisher.setDriverEnabled` are deprecated in favor of
+`setScope`; the corresponding `publisher.session.enabled` /
+`publisher.driver.enabled` config keys are no longer consulted by the
+orchestrator after the one-time migration in `migrateConfig()`.
 
 ### `releaseSession()`
 
@@ -114,6 +134,48 @@ enforced; if the swap never completes (e.g. iRacing crash), the next
 
 Stops both pipelines, sends `PUBLISHER_GOODBYE`, and tears down the
 transport. Called when the iRacing extension is unloaded.
+
+## Operator guide: one Director rig per session
+
+**Only one rig per race session may run in Director (`scope='session'`)
+mode.** All other rigs participating in the same session (driver
+stations, additional spectators) must run in Driver (`scope='driver'`)
+mode. `scope='both'` is for single-machine dev/demo only.
+
+### Why
+
+`SessionPublisherOrchestrator` observes the *entire field* via the
+shared iRacing YAML/telemetry. Every rig running with `scope='session'`
+sees the same session state and independently emits the same
+broadcast-level events (flags, overtakes, all-car `LAP_COMPLETED`,
+roster, environment). Race Control deduplicates only by event `id`
+(which includes `rigId`), so two Director rigs on one session cause
+**every broadcast event to be ingested twice** — inflating Cosmos DB
+RU consumption, doubling the AI narrative context signal, and
+potentially firing duplicate sequence triggers.
+
+### How operators avoid the misconfiguration
+
+1. The Rig Mode selector in **Publisher Settings** (the "Director /
+   Driver / Combined" radio group, see
+   `src/extensions/iracing/renderer/PublisherSettings.tsx`) is the
+   single source of truth. The Director option's blurb states
+   "One per session" so the constraint is visible at the point of
+   selection.
+2. Driver rigs should select **Driver** and complete the registration
+   flow against their session.
+3. The dedicated broadcast / media rig — and only that rig — should
+   select **Director**.
+
+### What Director does *not* do today
+
+There is no client-side leader election or server-side dedup. A second
+rig with `scope='session'` will not be detected or blocked; the
+constraint is enforced operationally via the UI. A future enhancement
+(see issue tracker) may add a session-publisher lease against the Race
+Control API; server-side dedup by `(raceSessionId, type, sessionTick,
+carIdx)` is being tracked at
+<https://github.com/margic/racecontrol/issues>.
 
 ## Transport
 

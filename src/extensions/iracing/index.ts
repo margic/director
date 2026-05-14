@@ -241,7 +241,7 @@ export async function activate(director: ExtensionAPI) {
     director.registerIntentHandler(
         'iracing.publisher.releaseSession',
         async () => {
-            publisherOrchestrator?.releaseSession();
+            publisherOrchestrator?.releaseSession('intent:iracing.publisher.releaseSession');
             // Restart the polling loop so the interval drops back to 4Hz
             // now that the session publisher is no longer active.
             if (pBase) {
@@ -294,22 +294,50 @@ export async function activate(director: ExtensionAPI) {
     );
 
     // Session publisher hot-toggle — called from the publisher settings UI.
+    // DEPRECATED (DIR-4): replaced by iracing.publisher.setScope. Kept as
+    // a no-op-ish handler for backward compatibility; the UI no longer
+    // dispatches this intent.
     director.registerIntentHandler(
         'iracing.publisher.setSessionEnabled',
         async (payload: { enabled: boolean }) => {
+            director.log('warn', 'iracing.publisher.setSessionEnabled is deprecated — use iracing.publisher.setScope instead');
             publisherOrchestrator?.setSessionEnabled(payload?.enabled ?? true);
         },
     );
 
     // Driver publisher hot-toggle — called from the publisher settings UI.
+    // DEPRECATED (DIR-4): replaced by iracing.publisher.setScope.
     director.registerIntentHandler(
         'iracing.publisher.setDriverEnabled',
         async (payload: { enabled: boolean }) => {
+            director.log('warn', 'iracing.publisher.setDriverEnabled is deprecated — use iracing.publisher.setScope instead');
             const enabled = payload?.enabled ?? false;
             director.settings['publisher.driver.enabled'] = enabled;
             if (!enabled) {
                 // Stop driver pipeline immediately if running.
                 // The orchestrator will gate on this setting on next bindSession.
+            }
+        },
+    );
+
+    // Rig Mode selector — called from the publisher settings UI (DIR-4).
+    // Persists publisher.scope and restarts pipelines if a session is bound.
+    director.registerIntentHandler(
+        'iracing.publisher.setScope',
+        async (payload: { scope: 'session' | 'driver' | 'both' }) => {
+            const scope = payload?.scope;
+            if (scope !== 'session' && scope !== 'driver' && scope !== 'both') {
+                director.log('warn', `iracing.publisher.setScope: invalid scope '${String(scope)}'`);
+                return;
+            }
+            publisherOrchestrator?.setScope(scope);
+            // Restart the polling loop so the interval reflects the new pipeline state.
+            if (pBase) {
+                if (telemetryInterval) {
+                    clearInterval(telemetryInterval);
+                    telemetryInterval = null;
+                }
+                startTelemetryPolling(director);
             }
         },
     );
