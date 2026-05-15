@@ -62,6 +62,63 @@ export interface RawTelemetryReads {
   rfTempCM?:            number[] | null;
   lrTempCM?:            number[] | null;
   rrTempCM?:            number[] | null;
+
+  // Group A: Driver inputs (player car only) — #178
+  throttle?:              number[] | null;
+  brake?:                 number[] | null;
+  clutch?:                number[] | null;
+  gear?:                  number[] | null;
+  rpm?:                   number[] | null;
+  brakeABSactive?:        boolean[] | null;
+  dcBrakeBias?:           number[] | null;
+  steeringWheelTorque?:   number[] | null;
+  handbrakeRaw?:          number[] | null;
+
+  // Group B: Vehicle dynamics (player car only) — #178
+  lat?:       number[] | null;
+  lon?:       number[] | null;
+  alt?:       number[] | null;
+  pitch?:     number[] | null;
+  roll?:      number[] | null;
+  yaw?:       number[] | null;
+  latAccel?:  number[] | null;
+  longAccel?: number[] | null;
+  vertAccel?: number[] | null;
+  yawRate?:   number[] | null;
+  velocityX?: number[] | null;
+  velocityY?: number[] | null;
+  velocityZ?: number[] | null;
+  waterTemp?: number[] | null;
+  oilTemp?:   number[] | null;
+  oilPressure?: number[] | null;
+  voltage?:   number[] | null;
+
+  // Group C: Per-tyre wear and pressure (player car only) — #178
+  lfWearL?: number[] | null;
+  lfWearM?: number[] | null;
+  lfWearR?: number[] | null;
+  rfWearL?: number[] | null;
+  rfWearM?: number[] | null;
+  rfWearR?: number[] | null;
+  lrWearL?: number[] | null;
+  lrWearM?: number[] | null;
+  lrWearR?: number[] | null;
+  rrWearL?: number[] | null;
+  rrWearM?: number[] | null;
+  rrWearR?: number[] | null;
+  lfPressure?: number[] | null;
+  rfPressure?: number[] | null;
+  lrPressure?: number[] | null;
+  rrPressure?: number[] | null;
+
+  // Group D: Per-car spatial awareness — #178
+  carIdxEstTime?:          number[] | null;
+  carIdxSteer?:            number[] | null;
+  carIdxRPM?:              number[] | null;
+  carIdxPaceLine?:         number[] | null;
+  carIdxPaceRow?:          number[] | null;
+  carIdxQualTireCompound?: number[] | null;
+  carIdxTireCompound?:     number[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +176,63 @@ export function assembleTelemetryFrame(r: RawTelemetryReads): TelemetryFrame {
     rfTempCM:            r.rfTempCM?.[0]            ?? 0,
     lrTempCM:            r.lrTempCM?.[0]            ?? 0,
     rrTempCM:            r.rrTempCM?.[0]            ?? 0,
+
+    // Group A: Driver inputs — #178
+    throttle:            r.throttle?.[0]            ?? 0,
+    brake:               r.brake?.[0]               ?? 0,
+    clutch:              r.clutch?.[0]              ?? 0,
+    gear:                r.gear?.[0]                ?? 0,
+    rpm:                 r.rpm?.[0]                 ?? 0,
+    brakeABSactive:      r.brakeABSactive?.[0] ? 1 : 0,
+    dcBrakeBias:         r.dcBrakeBias?.[0]         ?? 0,
+    steeringWheelTorque: r.steeringWheelTorque?.[0] ?? 0,
+    handbrakeRaw:        r.handbrakeRaw?.[0]        ?? 0,
+
+    // Group B: Vehicle dynamics — #178
+    lat:        r.lat?.[0]        ?? 0,
+    lon:        r.lon?.[0]        ?? 0,
+    alt:        r.alt?.[0]        ?? 0,
+    pitch:      r.pitch?.[0]      ?? 0,
+    roll:       r.roll?.[0]       ?? 0,
+    yaw:        r.yaw?.[0]        ?? 0,
+    latAccel:   r.latAccel?.[0]   ?? 0,
+    longAccel:  r.longAccel?.[0]  ?? 0,
+    vertAccel:  r.vertAccel?.[0]  ?? 0,
+    yawRate:    r.yawRate?.[0]    ?? 0,
+    velocityX:  r.velocityX?.[0]  ?? 0,
+    velocityY:  r.velocityY?.[0]  ?? 0,
+    velocityZ:  r.velocityZ?.[0]  ?? 0,
+    waterTemp:  r.waterTemp?.[0]  ?? 0,
+    oilTemp:    r.oilTemp?.[0]    ?? 0,
+    oilPressure: r.oilPressure?.[0] ?? 0,
+    voltage:    r.voltage?.[0]    ?? 0,
+
+    // Group C: Per-tyre wear and pressure — #178
+    lfWearL: r.lfWearL?.[0] ?? 0,
+    lfWearM: r.lfWearM?.[0] ?? 0,
+    lfWearR: r.lfWearR?.[0] ?? 0,
+    rfWearL: r.rfWearL?.[0] ?? 0,
+    rfWearM: r.rfWearM?.[0] ?? 0,
+    rfWearR: r.rfWearR?.[0] ?? 0,
+    lrWearL: r.lrWearL?.[0] ?? 0,
+    lrWearM: r.lrWearM?.[0] ?? 0,
+    lrWearR: r.lrWearR?.[0] ?? 0,
+    rrWearL: r.rrWearL?.[0] ?? 0,
+    rrWearM: r.rrWearM?.[0] ?? 0,
+    rrWearR: r.rrWearR?.[0] ?? 0,
+    lfPressure: r.lfPressure?.[0] ?? 0,
+    rfPressure: r.rfPressure?.[0] ?? 0,
+    lrPressure: r.lrPressure?.[0] ?? 0,
+    rrPressure: r.rrPressure?.[0] ?? 0,
+
+    // Group D: Per-car spatial awareness — #178
+    carIdxEstTime:          Float32Array.from(r.carIdxEstTime          ?? []),
+    carIdxSteer:            Float32Array.from(r.carIdxSteer            ?? []),
+    carIdxRPM:              Float32Array.from(r.carIdxRPM              ?? []),
+    carIdxPaceLine:         Int32Array.from(r.carIdxPaceLine           ?? []),
+    carIdxPaceRow:          Int32Array.from(r.carIdxPaceRow            ?? []),
+    carIdxQualTireCompound: Int32Array.from(r.carIdxQualTireCompound   ?? []),
+    carIdxTireCompound:     Int32Array.from(r.carIdxTireCompound       ?? []),
   };
 }
 

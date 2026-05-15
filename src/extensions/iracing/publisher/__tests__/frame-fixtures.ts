@@ -163,6 +163,51 @@ export interface FrameOptions {
   rfTempCM?: number;
   lrTempCM?: number;
   rrTempCM?: number;
+  // Group A: Driver inputs — #178
+  throttle?: number;
+  brake?: number;
+  clutch?: number;
+  gear?: number;
+  rpm?: number;
+  brakeABSactive?: number;
+  dcBrakeBias?: number;
+  steeringWheelTorque?: number;
+  handbrakeRaw?: number;
+  // Group B: Vehicle dynamics — #178
+  lat?: number;
+  lon?: number;
+  alt?: number;
+  pitch?: number;
+  roll?: number;
+  yaw?: number;
+  latAccel?: number;
+  longAccel?: number;
+  vertAccel?: number;
+  yawRate?: number;
+  velocityX?: number;
+  velocityY?: number;
+  velocityZ?: number;
+  waterTemp?: number;
+  oilTemp?: number;
+  oilPressure?: number;
+  voltage?: number;
+  // Group C: Per-tyre wear and pressure — #178
+  lfWearL?: number;
+  lfWearM?: number;
+  lfWearR?: number;
+  rfWearL?: number;
+  rfWearM?: number;
+  rfWearR?: number;
+  lrWearL?: number;
+  lrWearM?: number;
+  lrWearR?: number;
+  rrWearL?: number;
+  rrWearM?: number;
+  rrWearR?: number;
+  lfPressure?: number;
+  rfPressure?: number;
+  lrPressure?: number;
+  rrPressure?: number;
   // Per-car slot overrides
   cars?: CarSlotOverride[];
 }
@@ -179,6 +224,14 @@ export function makeFrame(opts: FrameOptions = {}): TelemetryFrame {
   const carIdxF2Time        = new Float32Array(CAR_COUNT);
   const carIdxSessionFlags  = new Int32Array(CAR_COUNT);
   const carIdxSpeed         = new Float32Array(CAR_COUNT).fill(40); // ~144 km/h default
+  // Group D — per-car arrays default to zero
+  const carIdxEstTime          = new Float32Array(CAR_COUNT);
+  const carIdxSteer            = new Float32Array(CAR_COUNT);
+  const carIdxRPM              = new Float32Array(CAR_COUNT);
+  const carIdxPaceLine         = new Int32Array(CAR_COUNT).fill(-1);
+  const carIdxPaceRow          = new Int32Array(CAR_COUNT).fill(-1);
+  const carIdxQualTireCompound = new Int32Array(CAR_COUNT);
+  const carIdxTireCompound     = new Int32Array(CAR_COUNT);
 
   for (const car of opts.cars ?? []) {
     const i = car.carIdx;
@@ -238,6 +291,59 @@ export function makeFrame(opts: FrameOptions = {}): TelemetryFrame {
     rfTempCM:                 opts.rfTempCM                 ?? 0,
     lrTempCM:                 opts.lrTempCM                 ?? 0,
     rrTempCM:                 opts.rrTempCM                 ?? 0,
+    // Group A: Driver inputs — #178
+    throttle:            opts.throttle            ?? 0,
+    brake:               opts.brake               ?? 0,
+    clutch:              opts.clutch              ?? 0,
+    gear:                opts.gear                ?? 0,
+    rpm:                 opts.rpm                 ?? 0,
+    brakeABSactive:      opts.brakeABSactive      ?? 0,
+    dcBrakeBias:         opts.dcBrakeBias         ?? 0.5,
+    steeringWheelTorque: opts.steeringWheelTorque ?? 0,
+    handbrakeRaw:        opts.handbrakeRaw        ?? 0,
+    // Group B: Vehicle dynamics — #178
+    lat:        opts.lat        ?? 0,
+    lon:        opts.lon        ?? 0,
+    alt:        opts.alt        ?? 0,
+    pitch:      opts.pitch      ?? 0,
+    roll:       opts.roll       ?? 0,
+    yaw:        opts.yaw        ?? 0,
+    latAccel:   opts.latAccel   ?? 0,
+    longAccel:  opts.longAccel  ?? 0,
+    vertAccel:  opts.vertAccel  ?? 0,
+    yawRate:    opts.yawRate    ?? 0,
+    velocityX:  opts.velocityX  ?? 0,
+    velocityY:  opts.velocityY  ?? 0,
+    velocityZ:  opts.velocityZ  ?? 0,
+    waterTemp:  opts.waterTemp  ?? 80,
+    oilTemp:    opts.oilTemp    ?? 90,
+    oilPressure: opts.oilPressure ?? 4.5,
+    voltage:    opts.voltage    ?? 13.8,
+    // Group C: Per-tyre wear and pressure — #178
+    lfWearL: opts.lfWearL ?? 1,
+    lfWearM: opts.lfWearM ?? 1,
+    lfWearR: opts.lfWearR ?? 1,
+    rfWearL: opts.rfWearL ?? 1,
+    rfWearM: opts.rfWearM ?? 1,
+    rfWearR: opts.rfWearR ?? 1,
+    lrWearL: opts.lrWearL ?? 1,
+    lrWearM: opts.lrWearM ?? 1,
+    lrWearR: opts.lrWearR ?? 1,
+    rrWearL: opts.rrWearL ?? 1,
+    rrWearM: opts.rrWearM ?? 1,
+    rrWearR: opts.rrWearR ?? 1,
+    lfPressure: opts.lfPressure ?? 165,
+    rfPressure: opts.rfPressure ?? 165,
+    lrPressure: opts.lrPressure ?? 165,
+    rrPressure: opts.rrPressure ?? 165,
+    // Group D: Per-car spatial awareness — #178
+    carIdxEstTime,
+    carIdxSteer,
+    carIdxRPM,
+    carIdxPaceLine,
+    carIdxPaceRow,
+    carIdxQualTireCompound,
+    carIdxTireCompound,
   };
 }
 
@@ -259,6 +365,14 @@ export function cloneFrame(f: TelemetryFrame): TelemetryFrame {
     carIdxF2Time:        f.carIdxF2Time.slice(),
     carIdxSessionFlags:  f.carIdxSessionFlags.slice(),
     carIdxSpeed:         f.carIdxSpeed.slice(),
+    // Group D typed arrays
+    carIdxEstTime:          f.carIdxEstTime.slice(),
+    carIdxSteer:            f.carIdxSteer.slice(),
+    carIdxRPM:              f.carIdxRPM.slice(),
+    carIdxPaceLine:         f.carIdxPaceLine.slice(),
+    carIdxPaceRow:          f.carIdxPaceRow.slice(),
+    carIdxQualTireCompound: f.carIdxQualTireCompound.slice(),
+    carIdxTireCompound:     f.carIdxTireCompound.slice(),
   };
 }
 

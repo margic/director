@@ -798,6 +798,63 @@ function buildTelemetryFrame(): TelemetryFrame | null {
         rfTempCM:            readVarFloat('RFtempCM',          buf.offset),
         lrTempCM:            readVarFloat('LRtempCM',          buf.offset),
         rrTempCM:            readVarFloat('RRtempCM',          buf.offset),
+
+        // Group A: Driver inputs — #178
+        throttle:            readVarFloat('Throttle',            buf.offset),
+        brake:               readVarFloat('Brake',               buf.offset),
+        clutch:              readVarFloat('Clutch',              buf.offset),
+        gear:                readVarInt('Gear',                  buf.offset),
+        rpm:                 readVarFloat('RPM',                 buf.offset),
+        brakeABSactive:      readVarBool('BrakeABSactive',       buf.offset),
+        dcBrakeBias:         readVarFloat('dcBrakeBias',         buf.offset),
+        steeringWheelTorque: readVarFloat('SteeringWheelTorque', buf.offset),
+        handbrakeRaw:        readVarFloat('HandbrakeRaw',        buf.offset),
+
+        // Group B: Vehicle dynamics — #178
+        lat:        readVarFloat('Lat',        buf.offset),
+        lon:        readVarFloat('Lon',        buf.offset),
+        alt:        readVarFloat('Alt',        buf.offset),
+        pitch:      readVarFloat('Pitch',      buf.offset),
+        roll:       readVarFloat('Roll',       buf.offset),
+        yaw:        readVarFloat('Yaw',        buf.offset),
+        latAccel:   readVarFloat('LatAccel',   buf.offset),
+        longAccel:  readVarFloat('LongAccel',  buf.offset),
+        vertAccel:  readVarFloat('VertAccel',  buf.offset),
+        yawRate:    readVarFloat('YawRate',    buf.offset),
+        velocityX:  readVarFloat('VelocityX',  buf.offset),
+        velocityY:  readVarFloat('VelocityY',  buf.offset),
+        velocityZ:  readVarFloat('VelocityZ',  buf.offset),
+        waterTemp:  readVarFloat('WaterTemp',  buf.offset),
+        oilTemp:    readVarFloat('OilTemp',    buf.offset),
+        oilPressure: readVarFloat('OilPressure', buf.offset),
+        voltage:    readVarFloat('Voltage',    buf.offset),
+
+        // Group C: Per-tyre wear and pressure — #178
+        lfWearL: readVarFloat('LFwearL', buf.offset),
+        lfWearM: readVarFloat('LFwearM', buf.offset),
+        lfWearR: readVarFloat('LFwearR', buf.offset),
+        rfWearL: readVarFloat('RFwearL', buf.offset),
+        rfWearM: readVarFloat('RFwearM', buf.offset),
+        rfWearR: readVarFloat('RFwearR', buf.offset),
+        lrWearL: readVarFloat('LRwearL', buf.offset),
+        lrWearM: readVarFloat('LRwearM', buf.offset),
+        lrWearR: readVarFloat('LRwearR', buf.offset),
+        rrWearL: readVarFloat('RRwearL', buf.offset),
+        rrWearM: readVarFloat('RRwearM', buf.offset),
+        rrWearR: readVarFloat('RRwearR', buf.offset),
+        lfPressure: readVarFloat('LFpressure', buf.offset),
+        rfPressure: readVarFloat('RFpressure', buf.offset),
+        lrPressure: readVarFloat('LRpressure', buf.offset),
+        rrPressure: readVarFloat('RRpressure', buf.offset),
+
+        // Group D: Per-car spatial awareness — #178
+        carIdxEstTime:          readVarFloat('CarIdxEstTime',          buf.offset),
+        carIdxSteer:            readVarFloat('CarIdxSteer',            buf.offset),
+        carIdxRPM:              readVarFloat('CarIdxRPM',              buf.offset),
+        carIdxPaceLine:         readVarInt('CarIdxPaceLine',           buf.offset),
+        carIdxPaceRow:          readVarInt('CarIdxPaceRow',            buf.offset),
+        carIdxQualTireCompound: readVarInt('CarIdxQualTireCompound',   buf.offset),
+        carIdxTireCompound:     readVarInt('CarIdxTireCompound',       buf.offset),
     };
 
     return assembleTelemetryFrame(reads);
