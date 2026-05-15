@@ -122,6 +122,11 @@ export function summariseEvent(event: PublisherEvent): string {
       const p = event.payload as any;
       return `Player stopped (${p.stoppedDurationSec?.toFixed?.(1)}s)`;
     }
+    case 'CONTACT_DETECTED': {
+      const p = event.payload as any;
+      const who = p.contactCar?.driverName ? ` with ${p.contactCar.driverName}` : '';
+      return `${p.severity ?? 'unknown'} ${p.cause === 'car_contact' ? 'contact' : 'incident'}${who}`;
+    }
 
     // §7 Identity
     case 'IDENTITY_RESOLVED':         return `Identity resolved: ${who}`;

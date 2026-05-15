@@ -17,9 +17,38 @@
  */
 
 import type { PublisherEvent } from './event-types';
+import type { PublisherCarRef } from './event-types';
 
 /** Maximum number of recent events retained on DriverState. */
 export const RECENT_EVENTS_CAPACITY = 50;
+
+/** Number of frames retained in the contact-proximity ring (#180). */
+export const CONTACT_PROXIMITY_RING_CAPACITY = 3;
+
+// ---------------------------------------------------------------------------
+// Pending-contact resolution state (#180)
+// ---------------------------------------------------------------------------
+
+/**
+ * Captures the in-flight resolution of a CONTACT_DETECTED trigger. Held on
+ * DriverState while the 1-second post-impact window elapses; cleared when the
+ * event is finalised and emitted.
+ */
+export interface PendingContactState {
+  startSessionTime: number;
+  startTick: number;
+  speedBefore: number;
+  peakLatAccel: number;
+  peakLongAccel: number;
+  peakVertAccel: number;
+  peakYawRate: number;
+  /** Frames during the window where |yawRate| > π rad/s — feeds severe-spin escalation. */
+  yawSustainedFrames: number;
+  cause: 'car_contact' | 'solo_incident';
+  contactCar?: PublisherCarRef;
+  trackSurface: number;
+  lapDistPct: number;
+}
 
 // ---------------------------------------------------------------------------
 // DriverState — all player-scoped mutable runtime state
@@ -82,6 +111,22 @@ export interface DriverState {
   recentEvents: PublisherEvent[];
   /** sessionTime of the most recent DRIVER_STATE_SNAPSHOT emission (-Infinity = never). */
   lastSnapshotSessionTime: number;
+
+  // ---- Contact detection (#180) ----
+  /** In-flight CONTACT_DETECTED resolution; null when not currently resolving. */
+  pendingContact: PendingContactState | null;
+  /** Tick at which CONTACT_DETECTED may fire again (cooldown after emission). */
+  contactDetectedCooldownUntilTick: number;
+  /**
+   * Rolling ring (capped at CONTACT_PROXIMITY_RING_CAPACITY) of `carIdxLapDistPct`
+   * snapshots from recent frames, used to classify `car_contact` vs `solo_incident`
+   * by checking whether any other car was nearby on this or the previous 2 frames.
+   *
+   * NOTE: spec #180 calls for `(carIdx, lat, lon)` ring using per-car Lat/Lon —
+   * iRacing only exposes Lat/Lon as scalars for the player car (#178), so this
+   * implementation uses `carIdxLapDistPct` as a sensible proximity proxy.
+   */
+  proximityRing: Float32Array[];
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +156,9 @@ export function createDriverState(carIdx: number): DriverState {
     bigHitCooldownUntilTick: 0,
     recentEvents: [],
     lastSnapshotSessionTime: -Infinity,
+    pendingContact: null,
+    contactDetectedCooldownUntilTick: 0,
+    proximityRing: [],
   };
 }
 

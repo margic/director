@@ -29,6 +29,7 @@ import { detectIncidentsAndMilestones } from './incident-stint-detector';
 import { detectDriverSwap } from './driver-swap-detector';
 import { detectDriverLapPerformance } from './lap-performance-driver';
 import { detectPlayerPhysics } from './player-physics-detector';
+import { detectContact } from './contact-detector';
 import { buildIdentityEvents } from './identity-event-builder';
 import { IdentityOverrideService } from './identity-override';
 import { aggregateRaceState } from '../shared/race-state-aggregator';
@@ -205,6 +206,10 @@ export class DriverPublisherOrchestrator {
       ...ctx,
       playerCarIdx,
       carNumberByCarIdx: this.carNumberByCarIdx.size > 0 ? this.carNumberByCarIdx : undefined,
+    }));
+    events.push(...detectContact(this.prevFrame, frame, this.state, this.driverState!, {
+      ...ctx,
+      playerCarIdx,
     }));
 
     // Race-narrative detectors (#153–#156) — all gated on playerCarIdx.
