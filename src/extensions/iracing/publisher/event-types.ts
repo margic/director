@@ -810,6 +810,51 @@ export interface DriverStateSnapshotPayload {
   // Race meta
   racePhase: 'unknown' | 'opening' | 'midrace' | 'endgame' | 'final-laps';
   flag: SnapshotFlag;
+
+  // Derived metrics (#182) — continuous rolling-window scores describing
+  // how the driver is doing in human terms. Optional for forward-compat with
+  // older snapshot consumers.
+  derived?: DerivedMetrics;
+}
+
+// ---------------------------------------------------------------------------
+// §12 Derived metrics (#182)
+// ---------------------------------------------------------------------------
+
+/**
+ * Coarse phase of the player's race arc — rule-based on race progress and
+ * recent events. Sampled by DRIVER_STATE_SNAPSHOT.
+ */
+export type NarrativeArc =
+  | 'opening'
+  | 'building'
+  | 'climax'
+  | 'recovery'
+  | 'cruise'
+  | 'endgame';
+
+/**
+ * Continuous derived metrics on `DriverState`. Recomputed every frame by
+ * `derived-metrics-aggregator.ts`. All scores are normalised 0–1 except
+ * `recentLapPace` (seconds) and `paceTrend` (seconds-per-lap).
+ */
+export interface DerivedMetrics {
+  /** Median of the last 5 stint lap times in seconds (0 = no data). */
+  recentLapPace: number;
+  /** Linear-fit slope of the last 5 lap times (sec/lap; positive = slowing, 0 = no data). */
+  paceTrend: number;
+  /** 0–1 — exponential-decay weighted recent incident pressure (60 s window). */
+  incidentIntensity: number;
+  /** 0–1 — max closeness of car ahead/behind, where closeness=1 at ≤0 s gap, 0 at ≥3 s. */
+  competitiveFocus: number;
+  /** 0–1 — weighted blend of incident, focus, low-fuel, tyre-wear pressure. */
+  raceStress: number;
+  /** 0–1 — lap-time consistency (1 = perfectly consistent). */
+  consistencyScore: number;
+  /** 0–1 — rolling avg of throttle+brake change rate (input volatility). */
+  aggressionScore: number;
+  /** Rule-based race phase / narrative arc. */
+  narrativeArc: NarrativeArc;
 }
 
 // ---------------------------------------------------------------------------

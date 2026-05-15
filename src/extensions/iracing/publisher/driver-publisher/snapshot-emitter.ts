@@ -202,6 +202,10 @@ function buildSnapshotPayload(
     // Race meta
     racePhase: state.racePhase,
     flag: deriveFlag(frame.sessionFlags),
+
+    // Derived metrics (#182) — snapshot a copy so downstream mutations cannot
+    // leak back into DriverState.
+    derived: { ...driverState.derived },
   };
 }
 

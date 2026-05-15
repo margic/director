@@ -17,13 +17,19 @@
  */
 
 import type { PublisherEvent } from './event-types';
-import type { PublisherCarRef } from './event-types';
+import type { PublisherCarRef, DerivedMetrics } from './event-types';
 
 /** Maximum number of recent events retained on DriverState. */
 export const RECENT_EVENTS_CAPACITY = 50;
 
 /** Number of frames retained in the contact-proximity ring (#180). */
 export const CONTACT_PROXIMITY_RING_CAPACITY = 3;
+
+/** Capacity of the throttle/brake sample rings used by the aggression score (#182). */
+export const INPUT_SAMPLE_CAPACITY = 30;
+
+/** Time window (sec) for the rolling incident decay (#182). */
+export const INCIDENT_INTENSITY_WINDOW_SEC = 60;
 
 // ---------------------------------------------------------------------------
 // Pending-contact resolution state (#180)
@@ -145,6 +151,19 @@ export interface DriverState {
     startPosition: number;
     trigger: 'PLAYER_STOPPED' | 'OFF_TRACK' | 'CONTACT_DETECTED';
   } | null;
+
+  // ---- Derived metrics (#182) ----
+  /** Continuous derived metrics; recomputed every frame by the aggregator. */
+  derived: DerivedMetrics;
+  /** Rolling buffer of recent throttle samples (0..1) for aggressionScore. */
+  throttleSamples: number[];
+  /** Rolling buffer of recent brake samples (0..1) for aggressionScore. */
+  brakeSamples: number[];
+  /**
+   * Rolling list of recent incident weights for `incidentIntensity` decay.
+   * Each entry: { sessionTime, weight }. Pruned to INCIDENT_INTENSITY_WINDOW_SEC.
+   */
+  recentIncidents: Array<{ sessionTime: number; weight: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,6 +198,24 @@ export function createDriverState(carIdx: number): DriverState {
     proximityRing: [],
     positionsLostThisStop: 0,
     recoveryActive: null,
+    derived: createDefaultDerivedMetrics(),
+    throttleSamples: [],
+    brakeSamples: [],
+    recentIncidents: [],
+  };
+}
+
+/** Default derived metrics state — all zeros and 'opening' arc. */
+export function createDefaultDerivedMetrics(): DerivedMetrics {
+  return {
+    recentLapPace: 0,
+    paceTrend: 0,
+    incidentIntensity: 0,
+    competitiveFocus: 0,
+    raceStress: 0,
+    consistencyScore: 0,
+    aggressionScore: 0,
+    narrativeArc: 'opening',
   };
 }
 
