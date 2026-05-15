@@ -16,6 +16,11 @@
  * Only the DriverPublisherOrchestrator creates and owns a DriverState instance.
  */
 
+import type { PublisherEvent } from './event-types';
+
+/** Maximum number of recent events retained on DriverState. */
+export const RECENT_EVENTS_CAPACITY = 50;
+
 // ---------------------------------------------------------------------------
 // DriverState — all player-scoped mutable runtime state
 // ---------------------------------------------------------------------------
@@ -73,8 +78,10 @@ export interface DriverState {
   bigHitCooldownUntilTick: number;
 
   // ---- Future use (Issue #179) ----
-  /** Reserved for the recent-events ring buffer planned in issue #179. */
-  recentEvents: never[];
+  /** Bounded ring buffer of recent events emitted from this pipeline (oldest→newest, capped at RECENT_EVENTS_CAPACITY). */
+  recentEvents: PublisherEvent[];
+  /** sessionTime of the most recent DRIVER_STATE_SNAPSHOT emission (-Infinity = never). */
+  lastSnapshotSessionTime: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,5 +110,19 @@ export function createDriverState(carIdx: number): DriverState {
     spinDetectedCooldownUntilTick: 0,
     bigHitCooldownUntilTick: 0,
     recentEvents: [],
+    lastSnapshotSessionTime: -Infinity,
   };
+}
+
+/**
+ * Append an event to the bounded recentEvents ring buffer. Mutates in place.
+ * Drops the oldest entry when at capacity. DRIVER_STATE_SNAPSHOT is excluded
+ * to avoid recursive noise in subsequent snapshots.
+ */
+export function pushRecentEvent(state: DriverState, event: PublisherEvent): void {
+  if (event.type === 'DRIVER_STATE_SNAPSHOT') return;
+  state.recentEvents.push(event);
+  while (state.recentEvents.length > RECENT_EVENTS_CAPACITY) {
+    state.recentEvents.shift();
+  }
 }

@@ -38,6 +38,7 @@ import { detectOverallPositionChange } from './overall-position-detector';
 import { detectPlayerStopped } from './player-stopped-detector';
 import { detectPitWindow } from './pit-window-detector';
 import { detectNarrativePolish } from './narrative-polish-detector';
+import { maybeBuildSnapshot } from './snapshot-emitter';
 import {
   createSessionState,
   buildEvent,
@@ -45,7 +46,7 @@ import {
   type SessionState,
   type TelemetryFrame,
 } from '../session-state';
-import { createDriverState, type DriverState } from '../driver-state';
+import { createDriverState, pushRecentEvent, type DriverState } from '../driver-state';
 import type { PublisherEvent, PublisherCarRef } from '../event-types';
 
 export interface DriverPublisherConfig {
@@ -54,6 +55,8 @@ export interface DriverPublisherConfig {
   /** Callback to forward events to the renderer. */
   emitEvent: (event: string, payload: any) => void;
   log: (level: 'info' | 'warn' | 'error', message: string) => void;
+  /** Override the DRIVER_STATE_SNAPSHOT cadence in seconds (default 15). */
+  driverStateSnapshotIntervalSec?: number;
 }
 
 export class DriverPublisherOrchestrator {
@@ -214,6 +217,19 @@ export class DriverPublisherOrchestrator {
 
     this.dispatchEvents(events);
 
+    // DRIVER_STATE_SNAPSHOT (#179) — periodic cadence + forced flush on
+    // HIGH_PRIORITY events, pit transitions, and post driver-swap. Emitted
+    // strictly after the detector batch so it reflects the latest state.
+    if (playerCarIdx >= 0 && this.driverState) {
+      const snapshot = maybeBuildSnapshot(frame, this.state, this.driverState, events, {
+        raceSessionId: this.raceSessionId,
+        rigId: this.rigId,
+        playerCarIdx,
+        snapshotIntervalSec: this.cfg.driverStateSnapshotIntervalSec,
+      });
+      if (snapshot) this.dispatchEvents([snapshot]);
+    }
+
     // Emit operator state whenever player pit-road status changes.
     const playerIdx = this.playerCarIdx ?? 0;
     const nowOnPit  = frame.carIdxOnPitRoad[playerIdx] !== 0;
@@ -304,6 +320,10 @@ export class DriverPublisherOrchestrator {
     for (const ev of events) {
       this.cfg.transport.enqueue(ev);
       this._eventsEnqueued++;
+      // Keep a bounded ring buffer of recently-emitted events on the
+      // DriverState — used by DRIVER_STATE_SNAPSHOT (#179) and downstream
+      // composite detectors (#181 RECOVERY_DRIVE).
+      if (this.driverState) pushRecentEvent(this.driverState, ev);
       this.cfg.emitEvent('iracing.publisherEventEmitted', {
         type:      ev.type,
         carIdx:    ev.car?.carIdx,
