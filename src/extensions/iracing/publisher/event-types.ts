@@ -108,6 +108,9 @@ export type PublisherEventType =
   | 'BATTLE_BROKEN'
   | 'LAPPED_TRAFFIC_AHEAD'
   | 'BEING_LAPPED'
+  // Player-perspective position events (driver-publisher, player car only)
+  | 'OVERALL_POSITION_LOSS'
+  | 'OVERALL_POSITION_GAIN'
   // §5 Pit & strategy
   | 'PIT_ENTRY'
   | 'PIT_STOP_BEGIN'
@@ -126,6 +129,8 @@ export type PublisherEventType =
   | 'INCIDENT_LIMIT_WARNING'
   | 'BIG_HIT'
   | 'SPIN_DETECTED'
+  /** Player car stationary on track (speed-based, driver-publisher only). */
+  | 'PLAYER_STOPPED'
   // §7 Identity & roster (edge-authoritative)
   | 'IDENTITY_RESOLVED'
   | 'IDENTITY_OVERRIDE_CHANGED'
@@ -218,8 +223,10 @@ export interface EventPayloadMap {
   BATTLE_BROKEN: BattlePayload;
   /** iRacing source: CarDistAhead < 100m, target has fewer CarIdxLap */
   LAPPED_TRAFFIC_AHEAD: TrafficPayload;
-  BEING_LAPPED: TrafficPayload;
-
+  BEING_LAPPED: TrafficPayload;  /** Player car lost an overall race position on-track (driver-publisher only). */
+  OVERALL_POSITION_LOSS: OverallPositionChangePayload;
+  /** Player car gained an overall race position on-track (driver-publisher only). */
+  OVERALL_POSITION_GAIN: OverallPositionChangePayload;
   // §5 Pit & strategy
   /** iRacing source: CarIdxOnPitRoad false→true */
   PIT_ENTRY: PitEntryPayload;
@@ -251,6 +258,8 @@ export interface EventPayloadMap {
   INCIDENT_LIMIT_WARNING: IncidentLimitWarningPayload;
   BIG_HIT: Record<string, never>;
   SPIN_DETECTED: Record<string, never>;
+  /** iRacing source: Speed scalar < threshold sustained (player-car, driver-publisher only). */
+  PLAYER_STOPPED: PlayerStoppedPayload;
 
   // §7 Identity
   IDENTITY_RESOLVED: IdentityResolvedPayload;
@@ -526,6 +535,8 @@ export interface RosterUpdatedPayload {
 export const HIGH_PRIORITY_EVENTS = new Set<PublisherEventType>([
   'OVERTAKE_FOR_LEAD',
   'STOPPED_ON_TRACK',
+  'OVERALL_POSITION_LOSS',
+  'PLAYER_STOPPED',
   'RACE_GREEN',
   'RACE_CHECKERED',
   'FLAG_RED',
@@ -592,6 +603,25 @@ export interface ClassPositionChangePayload {
   carClassId: number;
   carClassShortName: string;
   reason: 'overtake' | 'pit_cycle' | 'other';
+}
+
+export interface OverallPositionChangePayload {
+  previousPosition: number;
+  newPosition: number;
+  reason: 'overtake' | 'pit_cycle' | 'other';
+  /** Car that overtook the player — populated on OVERALL_POSITION_LOSS when reason === 'overtake'. */
+  overtakingCar?: PublisherCarRef;
+}
+
+export interface PlayerStoppedPayload {
+  /** Fraction along the lap (0.0–1.0). */
+  lapDistPct: number;
+  /** How long the player has been stopped (seconds). */
+  stoppedDurationSec: number;
+  /** Player ground speed at detection (m/s). */
+  speed: number;
+  /** Overall race position when stopped. */
+  position: number;
 }
 
 export interface InPitWindowPayload {

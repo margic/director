@@ -238,6 +238,7 @@ describe('STINT_MILESTONE', () => {
       recentGapToBehind: [], closingRateToBehind: 0,
       lapsSinceLastPit: 0, estimatedFuelLapsRemaining: 0, inPitWindow: false,
       classPositionHistory: [], stintLapTimes: [],
+      overallPositionHistory: [], playerStoppedBySpeedStartTime: null, isPlayerStoppedBySpeed: false,
     });
 
     // Pit exit frame
