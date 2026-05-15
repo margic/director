@@ -36,6 +36,9 @@
 
 import { randomUUID } from 'crypto';
 import { PublisherTransport, type TransportStatus } from './transport';
+import { EventEnricher } from './enricher/event-enricher';
+import { EnrichingTransport } from './enricher/enriching-transport';
+import { createProvider, type EnricherSettings } from './enricher/factory';
 import { LifecycleEventDetector, type LifecycleDetectorContext } from './shared/lifecycle-event-detector';
 import { SessionPublisherOrchestrator } from './session-publisher/orchestrator';
 import { DriverPublisherOrchestrator } from './driver-publisher/orchestrator';
@@ -106,6 +109,11 @@ const LEGACY_KEYS = [
 export class PublisherOrchestrator {
   /** Single transport instance — shared by both pipelines. Non-null while running. */
   private transport: PublisherTransport | null = null;
+
+  /** Optional LLM enricher (#183). Null when `publisher.enricher.provider` is
+   *  unset/`'disabled'` — the default. When non-null, the transport above
+   *  is an `EnrichingTransport` that forwards every event to it. */
+  private enricher: EventEnricher | null = null;
 
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -620,13 +628,45 @@ export class PublisherOrchestrator {
     );
 
     // Single transport — shared by both sub-orchestrators (hard architectural constraint).
-    this.transport = new PublisherTransport({
-      endpointUrl,
-      batchIntervalMs,
-      getAuthToken:   () => this.cfg.director.getAuthToken(),
-      onStatusChange: (s) => this.onTransportStatus(s),
-      fetchFn:        this.cfg.fetchFn,
-    });
+    // When the enricher is configured, we wrap the transport so every enqueued
+    // event is also fed to the LLM clustering stage. Default = disabled = no overhead.
+    const enricherSettings = this.cfg.director.settings['publisher.enricher'] as
+      | EnricherSettings
+      | undefined;
+    const enricherProvider = createProvider(enricherSettings, this.cfg.fetchFn);
+    if (enricherProvider.enabled) {
+      this.enricher = new EventEnricher({
+        provider: enricherProvider,
+        emitMetaEvent: (ev) => this.transport?.enqueue(ev),
+        log: (level, msg, meta) =>
+          this.cfg.director.log(level === 'debug' ? 'info' : level, `enricher: ${msg}${meta ? ' ' + JSON.stringify(meta) : ''}`),
+        raceSessionId: this.raceSessionId,
+        rigId: this.rigId,
+        tokenBudgetCap: Number(
+          this.cfg.director.settings['publisher.enricher.tokenBudget'] ?? 100_000,
+        ),
+        callTimeoutMs: Number(
+          this.cfg.director.settings['publisher.enricher.timeoutMs'] ?? 5000,
+        ),
+      });
+      this.transport = new EnrichingTransport({
+        endpointUrl,
+        batchIntervalMs,
+        getAuthToken:   () => this.cfg.director.getAuthToken(),
+        onStatusChange: (s) => this.onTransportStatus(s),
+        fetchFn:        this.cfg.fetchFn,
+        enricher:       this.enricher,
+      });
+      this.cfg.director.log('info', `Publisher enricher enabled (provider=${enricherProvider.name})`);
+    } else {
+      this.transport = new PublisherTransport({
+        endpointUrl,
+        batchIntervalMs,
+        getAuthToken:   () => this.cfg.director.getAuthToken(),
+        onStatusChange: (s) => this.onTransportStatus(s),
+        fetchFn:        this.cfg.fetchFn,
+      });
+    }
     this.transport.start();
 
     const emitEvent = (event: string, payload: any) =>

@@ -162,7 +162,12 @@ export type PublisherEventType =
   | 'ENGINE_WARNING'
   // §10 AI consumer aids (#179)
   /** Periodic snapshot of the current driver situation + recent events ring buffer. */
-  | 'DRIVER_STATE_SNAPSHOT';
+  | 'DRIVER_STATE_SNAPSHOT'
+  // §12 Enricher meta-events (#183) — emitted by the optional post-publisher
+  // LLM stage when it clusters bursts of low-level events into one beat.
+  | 'INCIDENT_SUMMARY'
+  | 'BATTLE_SUMMARY'
+  | 'STINT_SUMMARY';
 
 // CLOUD-EMITTED — publisher never produces these. Listed here for documentation only.
 // 'FOCUS_VS_FOCUS_BATTLE' | 'FOCUS_GROUP_ON_TRACK' | 'FOCUS_GROUP_SPLIT'
@@ -305,6 +310,11 @@ export interface EventPayloadMap {
 
   // §10 AI consumer aids (#179)
   DRIVER_STATE_SNAPSHOT: DriverStateSnapshotPayload;
+
+  // §12 Enricher meta-events (#183)
+  INCIDENT_SUMMARY: IncidentSummaryPayload;
+  BATTLE_SUMMARY: BattleSummaryPayload;
+  STINT_SUMMARY: StintSummaryPayload;
 }
 
 // ---------------------------------------------------------------------------
@@ -912,3 +922,76 @@ export interface SafetyCarImminentPayload {
   /** Refs for every stopped car contributing to the trigger. */
   affectedCars: PublisherCarRef[];
 }
+
+// ---------------------------------------------------------------------------
+// §12 Enricher meta-events (#183)
+// ---------------------------------------------------------------------------
+
+/** Severity classification for enricher meta-events. */
+export type EnricherSeverity = 'minor' | 'major' | 'race-defining';
+
+/**
+ * Provider/model attribution attached to every meta-event for observability.
+ * `provider='disabled'` is reserved — the disabled provider never emits.
+ */
+export interface EnricherLlmMeta {
+  provider: 'openai' | 'azure-openai' | 'ollama' | 'mock';
+  model: string;
+  latencyMs: number;
+  tokensIn: number;
+  tokensOut: number;
+}
+
+/**
+ * INCIDENT_SUMMARY — clusters 3+ incident-weight events (OFF_TRACK,
+ * CONTACT_DETECTED, PLAYER_STOPPED, BIG_HIT, SPIN_DETECTED) within a 10s
+ * sliding window into one narrative beat.
+ */
+export interface IncidentSummaryPayload {
+  startTime: number;
+  endTime: number;
+  involvedCars: PublisherCarRef[];
+  rawEventTypes: PublisherEventType[];
+  /** 2–3 sentence human description from the LLM. */
+  llmNarrative: string;
+  /** ≤ 60 char headline from the LLM. */
+  llmHeadline: string;
+  severity: EnricherSeverity;
+  /** 0–1 self-rated confidence from the LLM. */
+  confidence: number;
+  /** Provider attribution + cost metadata. */
+  llm: EnricherLlmMeta;
+}
+
+/**
+ * BATTLE_SUMMARY — emitted when a sustained 30s window of high
+ * `competitiveFocus` (> 0.7) ends. Captures the on-track battle as a beat.
+ */
+export interface BattleSummaryPayload {
+  startTime: number;
+  endTime: number;
+  involvedCars: PublisherCarRef[];
+  rawEventTypes: PublisherEventType[];
+  llmNarrative: string;
+  llmHeadline: string;
+  severity: EnricherSeverity;
+  confidence: number;
+  llm: EnricherLlmMeta;
+}
+
+/**
+ * STINT_SUMMARY — emitted on PIT_ENTRY (stint boundary). Covers every event
+ * of the stint that just ended.
+ */
+export interface StintSummaryPayload {
+  startTime: number;
+  endTime: number;
+  involvedCars: PublisherCarRef[];
+  rawEventTypes: PublisherEventType[];
+  llmNarrative: string;
+  llmHeadline: string;
+  severity: EnricherSeverity;
+  confidence: number;
+  llm: EnricherLlmMeta;
+}
+
