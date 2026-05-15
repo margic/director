@@ -153,7 +153,10 @@ export type PublisherEventType =
   | 'PACE_DROP'
   | 'SECTOR_PERSONAL_BEST'
   | 'TYRE_TEMP_DRIFT'
-  | 'ENGINE_WARNING';
+  | 'ENGINE_WARNING'
+  // §10 AI consumer aids (#179)
+  /** Periodic snapshot of the current driver situation + recent events ring buffer. */
+  | 'DRIVER_STATE_SNAPSHOT';
 
 // CLOUD-EMITTED — publisher never produces these. Listed here for documentation only.
 // 'FOCUS_VS_FOCUS_BATTLE' | 'FOCUS_GROUP_ON_TRACK' | 'FOCUS_GROUP_SPLIT'
@@ -285,6 +288,9 @@ export interface EventPayloadMap {
   SECTOR_PERSONAL_BEST: SectorPersonalBestPayload;
   TYRE_TEMP_DRIFT: TyreTempDriftPayload;
   ENGINE_WARNING: EngineWarningPayload;
+
+  // §10 AI consumer aids (#179)
+  DRIVER_STATE_SNAPSHOT: DriverStateSnapshotPayload;
 }
 
 // ---------------------------------------------------------------------------
@@ -664,4 +670,94 @@ export interface EngineWarningPayload {
   warningFlags: number;
   /** Decoded warning names (e.g. 'WaterTempWarning', 'OilPressureWarning'). */
   warningNames: string[];
+}
+
+// ---------------------------------------------------------------------------
+// §10 AI consumer aids — DRIVER_STATE_SNAPSHOT (#179)
+// ---------------------------------------------------------------------------
+
+export type SnapshotFlag =
+  | 'green'
+  | 'yellow'
+  | 'red'
+  | 'white'
+  | 'checkered'
+  | 'blue'
+  | 'unknown';
+
+export interface SnapshotBattleEntry {
+  /** Self-describing ref for the rival car. */
+  car: PublisherCarRef;
+  /** Current gap to that car in seconds (always positive). */
+  gapSec: number;
+  /** Closing rate in seconds-per-lap (positive = closing on us / we are closing on them). */
+  closingRateSecPerLap: number;
+}
+
+export interface SnapshotEventDigest {
+  type: PublisherEventType;
+  /** sessionTime (seconds) of the original event. */
+  sessionTime: number;
+  /** One-line summary suitable for downstream LLM prompts. */
+  summary: string;
+}
+
+/**
+ * DRIVER_STATE_SNAPSHOT — periodic + forced-flush snapshot of the player's
+ * current situation. Designed for downstream AI consumers (race-narrative,
+ * commentary, alerting). Strictly additive — never a substitute for the
+ * authoritative discrete events.
+ */
+export interface DriverStateSnapshotPayload {
+  /** ISO reason for this snapshot. */
+  reason: 'cadence' | 'forced';
+
+  // Identity
+  driverName: string;
+  carIdx: number;
+  carNumber: string;
+  stintNumber: number;
+
+  // Current state
+  position: number;
+  classPosition: number;
+  lap: number;
+  lapDistPct: number;
+  /** Player ground speed in m/s. */
+  speed: number;
+  onPitRoad: boolean;
+  /** iRacing CarIdxTrackSurface enum value. */
+  trackSurface: number;
+  isStopped: boolean;
+  isOffTrack: boolean;
+
+  // Pace
+  /** Most recent stint lap times (seconds, ordered oldest→newest, capped at 5). */
+  recentLapTimes: number[];
+  /** Best lap of the current stint (seconds, 0 = none). */
+  stintBestLapTime: number;
+  /** Personal best lap of the session (seconds, 0 = none). */
+  personalBestLapTime: number;
+  /** % delta of the most recent lap vs personal best (positive = slower, 0 when no data). */
+  paceVsBestPct: number;
+
+  // Strategy
+  /** Litres of fuel remaining (raw FuelLevel). */
+  fuelLevel: number;
+  /** Estimated laps the current fuel load will sustain (0 when unknown). */
+  fuelLapsRemaining: number;
+  inPitWindow: boolean;
+  /** Estimated stint length in laps (0 when unknown). */
+  estimatedStintLaps: number;
+
+  // Battle
+  carAhead?: SnapshotBattleEntry;
+  carBehind?: SnapshotBattleEntry;
+
+  // Recent events (most recent last, capped at 10)
+  recentEvents: SnapshotEventDigest[];
+
+  // Race meta
+  racePhase: 'unknown' | 'opening' | 'midrace' | 'endgame' | 'final-laps';
+  flag: SnapshotFlag;
 }
