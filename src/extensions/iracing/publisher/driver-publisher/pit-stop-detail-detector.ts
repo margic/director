@@ -26,6 +26,7 @@
 import type { TelemetryFrame, SessionState } from '../session-state';
 import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
 import type { PublisherEvent } from '../event-types';
+import type { DriverState } from '../driver-state';
 
 const TRACK_PIT_STALL = 2; // iRacing: irsdk_TrkLoc PitStall
 
@@ -58,6 +59,7 @@ export function detectPitStopDetail(
   prev: TelemetryFrame | null,
   curr: TelemetryFrame,
   state: SessionState,
+  driverState: DriverState,
   ctx: PitStopDetailContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
@@ -74,8 +76,8 @@ export function detectPitStopDetail(
 
   if (prev === null) {
     // Seed player fuel tracking on first frame.
-    if (state.playerFuelAtLapStart === 0) {
-      state.playerFuelAtLapStart = curr.fuelLevel;
+    if (driverState.fuelAtLapStart === 0) {
+      driverState.fuelAtLapStart = curr.fuelLevel;
     }
     return events;
   }
@@ -173,22 +175,22 @@ export function detectPitStopDetail(
   const prevPlayerLaps = prev.carIdxLapCompleted[playerCarIdx];
   const currPlayerLaps = curr.carIdxLapCompleted[playerCarIdx];
   if (currPlayerLaps > prevPlayerLaps) {
-    const fuelUsed = state.playerFuelAtLapStart - curr.fuelLevel;
-    if (fuelUsed > 0) state.playerFuelPerLap = fuelUsed;
-    state.playerFuelAtLapStart = curr.fuelLevel;
+    const fuelUsed = driverState.fuelAtLapStart - curr.fuelLevel;
+    if (fuelUsed > 0) driverState.fuelPerLap = fuelUsed;
+    driverState.fuelAtLapStart = curr.fuelLevel;
   }
 
   // FUEL_LOW — one-shot per threshold per session
   for (const threshold of FUEL_LOW_THRESHOLDS) {
     if (
-      !state.firedFuelLowThresholds.has(threshold) &&
+      !driverState.firedFuelLowThresholds.has(threshold) &&
       curr.fuelLevelPct < threshold
     ) {
       const fuelCar = carRefFromRoster(state, playerCarIdx);
       if (fuelCar) {
-        state.firedFuelLowThresholds.add(threshold);
-        const estimatedLapsRemaining = state.playerFuelPerLap > 0
-          ? Math.floor(curr.fuelLevel / state.playerFuelPerLap)
+        driverState.firedFuelLowThresholds.add(threshold);
+        const estimatedLapsRemaining = driverState.fuelPerLap > 0
+          ? Math.floor(curr.fuelLevel / driverState.fuelPerLap)
           : 0;
 
         events.push(buildEvent(

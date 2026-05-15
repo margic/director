@@ -9,6 +9,7 @@
 import type { TelemetryFrame, SessionState } from '../session-state';
 import { buildEvent, carRefFromRoster, getOrCreateCarState } from '../session-state';
 import type { PublisherEvent } from '../event-types';
+import type { DriverState } from '../driver-state';
 
 let unsetPlayerCarIdxWarned = false;
 
@@ -24,6 +25,7 @@ export function detectPitWindow(
   prev: TelemetryFrame | null,
   curr: TelemetryFrame,
   state: SessionState,
+  driverState: DriverState,
   ctx: PitWindowContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
@@ -59,7 +61,7 @@ export function detectPitWindow(
 
   // ---- FUEL_PROJECTION — at most once per lap when projection is low ----
   const lapNumber = curr.carIdxLapCompleted[ctx.playerCarIdx];
-  const fuelPerLap = state.playerFuelPerLap;
+  const fuelPerLap = driverState.fuelPerLap;
   const projected = cs.estimatedFuelLapsRemaining;
   if (
     fuelPerLap > 0

@@ -13,7 +13,8 @@ import {
   type IncidentStintContext,
 } from '../driver-publisher/incident-stint-detector';
 import { createSessionState, type SessionState } from '../session-state';
-import { makeFrame, cloneFrame, withPitExit, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
+import { makeFrame, cloneFrame, withPitExit, seedRoster, ALL_CAR_INDICES, makeDriverState } from './frame-fixtures';
+import type { DriverState } from '../driver-state';
 
 const CTX: IncidentStintContext = {
   rigId: 'rig-01',
@@ -22,9 +23,11 @@ const CTX: IncidentStintContext = {
 };
 
 let state: SessionState;
+let driverState: DriverState;
 beforeEach(() => {
   state = createSessionState('rs-1', 1);
   seedRoster(state, ALL_CAR_INDICES);
+  driverState = makeDriverState(0);
 });
 
 function detect(
@@ -33,7 +36,7 @@ function detect(
   s = state,
   ctx = CTX,
 ) {
-  return detectIncidentsAndMilestones(prev, curr, s, ctx);
+  return detectIncidentsAndMilestones(prev, curr, s, driverState, ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -104,11 +107,11 @@ describe('INCIDENT_LIMIT_WARNING', () => {
     const ev = events.find(e => e.type === 'INCIDENT_LIMIT_WARNING');
     expect(ev).toBeDefined();
     expect(ev!.payload).toMatchObject({ thresholdPercent: 50, currentCount: 9, incidentLimit: LIMIT });
-    expect(state.firedIncidentWarnings.has(50)).toBe(true);
+    expect(driverState.firedIncidentWarnings.has(50)).toBe(true);
   });
 
   it('fires at 75% threshold', () => {
-    state.firedIncidentWarnings.add(50); // already fired
+    driverState.firedIncidentWarnings.add(50); // already fired
     // 75% of 17 = 12.75 → ceiling = 13
     const f0 = makeFrame({ teamIncidentCount: 12, incidentLimit: LIMIT });
     const f1 = cloneFrame(f0); f1.teamIncidentCount = 13;
@@ -118,8 +121,8 @@ describe('INCIDENT_LIMIT_WARNING', () => {
   });
 
   it('fires at 90% threshold', () => {
-    state.firedIncidentWarnings.add(50);
-    state.firedIncidentWarnings.add(75);
+    driverState.firedIncidentWarnings.add(50);
+    driverState.firedIncidentWarnings.add(75);
     // 90% of 17 = 15.3 → ceiling = 16
     const f0 = makeFrame({ teamIncidentCount: 15, incidentLimit: LIMIT });
     const f1 = cloneFrame(f0); f1.teamIncidentCount = 16;
@@ -132,7 +135,7 @@ describe('INCIDENT_LIMIT_WARNING', () => {
     const f0 = makeFrame({ teamIncidentCount: 8, incidentLimit: LIMIT });
     const f1 = cloneFrame(f0); f1.teamIncidentCount = 9;  // crosses 50%
     detect(f0, f1);
-    expect(state.firedIncidentWarnings.has(50)).toBe(true);
+    expect(driverState.firedIncidentWarnings.has(50)).toBe(true);
 
     const f2 = cloneFrame(f1); f2.teamIncidentCount = 10;
     const events = detect(f1, f2);
@@ -180,12 +183,7 @@ describe('STINT_MILESTONE', () => {
   });
 
   it('fires at 50% (10 laps)', () => {
-    state.carStates.get(0)?.firedStintMilestones.add(25) || // pre-seed 25 fired
-      (state.carStates.set(0, { ...createSessionState('rs-1', 1).carStates.get(0)!, stintStartLap: 0, firedStintMilestones: new Set([25]) } as any));
-
-    // Get or create car state and set milestone 25 as fired
-    const cs = state.carStates.get(0);
-    if (cs) cs.firedStintMilestones.add(25);
+    driverState.firedStintMilestones.add(25);
 
     const f0 = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 9 }] });
     const f1 = cloneFrame(f0); f1.carIdxLapCompleted[0] = 10;
@@ -202,9 +200,8 @@ describe('STINT_MILESTONE', () => {
     const fpair = cloneFrame(f0pre);
     detect(f0pre, fpair, state, stintCtx);
     // Mark 25 and 50 as already fired so only 75 is pending.
-    const cs = state.carStates.get(0)!;
-    cs.firedStintMilestones.add(25);
-    cs.firedStintMilestones.add(50);
+    driverState.firedStintMilestones.add(25);
+    driverState.firedStintMilestones.add(50);
 
     const f0 = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 14 }] });
     const f1 = cloneFrame(f0); f1.carIdxLapCompleted[0] = 15;
@@ -226,19 +223,20 @@ describe('STINT_MILESTONE', () => {
 
   it('resets milestones after pit exit — next stint counts from 0', () => {
     // Pre-fire all milestones in a fake stint
-    const cs = state.carStates.set(0, {
+    driverState.firedStintMilestones = new Set([25, 50, 75]);
+    state.carStates.set(0, {
       position: 0, classPosition: 0, onPitRoad: true, trackSurface: 4,
       lastLapTime: 0, bestLapTime: 0, lapsCompleted: 20, lapDistPct: 0,
       stintBestLapTime: 0, sessionFlags: 0, pitEntryLap: null, pitEntryPosition: null,
       pitStallArrivalTime: null, fuelLevelOnPitEntry: null, offTrackFrames: 0,
       stoppedFrames: 0, isStoppedOnTrack: false, stoppedStartSessionTime: null,
       pitStallArrivalFuelLevel: null, onOutLap: false, pitExitLapsCompleted: null,
-      stintStartLap: 0, firedStintMilestones: new Set([25, 50, 75]),
+      stintStartLap: 0,
       recentGapToAhead: [], closingRateToAhead: 0,
       recentGapToBehind: [], closingRateToBehind: 0,
       lapsSinceLastPit: 0, estimatedFuelLapsRemaining: 0, inPitWindow: false,
       classPositionHistory: [], stintLapTimes: [],
-      overallPositionHistory: [], playerStoppedBySpeedStartTime: null, isPlayerStoppedBySpeed: false,
+      overallPositionHistory: [],
     });
 
     // Pit exit frame
@@ -248,9 +246,8 @@ describe('STINT_MILESTONE', () => {
 
     detect(f0, f1, state, stintCtx);
 
-    const csAfter = state.carStates.get(0)!;
-    expect(csAfter.firedStintMilestones.size).toBe(0);
-    expect(csAfter.stintStartLap).toBe(f1.carIdxLapCompleted[0]);
+    expect(driverState.firedStintMilestones.size).toBe(0);
+    expect(state.carStates.get(0)!.stintStartLap).toBe(f1.carIdxLapCompleted[0]);
   });
 
   it('does NOT fire when estimatedStintLaps is 0 or not provided', () => {

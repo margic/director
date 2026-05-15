@@ -94,11 +94,6 @@ describe('createSessionState', () => {
     const state = createSessionState(TEST_SESSION_ID, 42);
     expect(state.sessionBestLapTime).toBe(0);
   });
-
-  it('initialises with empty fired incident warnings', () => {
-    const state = createSessionState(TEST_SESSION_ID, 42);
-    expect(state.firedIncidentWarnings.size).toBe(0);
-  });
 });
 
 // ---------------------------------------------------------------------------

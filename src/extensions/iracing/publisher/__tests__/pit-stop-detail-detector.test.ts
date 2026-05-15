@@ -24,14 +24,18 @@ import {
   withLapCompleted,
   seedRoster,
   ALL_CAR_INDICES,
+  makeDriverState,
 } from './frame-fixtures';
+import type { DriverState } from '../driver-state';
 
 const CTX: PitStopDetailContext = { rigId: 'rig-01', raceSessionId: 'rs-1', playerCarIdx: 0 };
 
 let state: SessionState;
+let driverState: DriverState;
 beforeEach(() => {
   state = createSessionState('rs-1', 1);
   seedRoster(state, ALL_CAR_INDICES);
+  driverState = makeDriverState(0);
 });
 
 function detect(
@@ -40,7 +44,7 @@ function detect(
   s = state,
   ctx = CTX,
 ) {
-  return detectPitStopDetail(prev, curr, s, ctx);
+  return detectPitStopDetail(prev, curr, s, driverState, ctx);
 }
 
 /** Advance a frame's sessionTime by dt seconds. */
@@ -61,7 +65,7 @@ describe('detectPitStopDetail — seeding', () => {
 
   it('seeds playerFuelAtLapStart on first frame', () => {
     detect(null, makeFrame({ fuelLevel: 42 }));
-    expect(state.playerFuelAtLapStart).toBe(42);
+    expect(driverState.fuelAtLapStart).toBe(42);
   });
 });
 
@@ -219,7 +223,7 @@ describe('detectPitStopDetail — FUEL_LOW', () => {
   });
 
   it('fires at 0.05 threshold crossing (after 0.10)', () => {
-    state.firedFuelLowThresholds.add(0.10); // already fired
+    driverState.firedFuelLowThresholds.add(0.10); // already fired
 
     const f0 = makeFrame({ fuelLevelPct: 0.06, fuelLevel: 3 });
     const f1 = cloneFrame(f0);
@@ -263,8 +267,8 @@ describe('detectPitStopDetail — FUEL_LOW', () => {
   });
 
   it('includes estimatedLapsRemaining based on playerFuelPerLap', () => {
-    state.playerFuelPerLap = 3; // 3L per lap
-    state.firedFuelLowThresholds.clear();
+    driverState.fuelPerLap = 3; // 3L per lap
+    driverState.firedFuelLowThresholds.clear();
 
     const f0 = makeFrame({ fuelLevelPct: 0.12, fuelLevel: 6 });
     const f1 = cloneFrame(f0);
@@ -368,15 +372,15 @@ describe('detectPitStopDetail — FUEL_LEVEL_CHANGE', () => {
 describe('detectPitStopDetail — fuel-per-lap tracking', () => {
   it('updates playerFuelPerLap when a player lap is completed', () => {
     const f0 = makeFrame({ fuelLevel: 50, cars: [{ carIdx: 0, lapsCompleted: 1 }] });
-    detect(null, f0); // seeds playerFuelAtLapStart = 50
+    detect(null, f0); // seeds fuelAtLapStart = 50
 
     const f1 = cloneFrame(f0);
     f1.carIdxLapCompleted[0] = 2;
     f1.fuelLevel = 47; // used 3L
 
     detect(f0, f1);
-    expect(state.playerFuelPerLap).toBe(3);
-    expect(state.playerFuelAtLapStart).toBe(47);
+    expect(driverState.fuelPerLap).toBe(3);
+    expect(driverState.fuelAtLapStart).toBe(47);
   });
 });
 
