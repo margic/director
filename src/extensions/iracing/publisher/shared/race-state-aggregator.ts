@@ -17,6 +17,8 @@ import { getOrCreateCarState } from '../session-state';
 export const GAP_WINDOW_SIZE = 5;
 /** Maximum samples kept for class-position hysteresis. */
 export const CLASS_POSITION_HISTORY_SIZE = 3;
+/** Maximum samples kept for overall-position hysteresis. */
+export const OVERALL_POSITION_HISTORY_SIZE = 3;
 /** Distance from end of stint considered the "pit window" (laps). */
 export const PIT_WINDOW_LAPS = 5;
 /** Battle gap threshold for class-group formation (seconds). */
@@ -82,6 +84,12 @@ export function aggregateRaceState(
     const classPos = curr.carIdxClassPosition[carIdx];
     if (classPos > 0) {
       pushWindow(cs.classPositionHistory, classPos, CLASS_POSITION_HISTORY_SIZE);
+    }
+
+    // ---- 2b. Overall-position history (hysteresis source for OVERALL_POSITION_GAIN/LOSS) ----
+    const overallPos = curr.carIdxPosition[carIdx];
+    if (overallPos > 0) {
+      pushWindow(cs.overallPositionHistory, overallPos, OVERALL_POSITION_HISTORY_SIZE);
     }
 
     // ---- 3. Lap completion → stint laps + lapsSinceLastPit ----

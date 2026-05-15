@@ -34,6 +34,8 @@ import { IdentityOverrideService } from './identity-override';
 import { aggregateRaceState } from '../shared/race-state-aggregator';
 import { detectGapTrend } from './gap-trend-detector';
 import { detectClassPositionChange } from './class-position-detector';
+import { detectOverallPositionChange } from './overall-position-detector';
+import { detectPlayerStopped } from './player-stopped-detector';
 import { detectPitWindow } from './pit-window-detector';
 import { detectNarrativePolish } from './narrative-polish-detector';
 import {
@@ -198,6 +200,8 @@ export class DriverPublisherOrchestrator {
     // Race-narrative detectors (#153–#156) — all gated on playerCarIdx.
     events.push(...detectGapTrend(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
     events.push(...detectClassPositionChange(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
+    events.push(...detectOverallPositionChange(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
+    events.push(...detectPlayerStopped(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
     events.push(...detectPitWindow(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
     events.push(...detectNarrativePolish(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
 
