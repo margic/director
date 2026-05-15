@@ -56,6 +56,29 @@ function makeFrame(overrides: Partial<TelemetryFrame> = {}): TelemetryFrame {
     rfTempCM: 0,
     lrTempCM: 0,
     rrTempCM: 0,
+    // Group A: Driver inputs — #178
+    throttle: 0, brake: 0, clutch: 0, gear: 0, rpm: 0,
+    brakeABSactive: 0, dcBrakeBias: 0.5, steeringWheelTorque: 0, handbrakeRaw: 0,
+    // Group B: Vehicle dynamics — #178
+    lat: 0, lon: 0, alt: 0,
+    pitch: 0, roll: 0, yaw: 0,
+    latAccel: 0, longAccel: 0, vertAccel: 0, yawRate: 0,
+    velocityX: 0, velocityY: 0, velocityZ: 0,
+    waterTemp: 80, oilTemp: 90, oilPressure: 4.5, voltage: 13.8,
+    // Group C: Per-tyre wear and pressure — #178
+    lfWearL: 1, lfWearM: 1, lfWearR: 1,
+    rfWearL: 1, rfWearM: 1, rfWearR: 1,
+    lrWearL: 1, lrWearM: 1, lrWearR: 1,
+    rrWearL: 1, rrWearM: 1, rrWearR: 1,
+    lfPressure: 165, rfPressure: 165, lrPressure: 165, rrPressure: 165,
+    // Group D: Per-car spatial awareness — #178
+    carIdxEstTime: new Float32Array(64),
+    carIdxSteer: new Float32Array(64),
+    carIdxRPM: new Float32Array(64),
+    carIdxPaceLine: new Int32Array(64).fill(-1),
+    carIdxPaceRow: new Int32Array(64).fill(-1),
+    carIdxQualTireCompound: new Int32Array(64),
+    carIdxTireCompound: new Int32Array(64),
     ...overrides,
   };
 }

@@ -103,6 +103,112 @@ export interface TelemetryFrame {
   lrTempCM: number;
   /** iRacing: RRtempCM (right rear centre tyre temperature, Celsius) */
   rrTempCM: number;
+
+  // Group A: Driver inputs (player car only) — #178
+  /** iRacing: Throttle (0.0–1.0) */
+  throttle: number;
+  /** iRacing: Brake (0.0–1.0) */
+  brake: number;
+  /** iRacing: Clutch (0.0–1.0) */
+  clutch: number;
+  /** iRacing: Gear (-1=reverse, 0=neutral, 1-6=forward) */
+  gear: number;
+  /** iRacing: RPM — engine revolutions per minute */
+  rpm: number;
+  /** iRacing: BrakeABSactive — 1 when ABS is actively braking, 0 otherwise */
+  brakeABSactive: number;
+  /** iRacing: dcBrakeBias — front brake bias (0.0–1.0) */
+  dcBrakeBias: number;
+  /** iRacing: SteeringWheelTorque (Nm) — torque the driver is fighting */
+  steeringWheelTorque: number;
+  /** iRacing: HandbrakeRaw (0.0–1.0) */
+  handbrakeRaw: number;
+
+  // Group B: Vehicle dynamics (player car only) — #178
+  /** iRacing: Lat — WGS84 latitude (decimal degrees) */
+  lat: number;
+  /** iRacing: Lon — WGS84 longitude (decimal degrees) */
+  lon: number;
+  /** iRacing: Alt — altitude above MSL (metres) */
+  alt: number;
+  /** iRacing: Pitch (radians) — positive = nose up */
+  pitch: number;
+  /** iRacing: Roll (radians) — positive = right side down */
+  roll: number;
+  /** iRacing: Yaw (radians) — 0 = north, increases clockwise */
+  yaw: number;
+  /** iRacing: LatAccel (m/s²) — positive = right */
+  latAccel: number;
+  /** iRacing: LongAccel (m/s²) — positive = forward */
+  longAccel: number;
+  /** iRacing: VertAccel (m/s²) — positive = up */
+  vertAccel: number;
+  /** iRacing: YawRate (rad/s) — positive = turning right */
+  yawRate: number;
+  /** iRacing: VelocityX (m/s) — world X axis velocity */
+  velocityX: number;
+  /** iRacing: VelocityY (m/s) — world Y axis velocity */
+  velocityY: number;
+  /** iRacing: VelocityZ (m/s) — world Z axis velocity */
+  velocityZ: number;
+  /** iRacing: WaterTemp (Celsius) */
+  waterTemp: number;
+  /** iRacing: OilTemp (Celsius) */
+  oilTemp: number;
+  /** iRacing: OilPressure (bar) */
+  oilPressure: number;
+  /** iRacing: Voltage (V) */
+  voltage: number;
+
+  // Group C: Per-tyre wear and pressure (player car only) — #178
+  /** iRacing: LFwearL — left front tyre wear, inside strip (0.0–1.0) */
+  lfWearL: number;
+  /** iRacing: LFwearM — left front tyre wear, centre strip (0.0–1.0) */
+  lfWearM: number;
+  /** iRacing: LFwearR — left front tyre wear, outside strip (0.0–1.0) */
+  lfWearR: number;
+  /** iRacing: RFwearL — right front tyre wear, inside strip */
+  rfWearL: number;
+  /** iRacing: RFwearM — right front tyre wear, centre strip */
+  rfWearM: number;
+  /** iRacing: RFwearR — right front tyre wear, outside strip */
+  rfWearR: number;
+  /** iRacing: LRwearL — left rear tyre wear, inside strip */
+  lrWearL: number;
+  /** iRacing: LRwearM — left rear tyre wear, centre strip */
+  lrWearM: number;
+  /** iRacing: LRwearR — left rear tyre wear, outside strip */
+  lrWearR: number;
+  /** iRacing: RRwearL — right rear tyre wear, inside strip */
+  rrWearL: number;
+  /** iRacing: RRwearM — right rear tyre wear, centre strip */
+  rrWearM: number;
+  /** iRacing: RRwearR — right rear tyre wear, outside strip */
+  rrWearR: number;
+  /** iRacing: LFpressure (kPa) — left front tyre pressure */
+  lfPressure: number;
+  /** iRacing: RFpressure (kPa) — right front tyre pressure */
+  rfPressure: number;
+  /** iRacing: LRpressure (kPa) — left rear tyre pressure */
+  lrPressure: number;
+  /** iRacing: RRpressure (kPa) — right rear tyre pressure */
+  rrPressure: number;
+
+  // Group D: Per-car spatial awareness — #178
+  /** iRacing: CarIdxEstTime — estimated time behind leader, per car (seconds) */
+  carIdxEstTime: Float32Array;
+  /** iRacing: CarIdxSteer — steering angle per car (radians) */
+  carIdxSteer: Float32Array;
+  /** iRacing: CarIdxRPM — engine RPM per car */
+  carIdxRPM: Float32Array;
+  /** iRacing: CarIdxPaceLine — formation-lap pace line slot per car (-1 = not assigned) */
+  carIdxPaceLine: Int32Array;
+  /** iRacing: CarIdxPaceRow — formation-lap pace row per car (-1 = not assigned) */
+  carIdxPaceRow: Int32Array;
+  /** iRacing: CarIdxQualTireCompound — qualifying tyre compound index per car */
+  carIdxQualTireCompound: Int32Array;
+  /** iRacing: CarIdxTireCompound — current tyre compound index per car */
+  carIdxTireCompound: Int32Array;
 }
 
 // ---------------------------------------------------------------------------
