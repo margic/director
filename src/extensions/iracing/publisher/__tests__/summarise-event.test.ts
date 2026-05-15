@@ -39,6 +39,7 @@ const ALL_EVENT_TYPES: PublisherEventType[] = [
   'IN_PIT_WINDOW', 'FUEL_PROJECTION', 'PACE_DROP',
   'SECTOR_PERSONAL_BEST', 'TYRE_TEMP_DRIFT', 'ENGINE_WARNING',
   'DRIVER_STATE_SNAPSHOT',
+  'INCIDENT_SUMMARY', 'BATTLE_SUMMARY', 'STINT_SUMMARY',
 ];
 
 function fakeEvent(type: PublisherEventType): PublisherEvent {

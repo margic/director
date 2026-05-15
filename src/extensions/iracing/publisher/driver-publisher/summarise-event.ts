@@ -210,6 +210,15 @@ export function summariseEvent(event: PublisherEvent): string {
       const p = event.payload as any;
       return `Safety car imminent (${p.stoppedCarCount} stopped in ${p.windowSec}s)`;
     }
+
+    // §12 Enricher meta-events (#183)
+    case 'INCIDENT_SUMMARY':
+    case 'BATTLE_SUMMARY':
+    case 'STINT_SUMMARY': {
+      const p = event.payload as any;
+      const headline = typeof p?.llmHeadline === 'string' ? p.llmHeadline : event.type;
+      return `${event.type}: ${headline}`;
+    }
   }
 
   // Forward-compatibility — exhaustive switch above; this is unreachable
