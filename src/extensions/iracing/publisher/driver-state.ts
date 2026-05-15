@@ -127,6 +127,24 @@ export interface DriverState {
    * implementation uses `carIdxLapDistPct` as a sensible proximity proxy.
    */
   proximityRing: Float32Array[];
+
+  // ---- Composite events (#181) ----
+  /**
+   * Running count of overall positions lost during the current stop episode.
+   * Reset to 0 whenever `isStoppedBySpeed` transitions true → false.
+   */
+  positionsLostThisStop: number;
+  /**
+   * Active recovery state machine. Set when a trigger event
+   * (PLAYER_STOPPED | OFF_TRACK | CONTACT_DETECTED) fires; cleared after
+   * RECOVERY_DRIVE emits OR after the 60 s window expires without ever
+   * climbing ≥ 2 positions.
+   */
+  recoveryActive: {
+    startedAtSessionTime: number;
+    startPosition: number;
+    trigger: 'PLAYER_STOPPED' | 'OFF_TRACK' | 'CONTACT_DETECTED';
+  } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,6 +177,8 @@ export function createDriverState(carIdx: number): DriverState {
     pendingContact: null,
     contactDetectedCooldownUntilTick: 0,
     proximityRing: [],
+    positionsLostThisStop: 0,
+    recoveryActive: null,
   };
 }
 

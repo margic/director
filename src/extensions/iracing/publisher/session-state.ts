@@ -382,6 +382,19 @@ export interface SessionState {
   tyreTempDriftLastEmit: { LF: number; RF: number; LR: number; RR: number };
   /** Last EngineWarnings bitmask seen — change-detection for ENGINE_WARNING. */
   lastEngineWarnings: number;
+
+  // ---- Composite events (#181) ----
+  /**
+   * Rolling window of recent STOPPED_ON_TRACK observations used by the
+   * SAFETY_CAR_IMMINENT detector. Pruned to the last 30 s on every tick.
+   */
+  recentStoppedOnTrackEvents: Array<{
+    sessionTime: number;
+    carIdx: number;
+    lapDistPct: number;
+  }>;
+  /** sessionTime of the most recent SAFETY_CAR_IMMINENT emission (-Infinity = never). */
+  lastSafetyCarImminentEmittedAt: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -463,6 +476,8 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     tyreTempBaseline: { LF: [], RF: [], LR: [], RR: [] },
     tyreTempDriftLastEmit: { LF: 0, RF: 0, LR: 0, RR: 0 },
     lastEngineWarnings: 0,
+    recentStoppedOnTrackEvents: [],
+    lastSafetyCarImminentEmittedAt: -Infinity,
   };
 }
 

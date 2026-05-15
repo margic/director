@@ -23,6 +23,7 @@ import { detectSessionLifecycle } from './session-lifecycle-detector';
 import { detectFlags } from './flag-detector';
 import { detectLapCompleted } from './lap-completed-detector';
 import { detectOvertakeAndBattle } from './overtake-battle-detector';
+import { detectSafetyCarImminent } from './safety-car-imminent-detector';
 import { detectSessionLapPerformance } from './lap-performance-session';
 import { detectSessionTypeChange } from './session-type-detector';
 import { detectRosterUpdate } from './roster-detector';
@@ -130,6 +131,11 @@ export class SessionPublisherOrchestrator {
     events.push(...detectFlags(this.prevFrame, frame, this.state, ctx));
     events.push(...detectLapCompleted(this.prevFrame, frame, this.state, ctx));
     events.push(...detectOvertakeAndBattle(this.prevFrame, frame, this.state, ctx));
+    // Composite (#181): consumes STOPPED_ON_TRACK from this tick.
+    events.push(...detectSafetyCarImminent(this.prevFrame, frame, this.state, {
+      ...ctx,
+      emittedThisTick: events,
+    }));
     events.push(...detectSessionLapPerformance(this.prevFrame, frame, this.state, {
       ...ctx,
       carClassByCarIdx:   this.carClassByCarIdx,
