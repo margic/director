@@ -176,8 +176,25 @@ export function summariseEvent(event: PublisherEvent): string {
       return `Engine warning: ${((event.payload as any).warningNames ?? []).join(', ')}`;
 
     // §10 AI consumer aids
-    case 'DRIVER_STATE_SNAPSHOT':
-      return `Driver state snapshot`;
+    case 'DRIVER_STATE_SNAPSHOT': {
+      const p = event.payload as any;
+      const d = p?.derived;
+      if (!d) return `Driver state snapshot`;
+      const arc = d.narrativeArc ?? 'cruise';
+      const stress =
+        d.raceStress >= 0.7 ? 'stressed' :
+        d.raceStress >= 0.4 ? 'engaged'  :
+        'composed';
+      const battle =
+        d.competitiveFocus >= 0.66 ? ', battling' :
+        d.competitiveFocus >= 0.33 ? ', in traffic' :
+        '';
+      const pace =
+        d.paceTrend >  0.05 ? ', slowing' :
+        d.paceTrend < -0.05 ? ', improving' :
+        '';
+      return `Snapshot[${arc}]: ${stress}${battle}${pace}`;
+    }
 
     // §11 Composite events (#181)
     case 'BEING_PASSED_WHILE_STOPPED': {

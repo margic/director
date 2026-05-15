@@ -42,6 +42,7 @@ import { detectPlayerStopped } from './player-stopped-detector';
 import { detectPitWindow } from './pit-window-detector';
 import { detectNarrativePolish } from './narrative-polish-detector';
 import { maybeBuildSnapshot } from './snapshot-emitter';
+import { computeDerivedMetrics } from './derived-metrics-aggregator';
 import {
   createSessionState,
   buildEvent,
@@ -170,6 +171,14 @@ export class DriverPublisherOrchestrator {
         estimatedStintLaps: this.estimatedStintLaps,
         playerFuelPerLap: this.driverState?.fuelPerLap ?? 0,
       });
+
+      // Derived-metrics aggregator (#182) — also runs BEFORE detectors so the
+      // snapshot emitter and any consumer sees the freshest scores.
+      if (this.driverState) {
+        computeDerivedMetrics(this.prevFrame, frame, this.state, this.driverState, {
+          playerCarIdx,
+        });
+      }
     }
 
     // Identity — resolve on every frame; only emits on first resolve or change.
