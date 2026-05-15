@@ -18,8 +18,9 @@
  */
 
 import type { TelemetryFrame, SessionState } from '../session-state';
-import { buildEvent, carRefFromRoster, getOrCreateCarState } from '../session-state';
+import { buildEvent, carRefFromRoster } from '../session-state';
 import type { PublisherEvent } from '../event-types';
+import type { DriverState } from '../driver-state';
 
 /** Speed (m/s) below which the player is considered stopped (~3.6 km/h). */
 export const PLAYER_STOPPED_SPEED_MPS = 1.0;
@@ -42,6 +43,7 @@ export function detectPlayerStopped(
   prev: TelemetryFrame | null,
   curr: TelemetryFrame,
   state: SessionState,
+  driverState: DriverState,
   ctx: PlayerStoppedContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
@@ -57,12 +59,10 @@ export function detectPlayerStopped(
 
   if (prev === null) return events;
 
-  const cs = getOrCreateCarState(state, ctx.playerCarIdx);
-
   // Skip while on pit road — stationary pit stops are expected behaviour.
   if (curr.carIdxOnPitRoad[ctx.playerCarIdx] !== 0) {
-    cs.playerStoppedBySpeedStartTime = null;
-    cs.isPlayerStoppedBySpeed = false;
+    driverState.stoppedBySpeedStartTime = null;
+    driverState.isStoppedBySpeed = false;
     return events;
   }
 
@@ -71,23 +71,23 @@ export function detectPlayerStopped(
 
   if (speed > PLAYER_STOPPED_RESUME_SPEED_MPS) {
     // Player is moving — clear stopped state so we re-arm for the next stop.
-    cs.playerStoppedBySpeedStartTime = null;
-    cs.isPlayerStoppedBySpeed = false;
+    driverState.stoppedBySpeedStartTime = null;
+    driverState.isStoppedBySpeed = false;
     return events;
   }
 
   if (speed <= PLAYER_STOPPED_SPEED_MPS) {
     // Below stopped threshold — start or continue the duration clock.
-    if (cs.playerStoppedBySpeedStartTime === null) {
+    if (driverState.stoppedBySpeedStartTime === null) {
       // Seed from prev.sessionTime so the window includes the frame we just observed.
-      cs.playerStoppedBySpeedStartTime = prev.sessionTime;
+      driverState.stoppedBySpeedStartTime = prev.sessionTime;
     }
 
-    const stoppedFor = curr.sessionTime - cs.playerStoppedBySpeedStartTime;
-    if (stoppedFor >= PLAYER_STOPPED_MIN_DURATION_SEC && !cs.isPlayerStoppedBySpeed) {
+    const stoppedFor = curr.sessionTime - driverState.stoppedBySpeedStartTime;
+    if (stoppedFor >= PLAYER_STOPPED_MIN_DURATION_SEC && !driverState.isStoppedBySpeed) {
       const playerRef = carRefFromRoster(state, ctx.playerCarIdx);
       if (playerRef) {
-        cs.isPlayerStoppedBySpeed = true;
+        driverState.isStoppedBySpeed = true;
         events.push(buildEvent(
           'PLAYER_STOPPED',
           playerRef,

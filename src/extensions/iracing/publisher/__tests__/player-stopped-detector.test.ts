@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { detectPlayerStopped, PLAYER_STOPPED_SPEED_MPS, PLAYER_STOPPED_MIN_DURATION_SEC } from '../driver-publisher/player-stopped-detector';
 import { createSessionState } from '../session-state';
 import { makeFrame, seedRoster } from './frame-fixtures';
+import { createDriverState } from '../driver-state';
 import type { TelemetryFrame } from '../session-state';
 
 const PLAYER = 0;
@@ -17,6 +18,7 @@ const ctx = { rigId: 'r1', raceSessionId: 's1', playerCarIdx: PLAYER };
 function runFrames(frames: Array<{ speed: number; sessionTime: number; onPitRoad?: boolean }>): any[] {
   const state = createSessionState('s1', 1);
   seedRoster(state, [PLAYER]);
+  const driverState = createDriverState(PLAYER);
   let prev: TelemetryFrame | null = null;
   const allEvents: any[] = [];
 
@@ -26,7 +28,7 @@ function runFrames(frames: Array<{ speed: number; sessionTime: number; onPitRoad
       speed,
       cars: [{ carIdx: PLAYER, position: 5, lapDistPct: 0.3, onPitRoad: onPitRoad ?? false }],
     });
-    allEvents.push(...detectPlayerStopped(prev, frame, state, ctx));
+    allEvents.push(...detectPlayerStopped(prev, frame, state, driverState, ctx));
     prev = frame;
   }
   return allEvents;
@@ -104,8 +106,9 @@ describe('detectPlayerStopped', () => {
 
   it('returns empty when playerCarIdx < 0', () => {
     const state = createSessionState('s1', 1);
+    const driverState = createDriverState(-1);
     const frame = makeFrame({ speed: 0 });
-    const events = detectPlayerStopped(null, frame, state, {
+    const events = detectPlayerStopped(null, frame, state, driverState, {
       rigId: 'r1', raceSessionId: 's1', playerCarIdx: -1,
     });
     expect(events).toHaveLength(0);

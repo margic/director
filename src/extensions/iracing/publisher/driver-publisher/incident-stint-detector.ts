@@ -23,6 +23,7 @@
 import type { TelemetryFrame, SessionState } from '../session-state';
 import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
 import type { PublisherEvent } from '../event-types';
+import type { DriverState } from '../driver-state';
 
 /** Team incident thresholds for INCIDENT_LIMIT_WARNING (in percent). */
 export const INCIDENT_LIMIT_THRESHOLDS = [50, 75, 90] as const;
@@ -50,6 +51,7 @@ export function detectIncidentsAndMilestones(
   prev: TelemetryFrame | null,
   curr: TelemetryFrame,
   state: SessionState,
+  driverState: DriverState,
   ctx: IncidentStintContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
@@ -84,12 +86,12 @@ export function detectIncidentsAndMilestones(
   // -------------------------------------------------------------------------
   if (curr.incidentLimit > 0) {
     for (const thresholdPct of INCIDENT_LIMIT_THRESHOLDS) {
-      if (!state.firedIncidentWarnings.has(thresholdPct)) {
+      if (!driverState.firedIncidentWarnings.has(thresholdPct)) {
         const crossingCount = Math.ceil(curr.incidentLimit * thresholdPct / 100);
         if (curr.teamIncidentCount >= crossingCount) {
           const limitWarnCar = carRefFromRoster(state, playerCarIdx);
           if (limitWarnCar) {
-            state.firedIncidentWarnings.add(thresholdPct);
+            driverState.firedIncidentWarnings.add(thresholdPct);
             events.push(buildEvent(
               'INCIDENT_LIMIT_WARNING',
               limitWarnCar,
@@ -115,7 +117,7 @@ export function detectIncidentsAndMilestones(
 
   if (prevOnPit && !currOnPit) {
     cs.stintStartLap       = curr.carIdxLapCompleted[playerCarIdx];
-    cs.firedStintMilestones = new Set();
+    driverState.firedStintMilestones = new Set();
   }
 
   // -------------------------------------------------------------------------
@@ -126,12 +128,12 @@ export function detectIncidentsAndMilestones(
     const stintLapsCompleted = currLaps - cs.stintStartLap;
 
     for (const milestonePct of STINT_MILESTONE_PERCENTS) {
-      if (!cs.firedStintMilestones.has(milestonePct)) {
+      if (!driverState.firedStintMilestones.has(milestonePct)) {
         const threshold = (estimatedStintLaps * milestonePct) / 100;
         if (stintLapsCompleted >= threshold) {
           const milestoneCar = carRefFromRoster(state, playerCarIdx);
           if (milestoneCar) {
-            cs.firedStintMilestones.add(milestonePct);
+            driverState.firedStintMilestones.add(milestonePct);
             events.push(buildEvent(
               'STINT_MILESTONE',
               milestoneCar,

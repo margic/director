@@ -21,6 +21,7 @@
 import type { TelemetryFrame, SessionState } from '../session-state';
 import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
 import type { PublisherEvent } from '../event-types';
+import type { DriverState } from '../driver-state';
 
 export interface DriverSwapDetectorContext {
   rigId: string;
@@ -37,11 +38,12 @@ export function detectDriverSwap(
   prev: TelemetryFrame | null,
   curr: TelemetryFrame,
   state: SessionState,
+  driverState: DriverState,
   ctx: DriverSwapDetectorContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
   if (prev === null) return events;
-  if (!state.driverSwapPending) return events;
+  if (!driverState.driverSwapPending) return events;
 
   const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
   const playerCarIdx = ctx.playerCarIdx ?? 0;
@@ -51,39 +53,39 @@ export function detectDriverSwap(
 
   if (prevOnPit && !currOnPit) {
     const swapDurationSec =
-      state.pendingSwapInitiatedSessionTime > 0
-        ? Math.max(0, curr.sessionTime - state.pendingSwapInitiatedSessionTime)
+      driverState.pendingSwapInitiatedSessionTime > 0
+        ? Math.max(0, curr.sessionTime - driverState.pendingSwapInitiatedSessionTime)
         : 0;
 
     // Increment stint counter — the incoming driver is starting a new stint.
-    state.playerStintNumber += 1;
+    driverState.stintNumber += 1;
 
     const swapBaseRef = carRefFromRoster(state, playerCarIdx);
     if (swapBaseRef) {
       events.push(buildEvent(
         'DRIVER_SWAP_COMPLETED',
-        { ...swapBaseRef, driverName: state.pendingSwapIncomingDriverName },
+        { ...swapBaseRef, driverName: driverState.pendingSwapIncomingDriverName },
         {
           swapDurationSec,
-          incomingDriverId:    state.pendingSwapIncomingDriverId,
-          incomingDriverName:  state.pendingSwapIncomingDriverName,
-          stintNumberStarting: state.playerStintNumber,
+          incomingDriverId:    driverState.pendingSwapIncomingDriverId,
+          incomingDriverName:  driverState.pendingSwapIncomingDriverName,
+          stintNumberStarting: driverState.stintNumber,
         },
         opts,
       ));
     }
 
     // Clear pending swap state
-    state.driverSwapPending = false;
-    state.pendingSwapOutgoingDriverId = '';
-    state.pendingSwapIncomingDriverId = '';
-    state.pendingSwapIncomingDriverName = '';
-    state.pendingSwapInitiatedSessionTime = 0;
+    driverState.driverSwapPending = false;
+    driverState.pendingSwapOutgoingDriverId = '';
+    driverState.pendingSwapIncomingDriverId = '';
+    driverState.pendingSwapIncomingDriverName = '';
+    driverState.pendingSwapInitiatedSessionTime = 0;
 
     // Reset stint-milestone tracking for the new driver
     const cs = getOrCreateCarState(state, playerCarIdx);
-    cs.stintStartLap        = curr.carIdxLapCompleted[playerCarIdx];
-    cs.firedStintMilestones = new Set();
+    cs.stintStartLap            = curr.carIdxLapCompleted[playerCarIdx];
+    driverState.firedStintMilestones = new Set();
   }
 
   return events;

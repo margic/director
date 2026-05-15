@@ -45,6 +45,7 @@ import {
   type SessionState,
   type TelemetryFrame,
 } from '../session-state';
+import { createDriverState, type DriverState } from '../driver-state';
 import type { PublisherEvent, PublisherCarRef } from '../event-types';
 
 export interface DriverPublisherConfig {
@@ -57,6 +58,7 @@ export interface DriverPublisherConfig {
 
 export class DriverPublisherOrchestrator {
   private state: SessionState | null = null;
+  private driverState: DriverState | null = null;
   private prevFrame: TelemetryFrame | null = null;
   private active = false;
 
@@ -109,6 +111,7 @@ export class DriverPublisherOrchestrator {
     if (!this.active) return;
     this.active = false;
     this.state = null;
+    this.driverState = null;
     this.prevFrame = null;
     this.cfg.log('info', 'DriverPublisher deactivated');
   }
@@ -116,6 +119,7 @@ export class DriverPublisherOrchestrator {
   /** Reset detector state for a new session. */
   resetState(): void {
     this.state = null;
+    this.driverState = null;
     this.prevFrame = null;
     this.identity.reset();
     this.lastPlayerOnPitRoad = false;
@@ -141,6 +145,8 @@ export class DriverPublisherOrchestrator {
     if (!this.state) {
       this.state = createSessionState(this.raceSessionId, frame.sessionUniqueId);
       this.state.knownRoster = new Map(this.currentRoster);
+      const initCarIdx = (this.playerCarIdx ?? -1) >= 0 ? (this.playerCarIdx ?? 0) : 0;
+      this.driverState = createDriverState(initCarIdx);
     }
 
     const ctx = { rigId: this.rigId, raceSessionId: this.raceSessionId };
@@ -156,6 +162,7 @@ export class DriverPublisherOrchestrator {
       aggregateRaceState(this.prevFrame, frame, this.state, {
         playerCarIdx,
         estimatedStintLaps: this.estimatedStintLaps,
+        playerFuelPerLap: this.driverState?.fuelPerLap ?? 0,
       });
     }
 
@@ -174,24 +181,24 @@ export class DriverPublisherOrchestrator {
       ...ctx,
       playerCarIdx,
     }));
-    events.push(...detectPitStopDetail(this.prevFrame, frame, this.state, {
+    events.push(...detectPitStopDetail(this.prevFrame, frame, this.state, this.driverState!, {
       ...ctx,
       playerCarIdx,
     }));
-    events.push(...detectDriverLapPerformance(this.prevFrame, frame, this.state, {
+    events.push(...detectDriverLapPerformance(this.prevFrame, frame, this.state, this.driverState!, {
       ...ctx,
       playerCarIdx,
     }));
-    events.push(...detectIncidentsAndMilestones(this.prevFrame, frame, this.state, {
+    events.push(...detectIncidentsAndMilestones(this.prevFrame, frame, this.state, this.driverState!, {
       ...ctx,
       playerCarIdx:        this.playerCarIdx,
       estimatedStintLaps:  this.estimatedStintLaps,
     }));
-    events.push(...detectDriverSwap(this.prevFrame, frame, this.state, {
+    events.push(...detectDriverSwap(this.prevFrame, frame, this.state, this.driverState!, {
       ...ctx,
       playerCarIdx: this.playerCarIdx,
     }));
-    events.push(...detectPlayerPhysics(this.prevFrame, frame, this.state, {
+    events.push(...detectPlayerPhysics(this.prevFrame, frame, this.state, this.driverState!, {
       ...ctx,
       playerCarIdx,
       carNumberByCarIdx: this.carNumberByCarIdx.size > 0 ? this.carNumberByCarIdx : undefined,
@@ -201,8 +208,8 @@ export class DriverPublisherOrchestrator {
     events.push(...detectGapTrend(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
     events.push(...detectClassPositionChange(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
     events.push(...detectOverallPositionChange(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
-    events.push(...detectPlayerStopped(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
-    events.push(...detectPitWindow(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
+    events.push(...detectPlayerStopped(this.prevFrame, frame, this.state, this.driverState!, { ...ctx, playerCarIdx }));
+    events.push(...detectPitWindow(this.prevFrame, frame, this.state, this.driverState!, { ...ctx, playerCarIdx }));
     events.push(...detectNarrativePolish(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
 
     this.dispatchEvents(events);
@@ -210,7 +217,7 @@ export class DriverPublisherOrchestrator {
     // Emit operator state whenever player pit-road status changes.
     const playerIdx = this.playerCarIdx ?? 0;
     const nowOnPit  = frame.carIdxOnPitRoad[playerIdx] !== 0;
-    const swapPending = this.state.driverSwapPending;
+    const swapPending = this.driverState?.driverSwapPending ?? false;
     if (nowOnPit !== this.lastPlayerOnPitRoad) {
       this.lastPlayerOnPitRoad = nowOnPit;
       this.cfg.emitEvent('iracing.publisherOperatorState', {
@@ -221,6 +228,7 @@ export class DriverPublisherOrchestrator {
 
     if (events.some((e) => e.type === 'SESSION_LOADED')) {
       this.state = createSessionState(this.raceSessionId, frame.sessionUniqueId);
+      this.driverState = createDriverState(playerCarIdx >= 0 ? playerCarIdx : 0);
       this.prevFrame = null;
     } else {
       this.prevFrame = frame;
@@ -257,13 +265,13 @@ export class DriverPublisherOrchestrator {
    * DRIVER_SWAP_COMPLETED (via detectDriverSwap on subsequent frames).
    */
   initiateDriverSwap(outgoingDriverId: string, incomingDriverId: string, incomingDriverName: string): void {
-    if (!this.active || !this.state || !this.lastFrame) return;
+    if (!this.active || !this.state || !this.lastFrame || !this.driverState) return;
 
-    this.state.driverSwapPending                = true;
-    this.state.pendingSwapOutgoingDriverId       = outgoingDriverId;
-    this.state.pendingSwapIncomingDriverId       = incomingDriverId;
-    this.state.pendingSwapIncomingDriverName     = incomingDriverName;
-    this.state.pendingSwapInitiatedSessionTime   = this.lastFrame.sessionTime;
+    this.driverState.driverSwapPending                = true;
+    this.driverState.pendingSwapOutgoingDriverId       = outgoingDriverId;
+    this.driverState.pendingSwapIncomingDriverId       = incomingDriverId;
+    this.driverState.pendingSwapIncomingDriverName     = incomingDriverName;
+    this.driverState.pendingSwapInitiatedSessionTime   = this.lastFrame.sessionTime;
 
     const playerCarIdx = this.playerCarIdx ?? 0;
     const carRef = carRefFromRoster(this.state, playerCarIdx);

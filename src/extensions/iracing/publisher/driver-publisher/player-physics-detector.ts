@@ -18,6 +18,7 @@
 import type { TelemetryFrame, SessionState } from '../session-state';
 import type { PublisherEvent } from '../event-types';
 import { buildEvent, carRefFromRoster } from '../session-state';
+import type { DriverState } from '../driver-state';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -87,6 +88,7 @@ export function detectPlayerPhysics(
   prev: TelemetryFrame | null,
   curr: TelemetryFrame,
   state: SessionState,
+  driverState: DriverState,
   ctx: PlayerPhysicsDetectorContext,
 ): PublisherEvent[] {
   if (prev === null) return [];
@@ -110,7 +112,7 @@ export function detectPlayerPhysics(
   // -------------------------------------------------------------------------
   // SPIN_DETECTED
   // -------------------------------------------------------------------------
-  if (playerRef && tick >= state.spinDetectedCooldownUntilTick) {
+  if (playerRef && tick >= driverState.spinDetectedCooldownUntilTick) {
     const prevAngle = prev.steeringWheelAngle;
     const currAngle = curr.steeringWheelAngle;
     const playerSpeed = curr.speed;
@@ -124,27 +126,27 @@ export function detectPlayerPhysics(
 
     if (hasReversal && bothSignificant && speedAboveMin && speedDropped) {
       events.push(buildEvent('SPIN_DETECTED', playerRef, {}, opts));
-      state.spinDetectedCooldownUntilTick = tick + SPIN_COOLDOWN_TICKS;
+      driverState.spinDetectedCooldownUntilTick = tick + SPIN_COOLDOWN_TICKS;
     }
   }
 
   // -------------------------------------------------------------------------
   // BIG_HIT
   // -------------------------------------------------------------------------
-  if (playerRef && tick >= state.bigHitCooldownUntilTick) {
+  if (playerRef && tick >= driverState.bigHitCooldownUntilTick) {
     const torqueSpiked = curr.steeringWheelPctTorque >= BIG_HIT_TORQUE_THRESHOLD;
     const speedCrashed = prev.speed - curr.speed >= BIG_HIT_SPEED_DROP_MPS;
 
     if (torqueSpiked && speedCrashed) {
       events.push(buildEvent('BIG_HIT', playerRef, {}, opts));
-      state.bigHitCooldownUntilTick = tick + BIG_HIT_COOLDOWN_TICKS;
+      driverState.bigHitCooldownUntilTick = tick + BIG_HIT_COOLDOWN_TICKS;
     }
   }
 
   // -------------------------------------------------------------------------
   // SLOW_CAR_AHEAD
   // -------------------------------------------------------------------------
-  if (tick >= state.slowCarAheadCooldownUntilTick) {
+  if (tick >= driverState.slowCarAheadCooldownUntilTick) {
     const playerSpeed = curr.speed;
 
     // Only fire while actively racing at speed
@@ -179,7 +181,7 @@ export function detectPlayerPhysics(
                 { targetCarIdx: aheadCarIdx, targetCarNumber, closingRateMps },
                 opts,
               ));
-              state.slowCarAheadCooldownUntilTick = tick + SLOW_CAR_COOLDOWN_TICKS;
+              driverState.slowCarAheadCooldownUntilTick = tick + SLOW_CAR_COOLDOWN_TICKS;
             }
           }
         }

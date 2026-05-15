@@ -19,7 +19,8 @@ import {
 } from '../driver-publisher/lap-performance-driver';
 import { createSessionState, type SessionState } from '../session-state';
 import type { TelemetryFrame } from '../session-state';
-import { makeFrame, cloneFrame, CAR_COUNT, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
+import { makeFrame, cloneFrame, CAR_COUNT, seedRoster, ALL_CAR_INDICES, makeDriverState } from './frame-fixtures';
+import type { DriverState } from '../driver-state';
 
 // Combined context — covers both session and driver slices
 interface LapPerformanceContext extends SessionLapPerformanceContext {
@@ -46,7 +47,7 @@ function detectLapPerformance(
   ctx: LapPerformanceContext,
 ) {
   return [
-    ...detectDriverLapPerformance(prev, curr, state, ctx),
+    ...detectDriverLapPerformance(prev, curr, state, driverState, ctx),
     ...detectSessionLapPerformance(prev, curr, state, ctx),
   ];
 }
@@ -58,10 +59,12 @@ const ctx: LapPerformanceContext = {
 };
 
 let state: SessionState;
+let driverState: DriverState;
 
 beforeEach(() => {
   state = createSessionState('rs-1', 1);
   seedRoster(state, ALL_CAR_INDICES);
+  driverState = makeDriverState(0);
 });
 
 /** Helper — bump completed lap count + set lap times on a per-car slot. */
@@ -136,9 +139,9 @@ describe('detectLapPerformance — PERSONAL_BEST_LAP', () => {
     // (STINT_BEST_LAP is now a session-pipeline event — Issue #147.)
     const noPlayerCtx = { ...ctx, playerCarIdx: -1 };
     const f0 = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 1, lastLapTime: 91, bestLapTime: 91 }] });
-    detectDriverLapPerformance(null, f0, state, noPlayerCtx);
+    detectDriverLapPerformance(null, f0, state, driverState, noPlayerCtx);
     const f1 = bumpLap(f0, 0, 2, 89, 89);
-    const events = detectDriverLapPerformance(f0, f1, state, noPlayerCtx);
+    const events = detectDriverLapPerformance(f0, f1, state, driverState, noPlayerCtx);
     expect(events.find(e => e.type === 'PERSONAL_BEST_LAP')).toBeUndefined();
     expect(events.find(e => e.type === 'LAP_TIME_DEGRADATION')).toBeUndefined();
     // Defensive: STINT_BEST_LAP is now session-scoped (Issue #147) — the
@@ -289,17 +292,17 @@ describe('detectLapPerformance — LAP_TIME_DEGRADATION', () => {
   });
 
   it('resets the degradation latch when stint best improves', () => {
-    state.playerDegradationFired = true;
+    driverState.degradationFired = true;
     // Existing buffer keeps the post-improvement avg under the 3% threshold,
     // so the latch should reset and stay reset (not immediately re-trigger).
-    state.playerLapTimeBuffer = [88, 88, 88];
+    driverState.lapTimeBuffer = [88, 88, 88];
     const f0 = makeFrame({ cars: [{ carIdx: 0, lapsCompleted: 4, lastLapTime: 88, bestLapTime: 90 }] });
     detectLapPerformance(null, f0, state, ctx);
     state.carStates.get(0)!.stintBestLapTime = 90;
 
     const f1 = bumpLap(f0, 0, 5, 87, 87);
     detectLapPerformance(f0, f1, state, ctx);
-    expect(state.playerDegradationFired).toBe(false);
+    expect(driverState.degradationFired).toBe(false);
   });
 
   it('honours a custom threshold', () => {
