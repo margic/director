@@ -178,6 +178,21 @@ export function summariseEvent(event: PublisherEvent): string {
     // §10 AI consumer aids
     case 'DRIVER_STATE_SNAPSHOT':
       return `Driver state snapshot`;
+
+    // §11 Composite events (#181)
+    case 'BEING_PASSED_WHILE_STOPPED': {
+      const p = event.payload as any;
+      const who = p.overtakingCar?.driverName ? ` by ${p.overtakingCar.driverName}` : '';
+      return `Passed while stopped${who} (#${p.positionsLostThisStop} this stop)`;
+    }
+    case 'RECOVERY_DRIVE': {
+      const p = event.payload as any;
+      return `Recovery drive: +${p.positionsRecovered} after ${p.triggerEvent}`;
+    }
+    case 'SAFETY_CAR_IMMINENT': {
+      const p = event.payload as any;
+      return `Safety car imminent (${p.stoppedCarCount} stopped in ${p.windowSec}s)`;
+    }
   }
 
   // Forward-compatibility — exhaustive switch above; this is unreachable

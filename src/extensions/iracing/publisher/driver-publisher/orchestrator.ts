@@ -30,6 +30,8 @@ import { detectDriverSwap } from './driver-swap-detector';
 import { detectDriverLapPerformance } from './lap-performance-driver';
 import { detectPlayerPhysics } from './player-physics-detector';
 import { detectContact } from './contact-detector';
+import { detectBeingPassedWhileStopped } from './being-passed-while-stopped-detector';
+import { detectRecoveryDrive } from './recovery-drive-detector';
 import { buildIdentityEvents } from './identity-event-builder';
 import { IdentityOverrideService } from './identity-override';
 import { aggregateRaceState } from '../shared/race-state-aggregator';
@@ -219,6 +221,20 @@ export class DriverPublisherOrchestrator {
     events.push(...detectPlayerStopped(this.prevFrame, frame, this.state, this.driverState!, { ...ctx, playerCarIdx }));
     events.push(...detectPitWindow(this.prevFrame, frame, this.state, this.driverState!, { ...ctx, playerCarIdx }));
     events.push(...detectNarrativePolish(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
+
+    // Composite events (#181) — must run AFTER the events they depend on so
+    // the in-tick `events` array contains their triggers (OVERALL_POSITION_LOSS,
+    // PLAYER_STOPPED, OFF_TRACK, CONTACT_DETECTED).
+    events.push(...detectBeingPassedWhileStopped(this.prevFrame, frame, this.state, this.driverState!, {
+      ...ctx,
+      playerCarIdx,
+      emittedThisTick: events,
+    }));
+    events.push(...detectRecoveryDrive(this.prevFrame, frame, this.state, this.driverState!, {
+      ...ctx,
+      playerCarIdx,
+      emittedThisTick: events,
+    }));
 
     this.dispatchEvents(events);
 

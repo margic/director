@@ -132,8 +132,12 @@ export type PublisherEventType =
   /** Player car stationary on track (speed-based, driver-publisher only). */
   | 'PLAYER_STOPPED'
   /** Player car physical contact / hard hit (driver-publisher only) — #180. */
-  | 'CONTACT_DETECTED'
-  // §7 Identity & roster (edge-authoritative)
+  | 'CONTACT_DETECTED'  /** Composite — OVERALL_POSITION_LOSS while player is stopped (#181). */
+  | 'BEING_PASSED_WHILE_STOPPED'
+  /** Composite — player climbs ≥2 positions within 60s after an incident (#181). */
+  | 'RECOVERY_DRIVE'
+  /** Session-publisher — ≥3 STOPPED_ON_TRACK in 30s OR ≥2 in same sector (#181). */
+  | 'SAFETY_CAR_IMMINENT'  // §7 Identity & roster (edge-authoritative)
   | 'IDENTITY_RESOLVED'
   | 'IDENTITY_OVERRIDE_CHANGED'
   | 'DRIVER_SWAP_INITIATED'
@@ -267,6 +271,12 @@ export interface EventPayloadMap {
   PLAYER_STOPPED: PlayerStoppedPayload;
   /** Player physical contact / hard hit (driver-publisher, player-car only) — #180. */
   CONTACT_DETECTED: ContactDetectedPayload;
+  /** Composite (#181) — OVERALL_POSITION_LOSS while player is stopped. */
+  BEING_PASSED_WHILE_STOPPED: BeingPassedWhileStoppedPayload;
+  /** Composite (#181) — climb ≥2 positions within 60s after an incident. */
+  RECOVERY_DRIVE: RecoveryDrivePayload;
+  /** Session-publisher (#181) — cluster of stopped cars predicting yellow. */
+  SAFETY_CAR_IMMINENT: SafetyCarImminentPayload;
 
   // §7 Identity
   IDENTITY_RESOLVED: IdentityResolvedPayload;
@@ -548,6 +558,8 @@ export const HIGH_PRIORITY_EVENTS = new Set<PublisherEventType>([
   'OVERALL_POSITION_LOSS',
   'PLAYER_STOPPED',
   'CONTACT_DETECTED',
+  'BEING_PASSED_WHILE_STOPPED',
+  'SAFETY_CAR_IMMINENT',
   'RACE_GREEN',
   'RACE_CHECKERED',
   'FLAG_RED',
@@ -798,4 +810,60 @@ export interface DriverStateSnapshotPayload {
   // Race meta
   racePhase: 'unknown' | 'opening' | 'midrace' | 'endgame' | 'final-laps';
   flag: SnapshotFlag;
+}
+
+// ---------------------------------------------------------------------------
+// §11 Composite events (#181)
+// ---------------------------------------------------------------------------
+
+/**
+ * BEING_PASSED_WHILE_STOPPED — composite of OVERALL_POSITION_LOSS while the
+ * player is stopped (`DriverState.isStoppedBySpeed === true`). Fires once per
+ * overtake; `positionsLostThisStop` is a running counter for the current stop
+ * episode and resets when the player resumes movement.
+ */
+export interface BeingPassedWhileStoppedPayload {
+  overtakingCar: PublisherCarRef;
+  /** Running counter of positions lost during the current stop (resets on resume). */
+  positionsLostThisStop: number;
+  /** Seconds the player has been stopped at the moment of this overtake. */
+  secondsStopped: number;
+  /** iRacing CarIdxTrackSurface enum value for the player car. */
+  trackSurface: number;
+}
+
+/**
+ * RECOVERY_DRIVE — fires once when the player has climbed at least 2 overall
+ * positions within 60s of one of the trigger events
+ * (PLAYER_STOPPED, OFF_TRACK, CONTACT_DETECTED).
+ *
+ * NOTE: spec #181 lists `STOPPED_ON_TRACK` as a trigger; that event is
+ * emitted by the session publisher and is not currently captured in
+ * `DriverState.recentEvents`. We use the player-specific `PLAYER_STOPPED`
+ * event instead — same semantics for the player car.
+ */
+export interface RecoveryDrivePayload {
+  triggerEvent: 'PLAYER_STOPPED' | 'OFF_TRACK' | 'CONTACT_DETECTED';
+  positionsRecovered: number;
+  recoveryDurationSec: number;
+  startPosition: number;
+  currentPosition: number;
+}
+
+/**
+ * SAFETY_CAR_IMMINENT — session-publisher composite that predicts a yellow
+ * flag from a cluster of STOPPED_ON_TRACK events:
+ *   - ≥ 3 stopped cars within `windowSec` (30s), OR
+ *   - ≥ 2 stopped cars in the same sector (lapDistPct thirds).
+ *
+ * Sectors are derived from `lapDistPct`: sector = floor(lapDistPct * 3) → 0|1|2.
+ */
+export interface SafetyCarImminentPayload {
+  stoppedCarCount: number;
+  /** Length of the rolling window evaluated, in seconds. */
+  windowSec: number;
+  /** Sectors (0|1|2) containing at least one of the stopped cars. */
+  affectedSectors: number[];
+  /** Refs for every stopped car contributing to the trigger. */
+  affectedCars: PublisherCarRef[];
 }
