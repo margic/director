@@ -29,6 +29,8 @@ export interface AggregatorContext {
   playerCarIdx: number;
   /** Estimated player stint length in laps (from setSessionMetadata). */
   estimatedStintLaps?: number;
+  /** Player fuel per lap in litres (from DriverState.fuelPerLap). */
+  playerFuelPerLap?: number;
   /** Per-car class id (carIdx → CarClassID) — used for classGroups. */
   carClassByCarIdx?: Map<number, number>;
 }
@@ -106,7 +108,7 @@ export function aggregateRaceState(
   // ---- 4. Player fuel projection ----
   if (playerCarIdx >= 0) {
     const cs = getOrCreateCarState(state, playerCarIdx);
-    const fuelPerLap = state.playerFuelPerLap;
+    const fuelPerLap = ctx.playerFuelPerLap ?? 0;
     if (fuelPerLap > 0 && curr.fuelLevel > 0) {
       cs.estimatedFuelLapsRemaining = curr.fuelLevel / fuelPerLap;
     }

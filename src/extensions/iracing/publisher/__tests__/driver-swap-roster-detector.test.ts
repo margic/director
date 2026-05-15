@@ -28,7 +28,8 @@ import {
 } from '../session-publisher/roster-detector';
 import { createSessionState, type SessionState } from '../session-state';
 import type { PublisherCarRef } from '../event-types';
-import { makeFrame, cloneFrame, withPitExit, seedRoster } from './frame-fixtures';
+import { makeFrame, cloneFrame, withPitExit, seedRoster, makeDriverState } from './frame-fixtures';
+import type { DriverState } from '../driver-state';
 
 const SWAP_CTX: DriverSwapDetectorContext = {
   rigId: 'rig-01',
@@ -46,10 +47,12 @@ const ROSTER_CTX: RosterDetectorContext = {
 const CTX = ROSTER_CTX;
 
 let state: SessionState;
+let driverState: DriverState;
 beforeEach(() => {
   // Note: DRIVER_SWAP tests seed car 0 individually; ROSTER_UPDATED tests
   // manage their own knownRoster via detectRoster's currentRoster parameter.
   state = createSessionState('rs-1', 1);
+  driverState = makeDriverState(0);
 });
 
 function detect(
@@ -58,7 +61,7 @@ function detect(
   s = state,
   ctx: DriverSwapDetectorContext = SWAP_CTX,
 ) {
-  return detectDriverSwap(prev, curr, s, ctx);
+  return detectDriverSwap(prev, curr, s, driverState, ctx);
 }
 
 function detectRoster(
@@ -88,12 +91,12 @@ describe('DRIVER_SWAP_COMPLETED', () => {
   function pendingSwapState(s: SessionState, sessionTimeAtInitiation = 100): void {
     // Seed the player car so carRefFromRoster resolves for event emission.
     seedRoster(s, [0]);
-    s.driverSwapPending = true;
-    s.pendingSwapOutgoingDriverId = 'driver-out';
-    s.pendingSwapIncomingDriverId = 'driver-in';
-    s.pendingSwapIncomingDriverName = 'Alice Incoming';
-    s.pendingSwapInitiatedSessionTime = sessionTimeAtInitiation;
-    s.playerStintNumber = 1;
+    driverState.driverSwapPending                = true;
+    driverState.pendingSwapOutgoingDriverId       = 'driver-out';
+    driverState.pendingSwapIncomingDriverId       = 'driver-in';
+    driverState.pendingSwapIncomingDriverName     = 'Alice Incoming';
+    driverState.pendingSwapInitiatedSessionTime   = sessionTimeAtInitiation;
+    driverState.stintNumber                      = 1;
   }
 
   it('fires when player car exits pits while swap is pending', () => {
@@ -146,11 +149,11 @@ describe('DRIVER_SWAP_COMPLETED', () => {
     const f0 = makeFrame(); f0.carIdxOnPitRoad[0] = 1;
     const f1 = withPitExit(0)(f0);
     detect(f0, f1);
-    expect(state.driverSwapPending).toBe(false);
-    expect(state.pendingSwapIncomingDriverId).toBe('');
-    expect(state.pendingSwapIncomingDriverName).toBe('');
-    expect(state.pendingSwapOutgoingDriverId).toBe('');
-    expect(state.pendingSwapInitiatedSessionTime).toBe(0);
+    expect(driverState.driverSwapPending).toBe(false);
+    expect(driverState.pendingSwapIncomingDriverId).toBe('');
+    expect(driverState.pendingSwapIncomingDriverName).toBe('');
+    expect(driverState.pendingSwapOutgoingDriverId).toBe('');
+    expect(driverState.pendingSwapInitiatedSessionTime).toBe(0);
   });
 
   it('increments playerStintNumber on each completed swap', () => {
@@ -158,19 +161,19 @@ describe('DRIVER_SWAP_COMPLETED', () => {
     const f0 = makeFrame(); f0.carIdxOnPitRoad[0] = 1;
     const f1 = withPitExit(0)(f0);
     detect(f0, f1);
-    expect(state.playerStintNumber).toBe(2);
+    expect(driverState.stintNumber).toBe(2);
 
     // Second swap
-    state.driverSwapPending = true;
-    state.pendingSwapIncomingDriverId = 'driver-in-2';
-    state.pendingSwapIncomingDriverName = 'Bob Next';
-    state.pendingSwapInitiatedSessionTime = f1.sessionTime;
+    driverState.driverSwapPending = true;
+    driverState.pendingSwapIncomingDriverId = 'driver-in-2';
+    driverState.pendingSwapIncomingDriverName = 'Bob Next';
+    driverState.pendingSwapInitiatedSessionTime = f1.sessionTime;
     const f2 = cloneFrame(f1); f2.carIdxOnPitRoad[0] = 1;
     const f3 = withPitExit(0)(f2);
     const events2 = detect(f2, f3);
     const ev2 = events2.find(e => e.type === 'DRIVER_SWAP_COMPLETED');
     expect((ev2!.payload as any).stintNumberStarting).toBe(3);
-    expect(state.playerStintNumber).toBe(3);
+    expect(driverState.stintNumber).toBe(3);
   });
 
   it('sets swapDurationSec to 0 when initiatedSessionTime is 0', () => {
@@ -192,8 +195,8 @@ describe('DRIVER_SWAP_COMPLETED', () => {
     const cs = state.carStates.get(0);
     if (cs) {
       expect(cs.stintStartLap).toBe(10);
-      expect(cs.firedStintMilestones.size).toBe(0);
     }
+    expect(driverState.firedStintMilestones.size).toBe(0);
   });
 });
 

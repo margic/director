@@ -20,6 +20,7 @@
 import type { TelemetryFrame, SessionState } from '../session-state';
 import { getOrCreateCarState, buildEvent, carRefFromRoster } from '../session-state';
 import type { PublisherEvent } from '../event-types';
+import type { DriverState } from '../driver-state';
 
 /** Number of completed laps included in the LAP_TIME_DEGRADATION rolling avg. */
 export const LAP_DEGRADATION_BUFFER_SIZE = 3;
@@ -47,6 +48,7 @@ export function detectDriverLapPerformance(
   prev: TelemetryFrame | null,
   curr: TelemetryFrame,
   state: SessionState,
+  driverState: DriverState,
   ctx: DriverLapPerformanceContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
@@ -90,7 +92,7 @@ export function detectDriverLapPerformance(
   if (lastLap > 0 && (cs.stintBestLapTime === 0 || lastLap < cs.stintBestLapTime)) {
     cs.stintBestLapTime = lastLap;
     // Reset the player degradation latch — the stint just got a fresh best.
-    state.playerDegradationFired = false;
+    driverState.degradationFired = false;
   }
 
   cs.lastLapTime   = lastLap;
@@ -115,21 +117,21 @@ export function detectDriverLapPerformance(
   }
 
   if (lastLap > 0) {
-    state.playerLapTimeBuffer.push(lastLap);
-    if (state.playerLapTimeBuffer.length > LAP_DEGRADATION_BUFFER_SIZE) {
-      state.playerLapTimeBuffer.shift();
+    driverState.lapTimeBuffer.push(lastLap);
+    if (driverState.lapTimeBuffer.length > LAP_DEGRADATION_BUFFER_SIZE) {
+      driverState.lapTimeBuffer.shift();
     }
     if (
-      !state.playerDegradationFired &&
-      state.playerLapTimeBuffer.length === LAP_DEGRADATION_BUFFER_SIZE &&
+      !driverState.degradationFired &&
+      driverState.lapTimeBuffer.length === LAP_DEGRADATION_BUFFER_SIZE &&
       cs.stintBestLapTime > 0
     ) {
-      const avg = state.playerLapTimeBuffer.reduce((a, b) => a + b, 0) / LAP_DEGRADATION_BUFFER_SIZE;
+      const avg = driverState.lapTimeBuffer.reduce((a, b) => a + b, 0) / LAP_DEGRADATION_BUFFER_SIZE;
       const degradationPct = (avg - cs.stintBestLapTime) / cs.stintBestLapTime;
       if (degradationPct >= threshold) {
         const degradationCar = carRefFromRoster(state, i);
         if (degradationCar) {
-          state.playerDegradationFired = true;
+          driverState.degradationFired = true;
           events.push(buildEvent(
             'LAP_TIME_DEGRADATION',
             degradationCar,

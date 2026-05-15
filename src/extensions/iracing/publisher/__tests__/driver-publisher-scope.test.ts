@@ -25,7 +25,7 @@ import {
   type DriverLapPerformanceContext,
 } from '../driver-publisher/lap-performance-driver';
 import { createSessionState } from '../session-state';
-import { makeFrame, cloneFrame, CAR_COUNT, TrackSurface, seedRoster, ALL_CAR_INDICES } from './frame-fixtures';
+import { makeFrame, cloneFrame, CAR_COUNT, TrackSurface, seedRoster, ALL_CAR_INDICES, makeDriverState } from './frame-fixtures';
 
 const PLAYER_CAR_IDX = 7;
 
@@ -116,13 +116,14 @@ describe('driver-rig scope: every car changes state on the same tick', () => {
     };
 
     const prev = multiCarBaseline();
-    detectPitStopDetail(null, prev, state, ctx); // seed
+    const driverState = makeDriverState(PLAYER_CAR_IDX);
+    detectPitStopDetail(null, prev, state, driverState, ctx); // seed
 
     // Every car arrives in PitStall on the same tick.
     const curr = cloneFrame(prev);
     for (let i = 0; i < CAR_COUNT; i++) curr.carIdxTrackSurface[i] = TrackSurface.PitStall;
 
-    const events = detectPitStopDetail(prev, curr, state, ctx);
+    const events = detectPitStopDetail(prev, curr, state, driverState, ctx);
 
     const begins = events.filter(e => e.type === 'PIT_STOP_BEGIN');
     expect(begins).toHaveLength(1);
@@ -138,7 +139,8 @@ describe('driver-rig scope: every car changes state on the same tick', () => {
     };
 
     const prev = multiCarBaseline();
-    detectDriverLapPerformance(null, prev, state, ctx); // seed
+    const driverState = makeDriverState(PLAYER_CAR_IDX);
+    detectDriverLapPerformance(null, prev, state, driverState, ctx); // seed
 
     // Every car completes a lap with a faster (improved) time on the same tick.
     const curr = cloneFrame(prev);
@@ -148,7 +150,7 @@ describe('driver-rig scope: every car changes state on the same tick', () => {
       curr.carIdxBestLapTime[i]  = 89;
     }
 
-    const events = detectDriverLapPerformance(prev, curr, state, ctx);
+    const events = detectDriverLapPerformance(prev, curr, state, driverState, ctx);
 
     // STINT_BEST_LAP is now emitted by the session pipeline only.
     const stintBests = events.filter(e => e.type === 'STINT_BEST_LAP');

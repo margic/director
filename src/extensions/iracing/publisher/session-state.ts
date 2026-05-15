@@ -147,8 +147,6 @@ export interface CarState {
   pitExitLapsCompleted: number | null;
   /** lapsCompleted at the start of the current stint (session start or pit exit). */
   stintStartLap: number;
-  /** Stint milestone percents (25 / 50 / 75) already fired this stint. */
-  firedStintMilestones: Set<number>;
 
   // ---- Race-narrative trend fields (#151) ----
   /** Rolling window (last 5) of CarIdxF2Time samples (gap to car ahead). */
@@ -169,10 +167,6 @@ export interface CarState {
   classPositionHistory: number[];
   /** Last 3 sampled overall position values for hysteresis on OVERALL_POSITION_GAIN/LOSS. */
   overallPositionHistory: number[];
-  /** SessionTime when player speed first dropped below stopped threshold (null when moving). */
-  playerStoppedBySpeedStartTime: number | null;
-  /** Whether the player is currently stopped (speed-based; driver publisher only). */
-  isPlayerStoppedBySpeed: boolean;
   /** Stint lap times (seconds) — accumulated since the start of the current stint. */
   stintLapTimes: number[];
 }
@@ -223,39 +217,12 @@ export interface SessionState {
   sessionStartIncidentCount: number;
   /** Team incident count at session start */
   sessionStartTeamIncidentCount: number;
-  /** Incident limit thresholds already fired this session */
-  firedIncidentWarnings: Set<number>;
   /** Whether IDENTITY_RESOLVED has been emitted this session */
   identityResolved: boolean;
   /** Active traffic announcements keyed by battleKey(chaser, leader).
    *  Tracks whether LAPPED_TRAFFIC_AHEAD or BEING_LAPPED has already fired
    *  for a given (chaser, leader) pair while they remain close. */
   trafficAnnouncements: Map<string, 'LAPPED_AHEAD' | 'BEING_LAPPED'>;
-  /** Rolling buffer of recent player lap times (seconds) used by
-   *  LAP_TIME_DEGRADATION (#100). Capped to LAP_DEGRADATION_BUFFER_SIZE. */
-  playerLapTimeBuffer: number[];
-  /** Latch — true once LAP_TIME_DEGRADATION has fired in the current stint. */
-  playerDegradationFired: boolean;
-  /** FUEL_LOW thresholds already fired this session (values: 0.10, 0.05). */
-  firedFuelLowThresholds: Set<number>;
-  /** Estimated fuel consumption per lap in litres (0 until first completion). */
-  playerFuelPerLap: number;
-  /** Player FuelLevel at the start of the current lap (litres). */
-  playerFuelAtLapStart: number;
-
-  // ---- Driver swap state machine ----
-  /** True once the operator has clicked "Initiate Driver Swap"; cleared by DRIVER_SWAP_COMPLETED. */
-  driverSwapPending: boolean;
-  /** Outgoing driver id (as supplied by the operator at initiation). */
-  pendingSwapOutgoingDriverId: string;
-  /** Incoming driver id (as supplied by the operator at initiation). */
-  pendingSwapIncomingDriverId: string;
-  /** Incoming driver display name (as supplied by the operator at initiation). */
-  pendingSwapIncomingDriverName: string;
-  /** iRacing sessionTime when the swap was initiated — used to compute swapDurationSec. */
-  pendingSwapInitiatedSessionTime: number;
-  /** Monotonically incrementing stint counter; starts at 1, incremented on each DRIVER_SWAP_COMPLETED. */
-  playerStintNumber: number;
 
   // ---- Roster tracking ----
   /** Per-frame roster for ROSTER_UPDATED — diffed on each updateRoster() call to emit ROSTER_UPDATED. */
@@ -272,14 +239,6 @@ export interface SessionState {
   lastWeatherRelativeHumidity: number;
   /** FogLevel at the time of the last WEATHER_CHANGE emission. */
   lastWeatherFogLevel: number;
-
-  // ---- Physics detector cooldowns (session tick values) ----
-  /** Emit SLOW_CAR_AHEAD at most once per this many ticks (~30 s at 60Hz). */
-  slowCarAheadCooldownUntilTick: number;
-  /** Emit SPIN_DETECTED at most once per this many ticks. */
-  spinDetectedCooldownUntilTick: number;
-  /** Emit BIG_HIT at most once per this many ticks. */
-  bigHitCooldownUntilTick: number;
 
   // ---- Race-narrative additions (#151–#156) ----
   /** Race phase derived from SessionLapsRemain/Total or SessionTimeRemain. */
@@ -347,7 +306,6 @@ function makeDefaultCarState(): CarState {
     onOutLap: false,
     pitExitLapsCompleted: null,
     stintStartLap: 0,
-    firedStintMilestones: new Set(),
     recentGapToAhead: [],
     closingRateToAhead: 0,
     recentGapToBehind: [],
@@ -357,8 +315,6 @@ function makeDefaultCarState(): CarState {
     inPitWindow: false,
     classPositionHistory: [],
     overallPositionHistory: [],
-    playerStoppedBySpeedStartTime: null,
-    isPlayerStoppedBySpeed: false,
     stintLapTimes: [],
   };
 }
@@ -377,29 +333,14 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     sessionStartTrackTemp: 0,
     sessionStartIncidentCount: 0,
     sessionStartTeamIncidentCount: 0,
-    firedIncidentWarnings: new Set(),
     identityResolved: false,
     trafficAnnouncements: new Map(),
-    playerLapTimeBuffer: [],
-    playerDegradationFired: false,
-    firedFuelLowThresholds: new Set(),
-    playerFuelPerLap: 0,
-    playerFuelAtLapStart: 0,
-    driverSwapPending: false,
-    pendingSwapOutgoingDriverId: '',
-    pendingSwapIncomingDriverId: '',
-    pendingSwapIncomingDriverName: '',
-    pendingSwapInitiatedSessionTime: 0,
-    playerStintNumber: 1,
     knownRoster: new Map(),
     firedTrackTempDrift: false,
     lastTimeOfDayPhase: '',
     lastWeatherSkies: -1,
     lastWeatherRelativeHumidity: -1,
     lastWeatherFogLevel: -1,
-    slowCarAheadCooldownUntilTick: 0,
-    spinDetectedCooldownUntilTick: 0,
-    bigHitCooldownUntilTick: 0,
     racePhase: 'unknown',
     classGroups: new Map(),
     pitStrategySummary: new Map(),

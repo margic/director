@@ -12,6 +12,7 @@
  */
 
 import type { TelemetryFrame, SessionState } from '../session-state';
+import { createDriverState, type DriverState } from '../driver-state';
 
 // ---------------------------------------------------------------------------
 // Constants — mirror iRacing enum values
@@ -99,6 +100,15 @@ export function seedRoster(
       carClassId,
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// makeDriverState — factory for a DriverState with default values
+// ---------------------------------------------------------------------------
+
+/** Create a fresh DriverState for tests. Defaults to carIdx=0 (the typical player car). */
+export function makeDriverState(carIdx = 0): DriverState {
+  return createDriverState(carIdx);
 }
 
 // ---------------------------------------------------------------------------
