@@ -167,6 +167,12 @@ export interface CarState {
   inPitWindow: boolean;
   /** Last 3 sampled classPosition values for hysteresis on CLASS_POSITION_GAIN/LOSS. */
   classPositionHistory: number[];
+  /** Last 3 sampled overall position values for hysteresis on OVERALL_POSITION_GAIN/LOSS. */
+  overallPositionHistory: number[];
+  /** SessionTime when player speed first dropped below stopped threshold (null when moving). */
+  playerStoppedBySpeedStartTime: number | null;
+  /** Whether the player is currently stopped (speed-based; driver publisher only). */
+  isPlayerStoppedBySpeed: boolean;
   /** Stint lap times (seconds) — accumulated since the start of the current stint. */
   stintLapTimes: number[];
 }
@@ -296,6 +302,8 @@ export interface SessionState {
   lastGapTrendDirection: { ahead: 'closing' | 'opening' | 'none'; behind: 'closing' | 'opening' | 'none' };
   /** Last classPosition value emitted for CLASS_POSITION_GAIN/LOSS gating. */
   lastEmittedClassPosition: number;
+  /** Last overall position value emitted for OVERALL_POSITION_GAIN/LOSS gating. */
+  lastEmittedOverallPosition: number;
   /** Lap number on which FUEL_PROJECTION last fired (one per lap cap). */
   fuelProjectionLastLap: number;
   /** Latch — PACE_DROP fired this stint (cleared on stint reset). */
@@ -348,6 +356,9 @@ function makeDefaultCarState(): CarState {
     estimatedFuelLapsRemaining: 0,
     inPitWindow: false,
     classPositionHistory: [],
+    overallPositionHistory: [],
+    playerStoppedBySpeedStartTime: null,
+    isPlayerStoppedBySpeed: false,
     stintLapTimes: [],
   };
 }
@@ -397,6 +408,7 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     lastGapTrendEmittedAt: { ahead: -Infinity, behind: -Infinity },
     lastGapTrendDirection: { ahead: 'none', behind: 'none' },
     lastEmittedClassPosition: 0,
+    lastEmittedOverallPosition: 0,
     fuelProjectionLastLap: -1,
     paceDropFired: false,
     sectorPersonalBestLastSector: -1,
