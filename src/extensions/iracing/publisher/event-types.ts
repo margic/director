@@ -131,6 +131,8 @@ export type PublisherEventType =
   | 'SPIN_DETECTED'
   /** Player car stationary on track (speed-based, driver-publisher only). */
   | 'PLAYER_STOPPED'
+  /** Player car physical contact / hard hit (driver-publisher only) — #180. */
+  | 'CONTACT_DETECTED'
   // §7 Identity & roster (edge-authoritative)
   | 'IDENTITY_RESOLVED'
   | 'IDENTITY_OVERRIDE_CHANGED'
@@ -263,6 +265,8 @@ export interface EventPayloadMap {
   SPIN_DETECTED: Record<string, never>;
   /** iRacing source: Speed scalar < threshold sustained (player-car, driver-publisher only). */
   PLAYER_STOPPED: PlayerStoppedPayload;
+  /** Player physical contact / hard hit (driver-publisher, player-car only) — #180. */
+  CONTACT_DETECTED: ContactDetectedPayload;
 
   // §7 Identity
   IDENTITY_RESOLVED: IdentityResolvedPayload;
@@ -543,6 +547,7 @@ export const HIGH_PRIORITY_EVENTS = new Set<PublisherEventType>([
   'STOPPED_ON_TRACK',
   'OVERALL_POSITION_LOSS',
   'PLAYER_STOPPED',
+  'CONTACT_DETECTED',
   'RACE_GREEN',
   'RACE_CHECKERED',
   'FLAG_RED',
@@ -628,6 +633,39 @@ export interface PlayerStoppedPayload {
   speed: number;
   /** Overall race position when stopped. */
   position: number;
+}
+
+/**
+ * CONTACT_DETECTED — physical contact / hard hit on the player car (#180).
+ *
+ * Triggered on threshold edges of LatAccel / LongAccel / VertAccel / YawRate
+ * and resolved over a 1-second window during which peaks are tracked and the
+ * post-impact speed drop is measured to compute severity.
+ *
+ * `cause === 'car_contact'` only when another car was within proximity in the
+ * trigger frame or the previous 2 frames; otherwise `'solo_incident'`.
+ */
+export interface ContactDetectedPayload {
+  cause: 'car_contact' | 'solo_incident';
+  /** Populated only when cause === 'car_contact'. */
+  contactCar?: PublisherCarRef;
+  severity: 'light' | 'moderate' | 'severe';
+  /** Peak |LatAccel| observed during the resolution window (m/s²). */
+  peakLatAccel: number;
+  /** Peak |LongAccel| observed during the resolution window (m/s²). */
+  peakLongAccel: number;
+  /** Peak |VertAccel| observed during the resolution window (m/s²). */
+  peakVertAccel: number;
+  /** Peak |YawRate| observed during the resolution window (rad/s). */
+  peakYawRate: number;
+  /** Player speed (m/s) on the frame before the trigger. */
+  speedBeforeMps: number;
+  /** Player speed (m/s) at the end of the 1-second resolution window. */
+  speedAfterMps: number;
+  /** iRacing CarIdxTrackSurface enum value at trigger. */
+  trackSurface: number;
+  /** Lap fraction (0.0–1.0) at trigger. */
+  lapDistPct: number;
 }
 
 export interface InPitWindowPayload {
