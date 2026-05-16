@@ -266,6 +266,17 @@ export interface CameraGroup {
   groupName: string;
 }
 
+/**
+ * Operator-curated OBS scene exposed to Race Control (issue #203).
+ * `description` explains when the scene is appropriate (driver count, session
+ * type, on-track situation) so the AI Planner can pick a fit-for-purpose scene
+ * instead of any arbitrary scene name.
+ */
+export interface SceneCapability {
+  name: string;
+  description: string;
+}
+
 /** Driver discovered at runtime from the simulator session. */
 export interface CapabilityDriver {
   carNumber: string;
@@ -279,8 +290,13 @@ export interface DirectorCapabilities {
   connections: Record<string, ConnectionHealth>;
   /** iRacing camera groups cached from the SDK at check-in time. */
   cameraGroups?: CameraGroup[];
-  /** Available OBS scenes discovered via GetSceneList at check-in time. */
-  scenes?: string[];
+  /**
+   * Operator-curated OBS scenes exposed to Race Control (issue #203).
+   * Each entry carries a free-text `description` so the Planner can choose
+   * a scene that fits the current race context (driver count, session type,
+   * on-track situation). Only opted-in scenes for the connected host are included.
+   */
+  scenes?: SceneCapability[];
   /** Drivers in the current simulator session at check-in time. */
   drivers?: CapabilityDriver[];
   /**

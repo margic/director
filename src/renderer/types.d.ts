@@ -196,6 +196,10 @@ export interface IElectronAPI {
   obsDisconnect: () => Promise<void>;
   obsGetConfig: () => Promise<{ host: string; passwordSet: boolean; autoConnect: boolean }>;
   obsSaveSettings: (settings: { host: string; password?: string; autoConnect: boolean }) => Promise<boolean>;
+  // Issue #203: per-host scene curation
+  obsGetSceneCurations: () => Promise<Array<{ name: string; included: boolean; description: string }>>;
+  obsSetSceneCuration: (curation: { name: string; included: boolean; description: string }) => Promise<boolean>;
+  obsBulkSetIncluded: (included: boolean) => Promise<boolean>;
   discordGetStatus: () => Promise<{ connected: boolean; channelName?: string; lastMessage?: string; messagesSent: number }>;
   discordConnect: (token?: string, channelId?: string) => Promise<void>;
   discordDisconnect: () => Promise<void>;

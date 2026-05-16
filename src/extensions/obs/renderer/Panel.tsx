@@ -1,14 +1,17 @@
-import React, { useState, useEffect } from 'react';
-import { Activity, Aperture, AlertTriangle, Plug, PlugZap, Settings, Save } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Activity, Aperture, AlertTriangle, Plug, PlugZap, Settings, Save, Sparkles, Eye, EyeOff } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 import { useSetPageHeader } from '../../../renderer/contexts/PageHeaderContext';
 
+type SceneCuration = { name: string; included: boolean; description: string };
+
 export const ObsPanel = () => {
-  const [activeTab, setActiveTab] = useState<'status' | 'settings'>('status');
+  const [activeTab, setActiveTab] = useState<'status' | 'scenes' | 'settings'>('status');
   const [connected, setConnected] = useState(false);
   const [missingScenes, setMissingScenes] = useState<string[]>([]);
   const [availableScenes, setAvailableScenes] = useState<string[]>([]);
@@ -22,6 +25,9 @@ export const ObsPanel = () => {
   const [autoConnect, setAutoConnect] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
+
+  // Issue #203: per-host scene curation
+  const [curations, setCurations] = useState<SceneCuration[]>([]);
 
   // Push header into the global app bar
   useSetPageHeader({
@@ -51,6 +57,63 @@ export const ObsPanel = () => {
     const interval = setInterval(checkStatus, 2000);
     return () => clearInterval(interval);
   }, []);
+
+  // Issue #203: poll scene curations (reconciled in main when GetSceneList runs)
+  const refreshCurations = useCallback(async () => {
+    if (window.electronAPI?.obsGetSceneCurations) {
+      try {
+        const list = await window.electronAPI.obsGetSceneCurations();
+        setCurations(list || []);
+      } catch (e) {
+        console.error('Failed to load OBS scene curations', e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshCurations();
+    const i = setInterval(refreshCurations, 2000);
+    return () => clearInterval(i);
+  }, [refreshCurations]);
+
+  const handleToggleIncluded = async (name: string, included: boolean) => {
+    const existing = curations.find((c) => c.name === name);
+    const description = existing?.description ?? '';
+    setCurations((prev) => {
+      const found = prev.some((c) => c.name === name);
+      if (found) return prev.map((c) => (c.name === name ? { ...c, included } : c));
+      return [...prev, { name, included, description }];
+    });
+    try {
+      await window.electronAPI.obsSetSceneCuration({ name, included, description });
+    } catch (e) {
+      console.error('Failed to save scene curation', e);
+      refreshCurations();
+    }
+  };
+
+  const handleDescriptionBlur = async (name: string, description: string) => {
+    const existing = curations.find((c) => c.name === name);
+    const included = existing?.included ?? false;
+    if (existing && existing.description === description) return;
+    try {
+      await window.electronAPI.obsSetSceneCuration({ name, included, description });
+    } catch (e) {
+      console.error('Failed to save scene description', e);
+      refreshCurations();
+    }
+  };
+
+  const handleBulkInclude = async (included: boolean) => {
+    setCurations((prev) => prev.map((c) => ({ ...c, included })));
+    try {
+      await window.electronAPI.obsBulkSetIncluded(included);
+    } catch (e) {
+      console.error('Failed bulk include', e);
+    } finally {
+      refreshCurations();
+    }
+  };
 
   // Load config once
   useEffect(() => {
@@ -134,6 +197,16 @@ export const ObsPanel = () => {
             Status
           </button>
           <button
+            onClick={() => setActiveTab('scenes')}
+            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+              activeTab === 'scenes'
+                ? 'bg-primary text-primary-foreground shadow-sm'
+                : 'text-muted-foreground hover:bg-white/10'
+            }`}
+          >
+            Scenes
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
               activeTab === 'settings'
@@ -147,7 +220,7 @@ export const ObsPanel = () => {
       </div>
 
       <div className="flex-1">
-        {activeTab === 'status' ? (
+        {activeTab === 'status' && (
           <div className="space-y-6">
             {/* Connection banner */}
             <div className="flex justify-between items-center bg-card p-4 rounded-lg border border-border">
@@ -253,8 +326,72 @@ export const ObsPanel = () => {
               </CardContent>
             </Card>
           </div>
-        ) : (
-          /* Settings tab */
+        )}
+
+        {activeTab === 'scenes' && (
+          <div className="space-y-6">
+            <div className="bg-secondary/10 border border-secondary/40 rounded-lg p-4 flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-secondary mt-0.5" />
+              <div className="text-sm text-secondary-foreground/90">
+                <p className="font-bold uppercase font-rajdhani tracking-wider text-secondary mb-1">Scene Curation</p>
+                <p>
+                  Race Control's planner only sees scenes you <strong>include</strong>. New scenes default to
+                  <strong> excluded</strong>. Add a short description so the planner knows when to use each scene
+                  (e.g. "single-driver shot", "multi-car wide during pace lap"). Changes save automatically.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground font-rajdhani uppercase tracking-wider">
+                {curations.length} scene{curations.length === 1 ? '' : 's'}
+                {host ? ` for ${host}` : ''}
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkInclude(true)}
+                  disabled={curations.length === 0}
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  Include all
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleBulkInclude(false)}
+                  disabled={curations.length === 0}
+                >
+                  <EyeOff className="w-4 h-4 mr-2" />
+                  Exclude all
+                </Button>
+              </div>
+            </div>
+
+            {curations.length === 0 ? (
+              <Card className="bg-card border-border">
+                <CardContent className="p-6 text-sm text-muted-foreground italic">
+                  {connected ? 'No scenes available from OBS yet.' : 'Connect to OBS to discover scenes.'}
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {curations.map((c) => (
+                  <SceneCurationRow
+                    key={c.name}
+                    curation={c}
+                    isActive={currentScene === c.name}
+                    onToggle={(included) => handleToggleIncluded(c.name, included)}
+                    onDescriptionBlur={(desc) => handleDescriptionBlur(c.name, desc)}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'settings' && (
           <Card className="bg-card border-border">
             <CardHeader>
               <CardTitle className="text-muted-foreground text-sm uppercase font-rajdhani tracking-widest">
@@ -318,5 +455,59 @@ export const ObsPanel = () => {
         )}
       </div>
     </div>
+  );
+};
+
+type SceneCurationRowProps = {
+  curation: SceneCuration;
+  isActive: boolean;
+  onToggle: (included: boolean) => void;
+  onDescriptionBlur: (description: string) => void;
+};
+
+const SceneCurationRow: React.FC<SceneCurationRowProps> = ({ curation, isActive, onToggle, onDescriptionBlur }) => {
+  const [description, setDescription] = useState(curation.description);
+
+  // Sync local state when the prop changes externally (e.g. bulk toggle or refresh)
+  useEffect(() => {
+    setDescription(curation.description);
+  }, [curation.description]);
+
+  return (
+    <Card className={`bg-card border-border ${isActive ? 'ring-1 ring-primary/50' : ''}`}>
+      <CardContent className="p-4">
+        <div className="flex items-start gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="font-bold uppercase font-rajdhani tracking-wider text-foreground truncate">
+                {curation.name}
+              </span>
+              {isActive && (
+                <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded bg-primary/20 text-primary border border-primary/40">
+                  Live
+                </span>
+              )}
+            </div>
+            <Textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              onBlur={() => onDescriptionBlur(description)}
+              placeholder={curation.included
+                ? 'Describe when the planner should use this scene (e.g. "single-driver close-up", "wide pace-lap shot").'
+                : 'Include this scene to add a description.'}
+              disabled={!curation.included}
+              rows={2}
+              className="bg-background border-border resize-none text-sm"
+            />
+          </div>
+          <div className="flex flex-col items-center gap-2 pt-1">
+            <Switch checked={curation.included} onCheckedChange={onToggle} />
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-rajdhani">
+              {curation.included ? 'Included' : 'Excluded'}
+            </span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 };

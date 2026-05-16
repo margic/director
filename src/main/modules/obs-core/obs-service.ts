@@ -1,6 +1,6 @@
 import OBSWebSocket from 'obs-websocket-js';
 import { telemetryService } from '../../telemetry-service';
-import { configService } from '../../config-service';
+import { configService, ObsSceneCuration } from '../../config-service';
 
 export class ObsService {
     private obs: OBSWebSocket;
@@ -133,9 +133,105 @@ export class ObsService {
             this.availableScenes = (response.scenes as any[]).map((s: any) => s.sceneName) as string[];
             this.currentScene = (response as any).currentProgramSceneName || '';
             console.log('[ObsService] Fetched scenes', this.availableScenes, 'current:', this.currentScene);
+            this.reconcileSceneCurations();
         } catch (error) {
             console.error('[ObsService] Failed to fetch scenes', error);
         }
+    }
+
+    /**
+     * Issue #203: reconcile the per-host scene-curation list against the live scenes
+     * returned by OBS. New scenes are added with `included: false` (opt-in by default).
+     * Stale scenes (no longer present in OBS) are removed immediately to keep storage simple.
+     */
+    private reconcileSceneCurations(): void {
+        if (!this.currentHost) return;
+        const obsConfig = (configService.get('obs') || {}) as any;
+        const all: Record<string, ObsSceneCuration[]> = obsConfig.sceneCurations || {};
+        const existing = all[this.currentHost] || [];
+        const byName = new Map(existing.map(c => [c.name, c]));
+
+        const next: ObsSceneCuration[] = this.availableScenes.map(name => {
+            const prev = byName.get(name);
+            return prev
+                ? { name, included: prev.included, description: prev.description }
+                : { name, included: false, description: '' };
+        });
+
+        // Only persist if changed (avoid unnecessary disk writes).
+        if (curationsEqual(existing, next)) return;
+
+        all[this.currentHost] = next;
+        obsConfig.sceneCurations = all;
+        configService.set('obs', obsConfig);
+        console.log(`[ObsService] Reconciled ${next.length} scene curations for ${this.currentHost}`);
+    }
+
+    /**
+     * Returns the curation list for the currently connected host.
+     * Always reflects the latest OBS scene list (reconciled on fetch).
+     */
+    public getSceneCurations(): ObsSceneCuration[] {
+        if (!this.currentHost) return [];
+        const obsConfig = (configService.get('obs') || {}) as any;
+        const all: Record<string, ObsSceneCuration[]> = obsConfig.sceneCurations || {};
+        return all[this.currentHost] ? [...all[this.currentHost]] : [];
+    }
+
+    /**
+     * Persist a single scene curation entry for the current host.
+     * The scene must currently exist in `availableScenes`; otherwise the call is ignored
+     * (stale entries are removed by reconciliation).
+     */
+    public setSceneCuration(curation: ObsSceneCuration): void {
+        if (!this.currentHost) return;
+        if (!this.availableScenes.includes(curation.name)) {
+            console.warn(`[ObsService] setSceneCuration ignored — '${curation.name}' is not a live scene`);
+            return;
+        }
+        const obsConfig = (configService.get('obs') || {}) as any;
+        const all: Record<string, ObsSceneCuration[]> = obsConfig.sceneCurations || {};
+        const list = all[this.currentHost] ? [...all[this.currentHost]] : [];
+        const idx = list.findIndex(c => c.name === curation.name);
+        const next: ObsSceneCuration = {
+            name: curation.name,
+            included: !!curation.included,
+            description: curation.description ?? '',
+        };
+        if (idx >= 0) list[idx] = next; else list.push(next);
+        all[this.currentHost] = list;
+        obsConfig.sceneCurations = all;
+        configService.set('obs', obsConfig);
+    }
+
+    /** Bulk-toggle the `included` flag for every live scene on the current host. */
+    public bulkSetIncluded(included: boolean): void {
+        if (!this.currentHost) return;
+        const obsConfig = (configService.get('obs') || {}) as any;
+        const all: Record<string, ObsSceneCuration[]> = obsConfig.sceneCurations || {};
+        const existing = all[this.currentHost] || [];
+        const byName = new Map(existing.map(c => [c.name, c]));
+        const next: ObsSceneCuration[] = this.availableScenes.map(name => {
+            const prev = byName.get(name);
+            return {
+                name,
+                included,
+                description: prev?.description ?? '',
+            };
+        });
+        all[this.currentHost] = next;
+        obsConfig.sceneCurations = all;
+        configService.set('obs', obsConfig);
+    }
+
+    /**
+     * Returns the scenes the operator has opted in for the current host, each with its
+     * description. Used by the capabilities builder to populate the check-in payload.
+     */
+    public getIncludedSceneCapabilities(): Array<{ name: string; description: string }> {
+        return this.getSceneCurations()
+            .filter(c => c.included && this.availableScenes.includes(c.name))
+            .map(c => ({ name: c.name, description: c.description }));
     }
 
     public async switchScene(sceneName: string) {
@@ -203,4 +299,16 @@ export class ObsService {
         }
         return this.availableScenes;
     }
+}
+
+function curationsEqual(a: ObsSceneCuration[], b: ObsSceneCuration[]): boolean {
+    if (a.length !== b.length) return false;
+    const byName = new Map(a.map(c => [c.name, c]));
+    for (const item of b) {
+        const prev = byName.get(item.name);
+        if (!prev) return false;
+        if (prev.included !== item.included) return false;
+        if (prev.description !== item.description) return false;
+    }
+    return true;
 }

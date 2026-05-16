@@ -4,14 +4,14 @@
   "main": "index.js",
   "displayName": "OBS Studio Integration",
   "description": "Provides OBS Studio scene switching and status monitoring.",
-  "aiContext": "The OBS extension switches the active OBS Studio video scene.\n- obs.switchScene: changes the active scene. sceneName must exactly match one of the valid scene names listed in ALL VALID OBS SCENES — never invent scene names. Always follow with a system.wait step of at least 1000ms to allow the scene to render before the next action.",
+  "aiContext": "The OBS extension switches the active OBS Studio video scene.\n- obs.switchScene: changes the active scene. sceneName MUST exactly match one of the names in ALL VALID OBS SCENES — never invent scene names.\n- Each scene in ALL VALID OBS SCENES carries a 'description' written by the Director operator explaining when the scene is appropriate (e.g. 'single-driver only', 'multi-car wide shot during pace lap', 'use after a driver swap'). You MUST select a scene whose description fits the current race context (number of drivers in the car, session type, on-track situation). If no scene's description fits, prefer NOT switching rather than picking a mismatched scene.\n- Always follow obs.switchScene with a system.wait step of at least 1000ms to allow the scene to render before the next action.",
   "contributes": {
     "intents": [
       {
         "intent": "obs.switchScene",
         "title": "Switch OBS Scene",
         "category": "broadcast",
-        "description": "Changes the active OBS Studio scene. sceneName must exactly match a scene name from ALL VALID OBS SCENES. Always follow with a system.wait step of at least 1000ms.",
+        "description": "Changes the active OBS Studio scene. sceneName must exactly match a scene name from ALL VALID OBS SCENES. Pick a scene whose operator-provided description matches the current race context. Always follow with a system.wait step of at least 1000ms.",
         "schema": {
           "type": "object",
           "properties": {
