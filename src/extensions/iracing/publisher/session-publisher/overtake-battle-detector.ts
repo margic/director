@@ -139,6 +139,9 @@ export function detectOvertakeAndBattle(
     const currClassPos = curr.carIdxClassPosition[i];
     const overtakePayload = {
       overtakingCarIdx: i,
+      // #209: emit a self-describing ref for the overtaking car so consumers
+      // do not have to perform a roster lookup. Symmetric with overtakenCar.
+      overtakingCar:    overtakeCar,
       overtakenCar,
       newPosition:      currPos,
       lap:              curr.carIdxLapCompleted[i],

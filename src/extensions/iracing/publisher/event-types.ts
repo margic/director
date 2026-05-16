@@ -435,7 +435,20 @@ export interface StintBestLapPayload {
 // §4 Position & battle
 
 export interface OvertakePayload {
+  /**
+   * Legacy carIdx of the overtaking car. Kept for backward compatibility with
+   * consumers that parsed the original payload shape (#209). New consumers
+   * should prefer overtakingCar, which is self-describing and symmetric
+   * with overtakenCar.
+   */
   overtakingCarIdx: number;
+  /**
+   * Self-describing ref for the overtaking car (#209). Mirrors overtakenCar so
+   * downstream consumers (story engine, sequence planner, commentary) can
+   * resolve the driver/team/car class for the overtaking side without an
+   * external roster lookup.
+   */
+  overtakingCar: PublisherCarRef;
   /** Self-describing ref for the overtaken car. */
   overtakenCar: PublisherCarRef;
   newPosition: number;
