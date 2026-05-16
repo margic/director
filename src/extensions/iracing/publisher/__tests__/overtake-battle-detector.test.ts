@@ -893,3 +893,272 @@ describe('STOPPED_ON_TRACK', () => {
     expect(state.carStates.get(0)?.stoppedStartSessionTime).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #207 Bug 3: BATTLE_BROKEN must include durationSec
+// ---------------------------------------------------------------------------
+
+describe('BATTLE_BROKEN — durationSec (#207 Bug 3)', () => {
+  function engageBattleAt(engageSessionTime: number) {
+    const state = makeState();
+    const base = makeFrame({
+      sessionTime: engageSessionTime - 0.2,
+      cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }],
+    });
+    detect(null, base, state);
+
+    const f1 = cloneFrame(base);
+    f1.sessionTime = engageSessionTime - 0.1;
+    f1.carIdxF2Time[1] = 0.8;
+    detect(base, f1, state);
+
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = engageSessionTime;
+    f2.carIdxF2Time[1] = 0.7;
+    detect(f1, f2, state);
+
+    return { state, lastFrame: f2 };
+  }
+
+  it('includes durationSec in BATTLE_BROKEN payload', () => {
+    const { state, lastFrame } = engageBattleAt(100);
+    let prev = lastFrame;
+    let brokenEvent: any;
+    for (let i = 0; i < 3; i++) {
+      const curr = cloneFrame(prev);
+      curr.sessionTime = prev.sessionTime + 1;
+      curr.carIdxF2Time[1] = 2.5;
+      const events = detect(prev, curr, state);
+      brokenEvent = events.find(e => e.type === 'BATTLE_BROKEN') ?? brokenEvent;
+      prev = curr;
+    }
+    expect(brokenEvent).toBeDefined();
+    expect(typeof (brokenEvent.payload as any).durationSec).toBe('number');
+    // Battle engaged at sessionTime 100; broken frame 3 is at sessionTime 103
+    expect((brokenEvent.payload as any).durationSec).toBeGreaterThanOrEqual(1);
+  });
+
+  it('durationSec reflects elapsed sessionTime from engagedAt', () => {
+    const { state, lastFrame } = engageBattleAt(500);
+    // Advance 30 seconds before breaking
+    let prev = lastFrame;
+    for (let i = 0; i < 20; i++) {
+      const curr = cloneFrame(prev);
+      curr.sessionTime = prev.sessionTime + 1.5;
+      curr.carIdxF2Time[1] = 0.9; // still engaged
+      detect(prev, curr, state);
+      prev = curr;
+    }
+    // Now break the battle
+    let brokenEvent: any;
+    for (let i = 0; i < 3; i++) {
+      const curr = cloneFrame(prev);
+      curr.sessionTime = prev.sessionTime + 1;
+      curr.carIdxF2Time[1] = 2.5;
+      const events = detect(prev, curr, state);
+      brokenEvent = events.find(e => e.type === 'BATTLE_BROKEN') ?? brokenEvent;
+      prev = curr;
+    }
+    // durationSec should be ~30 (20 frames × 1.5s) + a few frames to break
+    expect((brokenEvent.payload as any).durationSec).toBeGreaterThan(25);
+  });
+
+  it('both engager and engaged perspectives include durationSec', () => {
+    const { state, lastFrame } = engageBattleAt(100);
+    let prev = lastFrame;
+    const allBroken: any[] = [];
+    for (let i = 0; i < 3; i++) {
+      const curr = cloneFrame(prev);
+      curr.sessionTime = prev.sessionTime + 1;
+      curr.carIdxF2Time[1] = 2.5;
+      const events = detect(prev, curr, state);
+      allBroken.push(...events.filter(e => e.type === 'BATTLE_BROKEN'));
+      prev = curr;
+    }
+    // Two events: engager + engaged
+    expect(allBroken).toHaveLength(2);
+    for (const ev of allBroken) {
+      expect(typeof (ev.payload as any).durationSec).toBe('number');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #207 Bug 2: BATTLE_BROKEN must fire at checkered flag for active battles
+// ---------------------------------------------------------------------------
+
+describe('BATTLE_BROKEN — checkered flag flush (#207 Bug 2)', () => {
+  function engagedBattleState() {
+    const state = makeState();
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }],
+    });
+    detect(null, base, state);
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 100.1;
+    f1.carIdxF2Time[1] = 0.8;
+    detect(base, f1, state);
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = 100.2;
+    f2.carIdxF2Time[1] = 0.7;
+    detect(f1, f2, state);
+    return { state, lastFrame: f2 };
+  }
+
+  it('emits BATTLE_BROKEN for each engaged battle when checkeredFired is set', () => {
+    const { state, lastFrame } = engagedBattleState();
+    expect(state.activeBattles.size).toBe(1);
+
+    // Simulate checkered flag
+    state.checkeredFired = true;
+
+    const next = cloneFrame(lastFrame);
+    next.sessionTime = 110;
+    next.carIdxF2Time[1] = 0.7; // still close — but checkered overrides
+    const events = detect(lastFrame, next, state);
+
+    const broken = events.filter(e => e.type === 'BATTLE_BROKEN');
+    expect(broken.length).toBeGreaterThanOrEqual(2); // engager + engaged
+    expect(broken.every(e => (e.payload as any).status === 'BROKEN')).toBe(true);
+  });
+
+  it('clears activeBattles after checkered flush', () => {
+    const { state, lastFrame } = engagedBattleState();
+    state.checkeredFired = true;
+    const next = cloneFrame(lastFrame);
+    next.sessionTime = 110;
+    detect(lastFrame, next, state);
+    expect(state.activeBattles.size).toBe(0);
+  });
+
+  it('checkered flush only happens once (checkeredBattlesFlushed flag)', () => {
+    const { state, lastFrame } = engagedBattleState();
+    state.checkeredFired = true;
+
+    const f1 = cloneFrame(lastFrame);
+    f1.sessionTime = 110;
+    const events1 = detect(lastFrame, f1, state);
+    const broken1 = events1.filter(e => e.type === 'BATTLE_BROKEN').length;
+    expect(broken1).toBeGreaterThanOrEqual(2);
+    expect(state.checkeredBattlesFlushed).toBe(true);
+
+    // Second call — no more battles to flush
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = 111;
+    const events2 = detect(f1, f2, state);
+    expect(events2.filter(e => e.type === 'BATTLE_BROKEN')).toHaveLength(0);
+  });
+
+  it('BATTLE_BROKEN on checkered includes durationSec', () => {
+    const { state, lastFrame } = engagedBattleState();
+    state.checkeredFired = true;
+    const next = cloneFrame(lastFrame);
+    next.sessionTime = 200;
+    const events = detect(lastFrame, next, state);
+    const broken = events.filter(e => e.type === 'BATTLE_BROKEN');
+    for (const ev of broken) {
+      expect(typeof (ev.payload as any).durationSec).toBe('number');
+      expect((ev.payload as any).durationSec).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it('does NOT flush STATUS_CLOSING battles at checkered (only ENGAGED)', () => {
+    const state = makeState();
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }],
+    });
+    detect(null, base, state);
+
+    // One frame — creates STATUS_CLOSING, not ENGAGED
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 100.1;
+    f1.carIdxF2Time[1] = 0.8;
+    detect(base, f1, state);
+    expect([...state.activeBattles.values()][0].status).toBe('CLOSING');
+
+    state.checkeredFired = true;
+    const f2 = cloneFrame(f1);
+    f2.sessionTime = 101;
+    const events = detect(f1, f2, state);
+    expect(events.filter(e => e.type === 'BATTLE_BROKEN')).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #207 Bug 4: STATUS_CLOSING entries must be cleaned up when gap > 2.0s
+// ---------------------------------------------------------------------------
+
+describe('STATUS_CLOSING state leak fix (#207 Bug 4)', () => {
+  it('removes STATUS_CLOSING entry after 3 frames above 2.0s (no BATTLE_BROKEN emitted)', () => {
+    const state = makeState();
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }],
+    });
+    detect(null, base, state);
+
+    // Create STATUS_CLOSING latch
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 100.1;
+    f1.carIdxF2Time[1] = 0.8;
+    detect(base, f1, state);
+    expect([...state.activeBattles.values()][0].status).toBe('CLOSING');
+
+    // Now gap exceeds 2.0s for 3 frames
+    let prev = f1;
+    let brokenEvents: any[] = [];
+    for (let i = 0; i < 3; i++) {
+      const curr = cloneFrame(prev);
+      curr.sessionTime = prev.sessionTime + 1;
+      curr.carIdxF2Time[1] = 2.5;
+      const events = detect(prev, curr, state);
+      brokenEvents.push(...events.filter(e => e.type === 'BATTLE_BROKEN'));
+      prev = curr;
+    }
+    // STATUS_CLOSING should be removed — no BATTLE_BROKEN (that only fires for ENGAGED)
+    expect(brokenEvents).toHaveLength(0);
+    expect(state.activeBattles.size).toBe(0);
+  });
+
+  it('allows fresh BATTLE_ENGAGED after STATUS_CLOSING is cleaned up', () => {
+    const state = makeState();
+    const base = makeFrame({
+      sessionTime: 100,
+      cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }],
+    });
+    detect(null, base, state);
+
+    // Create and break STATUS_CLOSING
+    const f1 = cloneFrame(base);
+    f1.sessionTime = 100.1;
+    f1.carIdxF2Time[1] = 0.8;
+    detect(base, f1, state);
+
+    let prev = f1;
+    for (let i = 0; i < 3; i++) {
+      const curr = cloneFrame(prev);
+      curr.sessionTime = prev.sessionTime + 1;
+      curr.carIdxF2Time[1] = 2.5;
+      detect(prev, curr, state);
+      prev = curr;
+    }
+    expect(state.activeBattles.size).toBe(0);
+
+    // Re-approach: should create a fresh CLOSING latch and then ENGAGED
+    const rClose1 = cloneFrame(prev);
+    rClose1.sessionTime = prev.sessionTime + 0.1;
+    rClose1.carIdxF2Time[1] = 0.9;
+    detect(prev, rClose1, state);
+    expect(state.activeBattles.size).toBe(1);
+    expect([...state.activeBattles.values()][0].status).toBe('CLOSING');
+
+    const rClose2 = cloneFrame(rClose1);
+    rClose2.sessionTime = rClose1.sessionTime + 0.1;
+    rClose2.carIdxF2Time[1] = 0.8;
+    const events = detect(rClose1, rClose2, state);
+    expect(events.find(e => e.type === 'BATTLE_ENGAGED')).toBeDefined();
+  });
+});
+

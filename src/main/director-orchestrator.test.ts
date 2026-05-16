@@ -592,4 +592,79 @@ describe('DirectorOrchestrator', () => {
       expect(ctx.battles).toBeUndefined();
     });
   });
+
+  describe('Re-check-in on SESSION_TYPE_CHANGE (#206)', () => {
+    it('should refresh check-in when iRacing sessionType changes (e.g. Practice → Race)', async () => {
+      mockSessionManager.getCheckinId.mockReturnValue('checkin-123');
+
+      // Emit first raceStateChanged to establish the baseline sessionType
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Practice', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockSessionManager.refreshCheckin).not.toHaveBeenCalled();
+
+      // Now emit with a different sessionType — should trigger re-check-in
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Race', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalledTimes(1);
+    });
+
+    it('should NOT refresh check-in when sessionType stays the same', async () => {
+      mockSessionManager.getCheckinId.mockReturnValue('checkin-123');
+
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Race', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Race', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockSessionManager.refreshCheckin).not.toHaveBeenCalled();
+    });
+
+    it('should NOT refresh check-in on first raceStateChanged (no prior sessionType)', async () => {
+      mockSessionManager.getCheckinId.mockReturnValue('checkin-123');
+
+      // First emission — lastKnownSessionType is '' so no change detected
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Race', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockSessionManager.refreshCheckin).not.toHaveBeenCalled();
+    });
+
+    it('should NOT refresh check-in when there is no active check-in', async () => {
+      mockSessionManager.getCheckinId.mockReturnValue(null);
+
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Practice', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Race', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      expect(mockSessionManager.refreshCheckin).not.toHaveBeenCalled();
+    });
+
+    it('should handle re-check-in failure gracefully on session type change', async () => {
+      mockSessionManager.getCheckinId.mockReturnValue('checkin-123');
+      mockSessionManager.refreshCheckin.mockRejectedValue(new Error('Network error'));
+
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Practice', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Race', cars: [] },
+      });
+      // Should not throw
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(mockSessionManager.refreshCheckin).toHaveBeenCalledTimes(1);
+    });
+  });
 });

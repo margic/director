@@ -420,6 +420,8 @@ export interface SessionState {
   trafficExitFrames: Map<string, number>;
   /** Whether RACE_CHECKERED has been emitted this session (prevents 53x flood). */
   checkeredFired: boolean;
+  /** Whether active battles have been flushed as BATTLE_BROKEN on the checkered flag (#207). */
+  checkeredBattlesFlushed: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +513,7 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     raceGreenFired: false,
     trafficExitFrames: new Map(),
     checkeredFired: false,
+    checkeredBattlesFlushed: false,
   };
 }
 

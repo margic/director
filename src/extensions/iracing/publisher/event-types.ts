@@ -469,6 +469,8 @@ export interface BattlePayload {
   role: 'engager' | 'engaged';
   /** Overall position being contested (position of the leader car). */
   forPosition: number;
+  /** Duration of the battle in seconds from ENGAGED to BROKEN. Present on BATTLE_BROKEN only. */
+  durationSec?: number;
 }
 
 export interface TrafficPayload {
