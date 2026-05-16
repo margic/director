@@ -3,6 +3,17 @@ import Store from 'electron-store';
 import { safeStorage } from 'electron';
 import { randomUUID } from 'crypto';
 
+/**
+ * Per-scene curation entry stored under `obs.sceneCurations[host]` (issue #203).
+ * `included = true` means the scene is exposed to Race Control with its `description`.
+ * New scenes default to `included: false`. Stale scenes are removed.
+ */
+export interface ObsSceneCuration {
+  name: string;
+  included: boolean;
+  description: string;
+}
+
 interface AppConfig {
   youtube: {
     enabled: boolean;
@@ -14,6 +25,12 @@ interface AppConfig {
     host?: string;
     password?: string;
     autoConnect?: boolean;
+    /**
+     * Per-host scene curation (issue #203). Key = OBS host string (matches `host`).
+     * Only included scenes are exposed to Race Control via the check-in payload.
+     * Stale scenes (no longer present in OBS) are removed on the next reconciliation.
+     */
+    sceneCurations?: Record<string, ObsSceneCuration[]>;
   };
   iracing: {
     enabled: boolean;
@@ -46,7 +63,10 @@ const schema = {
       enabled: { type: 'boolean', default: true },
       host: { type: 'string' },
       password: { type: 'string' },
-      autoConnect: { type: 'boolean', default: false }
+      autoConnect: { type: 'boolean', default: false },
+      // sceneCurations: Record<host, ObsSceneCuration[]> — issue #203.
+      // Schema kept loose (object); per-entry shape is enforced in ObsService.
+      sceneCurations: { type: 'object', default: {} },
     },
     default: {}
   },

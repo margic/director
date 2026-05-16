@@ -236,12 +236,13 @@ app.on('ready', () => {
       && stableForMs != null
       && stableForMs >= IDENTITY_STABILITY_MS;
 
-    // #192: use extensionHost.getObsScenes() — populated by the obs.scenes event cache
-    // maintained in the extension host. Warn when OBS is connected but scenes are empty
-    // so regressions are visible in logs without needing to inspect the check-in payload.
-    const scenes: string[] = extensionHost.getObsScenes();
+    // #192 / #203: source of truth for scenes is the operator-curated list maintained
+    // by ObsService. Only scenes the operator has opted in (per OBS host) are exposed
+    // to Race Control, each with a description that lets the Planner pick a scene
+    // that fits the current race context.
+    const scenes = obsService.getIncludedSceneCapabilities();
     if (scenes.length === 0 && connections['director-obs']?.connected) {
-      console.warn('[Capabilities] OBS is connected but scene list is empty — check-in will report no scenes. Verify OBS scene fetch succeeded.');
+      console.warn('[Capabilities] OBS is connected but no scenes are opted-in — check-in will report no scenes. Visit the OBS panel to curate scenes.');
     }
 
     // #112: only include broadcast intents — exclude operational/query
@@ -622,6 +623,21 @@ app.on('ready', () => {
 
   ipcMain.handle('obs:save-settings', async (event, settings: { host: string; password?: string; autoConnect: boolean }) => {
     obsService.saveConfig(settings.host, settings.password, settings.autoConnect);
+    return true;
+  });
+
+  // Issue #203: per-host scene curation
+  ipcMain.handle('obs:get-scene-curations', () => {
+    return obsService.getSceneCurations();
+  });
+
+  ipcMain.handle('obs:set-scene-curation', (_event, curation: { name: string; included: boolean; description: string }) => {
+    obsService.setSceneCuration(curation);
+    return true;
+  });
+
+  ipcMain.handle('obs:bulk-set-included', (_event, included: boolean) => {
+    obsService.bulkSetIncluded(included);
     return true;
   });
 

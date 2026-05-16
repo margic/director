@@ -49,6 +49,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obsDisconnect: () => ipcRenderer.invoke('obs:disconnect'),
   obsGetConfig: () => ipcRenderer.invoke('obs:get-config'),
   obsSaveSettings: (settings: { host: string; password?: string; autoConnect: boolean }) => ipcRenderer.invoke('obs:save-settings', settings),
+  // Issue #203: per-host scene curation
+  obsGetSceneCurations: () => ipcRenderer.invoke('obs:get-scene-curations'),
+  obsSetSceneCuration: (curation: { name: string; included: boolean; description: string }) => ipcRenderer.invoke('obs:set-scene-curation', curation),
+  obsBulkSetIncluded: (included: boolean) => ipcRenderer.invoke('obs:bulk-set-included', included),
   
   // Discord API
   discordGetStatus: () => ipcRenderer.invoke('discord:get-status'),
