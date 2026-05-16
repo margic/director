@@ -33,14 +33,12 @@ vi.mock('../../config-service', async () => {
 
 import { ObsService } from './obs-service';
 
-type Svc = ObsService & {
-  availableScenes: string[];
-  currentHost?: string;
-  reconcileSceneCurations: () => void;
-};
+// Cast to any to access private fields in tests without collapsing the type.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type TestSvc = ObsService & Record<string, any>;
 
-const newService = (host: string, scenes: string[]): Svc => {
-  const svc = new ObsService() as Svc;
+const newService = (host: string, scenes: string[]): TestSvc => {
+  const svc = new ObsService() as TestSvc;
   svc.currentHost = host;
   svc.availableScenes = scenes;
   return svc;
@@ -141,7 +139,7 @@ describe('ObsService scene curation (issue #203)', () => {
   });
 
   it('getSceneCurations returns empty when no host is set', () => {
-    const svc = new ObsService() as Svc;
+    const svc = new ObsService() as TestSvc;
     expect(svc.getSceneCurations()).toEqual([]);
   });
 });
