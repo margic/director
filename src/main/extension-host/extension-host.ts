@@ -105,6 +105,12 @@ export class ExtensionHostService {
   private cachedObsScenes: string[] = [];
   private cachedCameraGroups: { groupNum: number; groupName: string }[] = [];
   private cachedDrivers: { carNumber: string; userName: string; carName?: string }[] = [];
+  /**
+   * Wall-clock timestamp (ms) of the most recent change to `cachedDrivers`.
+   * Used to gate the first session check-in on a stable iRacing roster
+   * (issue #193). Null until the first `iracing.driversChanged` event arrives.
+   */
+  private driversLastChangedAt: number | null = null;
 
   constructor(
     extensionsPath: string, 
@@ -307,6 +313,15 @@ export class ExtensionHostService {
   }
 
   /**
+   * Returns how many ms the cached iRacing driver roster has been unchanged
+   * (issue #193). Returns `null` if no roster has been observed yet.
+   */
+  public getDriversStableForMs(): number | null {
+    if (this.driversLastChangedAt == null) return null;
+    return Date.now() - this.driversLastChangedAt;
+  }
+
+  /**
    * Allows main process to set connection health for extensions that don't
    * emit events themselves (e.g., discord delegates to main process).
    */
@@ -374,11 +389,18 @@ export class ExtensionHostService {
         newDrivers.some((d, i) => d.carNumber !== this.cachedDrivers[i]?.carNumber || d.userName !== this.cachedDrivers[i]?.userName);
       this.cachedDrivers = newDrivers;
       if (changed) {
+        // Stamp the roster mutation so callers can gate first check-in on a
+        // stable iRacing roster (issue #193).
+        this.driversLastChangedAt = Date.now();
         this.eventBus.emitExtensionEvent(data.extensionId || 'director-iracing', 'extension.capabilitiesChanged', {
           extensionId: data.extensionId || 'director-iracing',
           enabled: true,
           reason: 'drivers',
         });
+      } else if (this.driversLastChangedAt == null) {
+        // First-ever roster snapshot, even if structurally identical to the
+        // empty default — record so stability windows can begin.
+        this.driversLastChangedAt = Date.now();
       }
     });
   }
