@@ -283,6 +283,13 @@ export interface DirectorCapabilities {
   scenes?: string[];
   /** Drivers in the current simulator session at check-in time. */
   drivers?: CapabilityDriver[];
+  /**
+   * Whether the iRacing driver roster captured in `drivers` has stabilised
+   * (issue #193). When `false`, the cloud Planner should treat the identities
+   * here as provisional and avoid baking them into long-lived templates.
+   * When omitted, identity resolution is unknown (older Director clients).
+   */
+  identityResolved?: boolean;
 }
 
 export interface SessionCheckinRequest {

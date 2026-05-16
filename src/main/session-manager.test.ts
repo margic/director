@@ -15,7 +15,16 @@ vi.mock('./auth-config', () => ({
     baseUrl: 'https://test.simracecenter.com',
     endpoints: {
       listSessions: '/api/director/v1/sessions',
+      checkin: (id: string) => `/api/director/v1/sessions/${id}/checkin`,
+      refreshCheckin: (id: string) => `/api/director/v1/sessions/${id}/checkin`,
+      wrap: (id: string) => `/api/director/v1/sessions/${id}/checkin`,
     },
+  },
+}));
+
+vi.mock('./config-service', () => ({
+  configService: {
+    getOrCreateDirectorId: () => 'd_inst_test',
   },
 }));
 
@@ -334,6 +343,152 @@ describe('SessionManager', () => {
 
       const sessions = sessionManager.getSessions();
       expect(sessions).toEqual(mockSessions);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Issue #193: identity resolution gating before first check-in
+  // -----------------------------------------------------------------------
+  describe('checkinSession identity resolution (#193)', () => {
+    const selected: RaceSession = {
+      raceSessionId: 'sess-193',
+      name: 'Identity Test',
+      centerId: 'test-center',
+    };
+
+    beforeEach(async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [selected],
+        headers: new Headers(),
+      });
+      await sessionManager.discover();
+      await sessionManager.selectSession('sess-193');
+    });
+
+    it('defers POST /checkin until capabilities report identityResolved=true', async () => {
+      vi.useFakeTimers();
+      try {
+        let resolved = false;
+        const builder = vi.fn(() => ({
+          extensions: [],
+          connections: {},
+          drivers: [{ carNumber: '15', userName: 'Paul Crofts', carName: '' }],
+          identityResolved: resolved,
+        }));
+        sessionManager.setCapabilitiesBuilder(builder as any);
+        sessionManager.setRaceContextGetter(() => null);
+
+        // Stub the actual HTTP POST so we can observe when it fires.
+        let postFired = false;
+        mockFetch.mockImplementation(async () => {
+          postFired = true;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              status: 'standby',
+              checkinId: 'ci-1',
+              checkinTtlSeconds: 120,
+              sessionConfig: { raceSessionId: 'sess-193', name: '', status: '', simulator: 'iRacing', drivers: [], obsScenes: [] },
+              warnings: [],
+            }),
+            headers: new Headers(),
+          };
+        });
+
+        const inFlight = sessionManager.checkinSession();
+
+        // Advance several poll intervals — POST should still be blocked.
+        for (let i = 0; i < 5; i++) {
+          await vi.advanceTimersByTimeAsync(1000);
+        }
+        expect(postFired).toBe(false);
+
+        // Roster stabilises — next poll should release the gate.
+        resolved = true;
+        await vi.advanceTimersByTimeAsync(1000);
+        await inFlight;
+
+        expect(postFired).toBe(true);
+        expect(builder).toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('proceeds with check-in after timeout when identity never resolves', async () => {
+      vi.useFakeTimers();
+      try {
+        const builder = vi.fn(() => ({
+          extensions: [],
+          connections: {},
+          drivers: [{ carNumber: '15', userName: 'Stale Name', carName: '' }],
+          identityResolved: false,
+        }));
+        sessionManager.setCapabilitiesBuilder(builder as any);
+        sessionManager.setRaceContextGetter(() => null);
+
+        const sentBody: any = {};
+        mockFetch.mockImplementation(async (_url: any, init: any) => {
+          sentBody.body = JSON.parse(init.body);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              status: 'standby', checkinId: 'ci-2', checkinTtlSeconds: 120,
+              sessionConfig: { raceSessionId: 'sess-193', name: '', status: '', simulator: 'iRacing', drivers: [], obsScenes: [] },
+              warnings: [],
+            }),
+            headers: new Headers(),
+          };
+        });
+
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const inFlight = sessionManager.checkinSession();
+
+        // Advance just past the 90s timeout.
+        await vi.advanceTimersByTimeAsync(91_000);
+        await inFlight;
+
+        // Body should carry identityResolved=false from the builder.
+        expect(sentBody.body.capabilities.identityResolved).toBe(false);
+        // Should have logged the timeout warning at least once.
+        expect(warnSpy.mock.calls.some(c => String(c[0]).includes('without confirmed iRacing roster'))).toBe(true);
+        warnSpy.mockRestore();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('skips the stability wait when forceCheckin=true', async () => {
+      const builder = vi.fn(() => ({
+        extensions: [],
+        connections: {},
+        drivers: [{ carNumber: '15', userName: 'Stale Name', carName: '' }],
+        identityResolved: false,
+      }));
+      sessionManager.setCapabilitiesBuilder(builder as any);
+      sessionManager.setRaceContextGetter(() => null);
+
+      let posted = false;
+      mockFetch.mockImplementation(async () => {
+        posted = true;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: 'standby', checkinId: 'ci-3', checkinTtlSeconds: 120,
+            sessionConfig: { raceSessionId: 'sess-193', name: '', status: '', simulator: 'iRacing', drivers: [], obsScenes: [] },
+            warnings: [],
+          }),
+          headers: new Headers(),
+        };
+      });
+
+      await sessionManager.checkinSession({ forceCheckin: true });
+      expect(posted).toBe(true);
     });
   });
 });

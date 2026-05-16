@@ -296,6 +296,78 @@ export class SessionManager extends EventEmitter {
   // ---------------------------------------------------------------------------
 
   /**
+   * Maximum time (ms) to wait for the iRacing roster to stabilise before
+   * proceeding with the first session check-in (issue #193). After this
+   * timeout, check-in proceeds anyway and the cloud is told identity is
+   * unresolved via `capabilities.identityResolved=false`.
+   */
+  private static readonly IDENTITY_RESOLUTION_TIMEOUT_MS = 90_000;
+  /** Poll interval while waiting for identity resolution. */
+  private static readonly IDENTITY_POLL_INTERVAL_MS = 1_000;
+
+  /**
+   * Block until the live capabilities snapshot reports
+   * `identityResolved === true`, or until a bounded timeout elapses.
+   *
+   * The cloud Planner runs once at POST /checkin and bakes the captured
+   * driver roster into ~100+ templates with a long TTL — so a stale roster
+   * captured here poisons broadcast decisions for the rest of the session.
+   * Waiting for the roster to settle is cheap insurance against that.
+   */
+  private async awaitIdentityResolved(): Promise<void> {
+    if (!this.buildCapabilities) return;
+    const start = Date.now();
+    while (Date.now() - start < SessionManager.IDENTITY_RESOLUTION_TIMEOUT_MS) {
+      let caps: DirectorCapabilities;
+      try {
+        caps = this.buildCapabilities();
+      } catch {
+        return; // capabilities builder failed; don't block check-in indefinitely
+      }
+      if (caps.identityResolved === true) {
+        if (Date.now() - start > 0) {
+          console.log(`[SessionManager] iRacing identity resolved after ${Date.now() - start}ms`);
+        }
+        return;
+      }
+      await new Promise(r => setTimeout(r, SessionManager.IDENTITY_POLL_INTERVAL_MS));
+    }
+    console.warn(
+      `[SessionManager] Proceeding with check-in after ${SessionManager.IDENTITY_RESOLUTION_TIMEOUT_MS}ms ` +
+      'without confirmed iRacing roster — capabilities.identityResolved will be false. ' +
+      'Cloud should treat driver identities as provisional.'
+    );
+  }
+
+  /**
+   * Log a warning when the live iRacing roster reports a `userName` for a car
+   * number that disagrees with the `iracingName` configured on the
+   * `SessionOperationalConfig.drivers` mapping returned from a prior check-in
+   * (issue #193). Distinct from identityResolved gating because it operates
+   * on the post-checkin session config, which only exists for refresh paths.
+   */
+  private warnOnIdentityMismatch(capabilities: DirectorCapabilities): void {
+    const cfg = this.sessionConfig;
+    if (!cfg?.drivers?.length || !capabilities.drivers?.length) return;
+    const liveByCar = new Map(capabilities.drivers.map(d => [String(d.carNumber), d]));
+    for (const mapping of cfg.drivers) {
+      const live = liveByCar.get(String(mapping.carNumber));
+      if (!live) continue;
+      const expected = (mapping as any).iracingName ?? mapping.displayName;
+      if (!expected) continue;
+      if (typeof expected === 'string' && expected.trim() && live.userName !== expected) {
+        console.warn(
+          `[SessionManager] iRacing identity mismatch on car #${mapping.carNumber}: ` +
+          `live roster reports "${live.userName}" but session is configured for "${expected}". ` +
+          'Cloud Planner will be told identityResolved=false.'
+        );
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+
+  /**
    * Check into the currently selected session with Race Control.
    * Transitions: selected → checked-in (or stays selected on error).
    */
@@ -317,6 +389,15 @@ export class SessionManager extends EventEmitter {
     this.lastError = undefined;
     this.emitStateChanged();
 
+    // Issue #193: defer first check-in until the iRacing roster has had a
+    // chance to stabilise. iRacing's shared memory can expose stale slot data
+    // from the prior session for ~1–2 minutes after a session loads, which
+    // would poison the cloud Planner's templates with the wrong identities.
+    // Skip the wait when the operator explicitly forces check-in.
+    if (!options?.forceCheckin) {
+      await this.awaitIdentityResolved();
+    }
+
     const token = await this.authService.getAccessToken();
     if (!token) {
       this.checkinStatus = 'error';
@@ -326,6 +407,7 @@ export class SessionManager extends EventEmitter {
     }
 
     const capabilities = this.buildCapabilities?.() ?? { extensions: [], connections: {} };
+    this.warnOnIdentityMismatch(capabilities);
     const directorId = configService.getOrCreateDirectorId();
 
     // Always include raceContext — live spec requires it (issue #142).
@@ -526,6 +608,7 @@ export class SessionManager extends EventEmitter {
     }
 
     const capabilities = this.buildCapabilities?.() ?? { extensions: [], connections: {} };
+    this.warnOnIdentityMismatch(capabilities);
 
     // Include raceContext when available so the Planner can scope re-generated
     // templates to the correct session type (issue #142 / racecontrol#319).

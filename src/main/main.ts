@@ -224,6 +224,18 @@ app.on('ready', () => {
     const drivers: { carNumber: string; userName: string; carName: string }[] =
       (driverPayload?.drivers ?? []).map((d: any) => ({ carNumber: d.carNumber, userName: d.userName, carName: d.carName }));
 
+    // Issue #193: identityResolved signals the cloud Planner whether the
+    // captured iRacing roster is trustworthy. The roster is considered resolved
+    // when (a) it is non-empty and (b) it has been stable for at least
+    // IDENTITY_STABILITY_MS without further `iracing.driversChanged` events —
+    // long enough for iRacing to overwrite any stale slot data from the prior
+    // session that the SDK exposes in the first ~1–2 minutes after load.
+    const IDENTITY_STABILITY_MS = 15_000;
+    const stableForMs = extensionHost.getDriversStableForMs();
+    const identityResolved = drivers.length > 0
+      && stableForMs != null
+      && stableForMs >= IDENTITY_STABILITY_MS;
+
     // #192: use extensionHost.getObsScenes() — populated by the obs.scenes event cache
     // maintained in the extension host. Warn when OBS is connected but scenes are empty
     // so regressions are visible in logs without needing to inspect the check-in payload.
@@ -262,6 +274,7 @@ app.on('ready', () => {
       ...(cameraGroups.length > 0 && { cameraGroups }),
       ...(scenes.length > 0 && { scenes }),
       ...(drivers.length > 0 && { drivers }),
+      ...(drivers.length > 0 && { identityResolved }),
     };
   });
   sessionManager.setLocalSequencesGetter(async () => {
