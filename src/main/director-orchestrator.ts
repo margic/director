@@ -80,6 +80,8 @@ export class DirectorOrchestrator extends EventEmitter {
   private currentRaceSessionId: string | null = null;
   /** Last known iRacing state snapshot, updated from iracing.raceStateChanged events. */
   private lastIRacingState: any = null;
+  /** Last known iRacing sessionType — used to detect SESSION_TYPE_CHANGE and re-check-in (#206). */
+  private lastKnownSessionType: string = '';
   /** Synthesizes higher-order narrative events from raw race state history. */
   private readonly raceAnalyzer = new RaceAnalyzer();
 
@@ -126,8 +128,21 @@ export class DirectorOrchestrator extends EventEmitter {
 
       // Cache latest iRacing state for raceContext in sequences/next POST body
       this.eventBus.on('iracing.raceStateChanged', (data: { payload: any }) => {
+        const newSessionType: string = data.payload?.sessionType ?? '';
+        const prevSessionType = this.lastKnownSessionType;
         this.lastIRacingState = data.payload;
         this.raceAnalyzer.update(data.payload);
+
+        // Re-check-in when the iRacing session type changes (e.g. Practice → Race).
+        // Only trigger when both old and new types are known and the Director has an
+        // active check-in, to avoid spurious re-checks on first connect (#206).
+        if (newSessionType && prevSessionType && newSessionType !== prevSessionType && this.sessionManager.getCheckinId()) {
+          console.log(`[DirectorOrchestrator] Session type changed ${prevSessionType} → ${newSessionType}. Re-checking-in.`);
+          this.sessionManager.refreshCheckin().catch(err => {
+            console.warn('[DirectorOrchestrator] Re-check-in on session type change failed:', err);
+          });
+        }
+        if (newSessionType) this.lastKnownSessionType = newSessionType;
       });
     }
 

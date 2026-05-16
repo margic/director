@@ -168,6 +168,36 @@ export function detectOvertakeAndBattle(
   // For each car with a valid position, look at the car directly ahead.
   // Update or create BattleState keyed by battleKey(chaser, leader).
   // -------------------------------------------------------------------------
+
+  // Fix #207 Bug 2: flush all ENGAGED battles as BATTLE_BROKEN when the race
+  // goes to checkered.  state.checkeredFired is set by detectSessionLifecycle
+  // (which runs before this detector), so on the first frame after the flag
+  // we flush once and set checkeredBattlesFlushed to prevent repeat flushes.
+  if (state.checkeredFired && !state.checkeredBattlesFlushed) {
+    state.checkeredBattlesFlushed = true;
+    for (const [, battle] of state.activeBattles) {
+      if (battle.status !== STATUS_ENGAGED) continue;
+      const brokenChaser = carRefFromRoster(state, battle.chaserCarIdx);
+      const brokenLeader = carRefFromRoster(state, battle.leaderCarIdx);
+      if (!brokenChaser || !brokenLeader) continue;
+      const durationSec = Math.round(curr.sessionTime - battle.engagedAt);
+      const checkeredBrokenPayload = {
+        chaserCar:            brokenChaser,
+        leaderCar:            brokenLeader,
+        gapSec:               battle.gapSec,
+        closingRateSecPerLap: battle.closingRateSecPerLap,
+        status:               'BROKEN' as const,
+        role:                 'engager' as const,
+        forPosition:          curr.carIdxPosition[battle.leaderCarIdx],
+        durationSec,
+      };
+      events.push(buildEvent('BATTLE_BROKEN', brokenChaser, checkeredBrokenPayload, opts));
+      events.push(buildEvent('BATTLE_BROKEN', brokenLeader, { ...checkeredBrokenPayload, role: 'engaged' as const }, opts));
+    }
+    state.activeBattles.clear();
+    return events;
+  }
+
   for (let i = 0; i < CAR_COUNT; i++) {
     const currPos = curr.carIdxPosition[i];
     if (currPos <= 1) continue;                        // car is leading (no one ahead)
@@ -283,27 +313,35 @@ export function detectOvertakeAndBattle(
       battle.brokenFrames++;
       battle.gapSec = gap;
 
-      if (battle.brokenFrames >= BATTLE_BROKEN_FRAMES && battle.status === STATUS_ENGAGED) {
-        const brokenCar     = carRefFromRoster(state, i);
-        const brokenChaser  = carRefFromRoster(state, battle.chaserCarIdx);
-        const brokenLeader  = carRefFromRoster(state, battle.leaderCarIdx);
-        if (brokenCar && brokenChaser && brokenLeader) {
-          const brokenLeaderPos = curr.carIdxPosition[battle.leaderCarIdx];
-          const brokenPayload = {
-            chaserCar:            brokenChaser,
-            leaderCar:            brokenLeader,
-            gapSec:               gap,
-            closingRateSecPerLap: battle.closingRateSecPerLap,
-            status:               'BROKEN' as const,
-            role:                 'engager' as const,
-            forPosition:          brokenLeaderPos,
-          };
-          events.push(buildEvent('BATTLE_BROKEN', brokenChaser, brokenPayload, opts));
-          events.push(buildEvent('BATTLE_BROKEN', brokenLeader, {
-            ...brokenPayload,
-            role: 'engaged' as const,
-          }, opts));
+      if (battle.brokenFrames >= BATTLE_BROKEN_FRAMES) {
+        if (battle.status === STATUS_ENGAGED) {
+          // Fix #207 Bug 3: include durationSec computed from engagedAt.
+          const durationSec = Math.round(curr.sessionTime - battle.engagedAt);
+          const brokenCar     = carRefFromRoster(state, i);
+          const brokenChaser  = carRefFromRoster(state, battle.chaserCarIdx);
+          const brokenLeader  = carRefFromRoster(state, battle.leaderCarIdx);
+          if (brokenCar && brokenChaser && brokenLeader) {
+            const brokenLeaderPos = curr.carIdxPosition[battle.leaderCarIdx];
+            const brokenPayload = {
+              chaserCar:            brokenChaser,
+              leaderCar:            brokenLeader,
+              gapSec:               gap,
+              closingRateSecPerLap: battle.closingRateSecPerLap,
+              status:               'BROKEN' as const,
+              role:                 'engager' as const,
+              forPosition:          brokenLeaderPos,
+              durationSec,
+            };
+            events.push(buildEvent('BATTLE_BROKEN', brokenChaser, brokenPayload, opts));
+            events.push(buildEvent('BATTLE_BROKEN', brokenLeader, {
+              ...brokenPayload,
+              role: 'engaged' as const,
+            }, opts));
+          }
         }
+        // Fix #207 Bug 4: also clean up STATUS_CLOSING entries that drifted apart
+        // before becoming ENGAGED — prevents a permanent memory leak and stale
+        // re-engagement behaviour on the next approach.
         state.activeBattles.delete(key);
       }
     }
