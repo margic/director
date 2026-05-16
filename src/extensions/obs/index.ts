@@ -64,7 +64,7 @@ export async function activate(director: ExtensionAPI) {
     // Register Intent: Get Scenes — re-fetches from OBS rather than re-emitting cache.
     director.registerIntentHandler('obs.getScenes', async () => {
         if (connected) {
-            await fetchScenes(director, 0);
+            await fetchScenes(director, 0, true);
         } else {
             director.emitEvent('obs.scenes', { scenes: availableScenes, connected });
         }
@@ -125,8 +125,16 @@ function startReconnect(director: ExtensionAPI) {
     }, 5000);
 }
 
-async function fetchScenes(director: ExtensionAPI, attempt: number): Promise<void> {
+async function fetchScenes(
+    director: ExtensionAPI,
+    attempt: number,
+    emitOnTerminalFailure = false
+): Promise<void> {
     if (!connected || !obs) return;
+    if (attempt === 0 && fetchRetryTimeout) {
+        clearTimeout(fetchRetryTimeout);
+        fetchRetryTimeout = null;
+    }
     try {
         const response = await obs.call('GetSceneList');
         availableScenes = (response.scenes as any[]).map((s: any) => s.sceneName) as string[];
@@ -140,12 +148,19 @@ async function fetchScenes(director: ExtensionAPI, attempt: number): Promise<voi
     } catch (err: any) {
         director.log('error', `Failed to fetch scenes (attempt ${attempt + 1}/${MAX_FETCH_RETRIES}): ${err.message}`);
         if (attempt + 1 < MAX_FETCH_RETRIES && connected) {
+            if (fetchRetryTimeout) {
+                clearTimeout(fetchRetryTimeout);
+                fetchRetryTimeout = null;
+            }
             fetchRetryTimeout = setTimeout(() => {
                 fetchRetryTimeout = null;
-                fetchScenes(director, attempt + 1);
+                fetchScenes(director, attempt + 1, emitOnTerminalFailure);
             }, FETCH_RETRY_DELAY_MS);
         } else {
             director.log('warn', 'Scene fetch failed after all retries; capabilities.scenes will be empty at next check-in.');
+            if (emitOnTerminalFailure) {
+                director.emitEvent('obs.scenes', { scenes: availableScenes, connected });
+            }
         }
     }
 }
