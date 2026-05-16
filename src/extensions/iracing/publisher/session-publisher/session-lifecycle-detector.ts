@@ -118,11 +118,13 @@ export function detectSessionLifecycle(
     if (currState === SESSION_STATE.Racing && (curr.sessionFlags & FLAG_GREEN) !== 0) {
       const startType = prevState === SESSION_STATE.ParadeLaps ? 'rolling' : 'standing';
       events.push(buildEvent('RACE_GREEN', nocar, { startType }, opts));
+      state.raceGreenFired = true;
     }
 
     // RACE_CHECKERED — transition TO Checkered state
-    if (currState === SESSION_STATE.Checkered) {
+    if (currState === SESSION_STATE.Checkered && !state.checkeredFired) {
       events.push(buildEvent('RACE_CHECKERED', nocar, {}, opts));
+      state.checkeredFired = true;
     }
 
     // SESSION_ENDED — transition TO CoolDown
@@ -133,13 +135,14 @@ export function detectSessionLifecycle(
 
   // -------------------------------------------------------------------------
   // RACE_CHECKERED — flag bit fires before/without a state transition
-  // Guard: only emit once; skip if already emitted above via state transition.
+  // Guard: only emit once via the dedicated checkeredFired latch.
   // -------------------------------------------------------------------------
-  const checkeredAlreadyFired = state.lastSessionState >= SESSION_STATE.Checkered;
-  if (!checkeredAlreadyFired && (curr.sessionFlags & FLAG_CHECKERED) !== 0) {
+  if (!state.checkeredFired && (curr.sessionFlags & FLAG_CHECKERED) !== 0) {
+    // Only emit if not already emitted via the state-transition branch above
     const alreadyEmittedViaState = currState === SESSION_STATE.Checkered && prevState !== SESSION_STATE.Checkered;
     if (!alreadyEmittedViaState) {
       events.push(buildEvent('RACE_CHECKERED', nocar, {}, opts));
+      state.checkeredFired = true;
     }
   }
 

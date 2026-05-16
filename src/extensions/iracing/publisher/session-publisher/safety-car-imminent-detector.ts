@@ -53,12 +53,18 @@ export function detectSafetyCarImminent(
   ctx: SafetyCarImminentContext,
 ): PublisherEvent[] {
   const events: PublisherEvent[] = [];
+
+  // #196 pre-green guard — suppress before race has gone green.
+  if (!state.raceGreenFired) return events;
+
   const now = curr.sessionTime;
 
-  // ---- Ingest this tick's STOPPED_ON_TRACK events ----
+  // ---- Ingest this tick's STOPPED_ON_TRACK 'entered' events only ----
   for (const ev of ctx.emittedThisTick) {
     if (ev.type !== 'STOPPED_ON_TRACK') continue;
     const p = ev.payload as StoppedOnTrackPayload;
+    // Only count rising-edge events; ignore 'exited' and 'refresh' kinds.
+    if (p.state === 'exited') continue;
     state.recentStoppedOnTrackEvents.push({
       sessionTime: now,
       carIdx:      ev.car.carIdx,

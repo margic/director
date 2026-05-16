@@ -42,23 +42,58 @@ export function detectLapCompleted(
   const events: PublisherEvent[] = [];
   const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
 
+  // #196 PR-D: build a position→carIdx map for neighbour-interval computation.
+  // We only include cars with a valid position (> 0) and on the same lap or
+  // one lap ahead — cross-lap F2Time values are meaningless (≈ lapTime * lapDelta).
+  const posToCarIdx = new Map<number, number>();
+  for (let j = 0; j < CAR_COUNT; j++) {
+    const pos = curr.carIdxPosition[j];
+    if (pos > 0) posToCarIdx.set(pos, j);
+  }
+
   for (let i = 0; i < CAR_COUNT; i++) {
     const prevLaps = prev.carIdxLapCompleted[i];
     const currLaps = curr.carIdxLapCompleted[i];
 
     if (currLaps > prevLaps) {
       const car = carRefFromRoster(state, i);
-      if (!car) continue;
+
+      const pos = curr.carIdxPosition[i];
+
+      // Compute neighbour intervals using CarIdxF2Time (gap to car ahead) and
+      // by looking up the car behind's F2Time.  Skip cross-lap neighbours to
+      // avoid stale ~90-second values polluting the payload.
+      const aheadIdx  = posToCarIdx.get(pos - 1) ?? -1;
+      const behindIdx = posToCarIdx.get(pos + 1) ?? -1;
+
+      const sameLap = (a: number) =>
+        a >= 0 && curr.carIdxLapCompleted[a] === currLaps;
+
+      const intervalAheadSec  = (sameLap(aheadIdx) && aheadIdx >= 0)
+        ? Math.max(0, curr.carIdxF2Time[i])
+        : undefined;
+      const intervalBehindSec = (sameLap(behindIdx) && behindIdx >= 0)
+        ? Math.max(0, curr.carIdxF2Time[behindIdx])
+        : undefined;
+
+      const carAhead  = aheadIdx  >= 0 && intervalAheadSec  !== undefined
+        ? carRefFromRoster(state, aheadIdx)  : undefined;
+      const carBehind = behindIdx >= 0 && intervalBehindSec !== undefined
+        ? carRefFromRoster(state, behindIdx) : undefined;
 
       events.push(buildEvent(
         'LAP_COMPLETED',
         car,
         {
-          lapNumber:      currLaps,
-          lapTime:        curr.carIdxLastLapTime[i],
-          position:       curr.carIdxPosition[i],
-          classPosition:  curr.carIdxClassPosition[i],
-          gapToLeaderSec: curr.carIdxF2Time[i],
+          lapNumber:          currLaps,
+          lapTime:            curr.carIdxLastLapTime[i],
+          position:           pos,
+          classPosition:      curr.carIdxClassPosition[i],
+          gapToLeaderSec:     curr.carIdxF2Time[i],
+          intervalAheadSec,
+          intervalBehindSec,
+          carAhead,
+          carBehind,
         },
         opts,
       ));

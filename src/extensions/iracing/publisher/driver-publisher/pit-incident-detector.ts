@@ -90,6 +90,7 @@ export function detectPitAndIncidents(
             entryLap:       curr.carIdxLapCompleted[i],
             position:       curr.carIdxPosition[i],
             gapToLeaderSec: curr.carIdxF2Time[i],
+            stopType:       'unknown' as const,
           },
           opts,
         ));

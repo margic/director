@@ -237,6 +237,9 @@ describe('STINT_MILESTONE', () => {
       lapsSinceLastPit: 0, estimatedFuelLapsRemaining: 0, inPitWindow: false,
       classPositionHistory: [], stintLapTimes: [],
       overallPositionHistory: [],
+      pitEntrySessionTime: null, pitStopType: null,
+      stallArrivalSessionTime: null, stallFuelOnEntry: 0,
+      lastIncidentSessionTime: undefined,
     });
 
     // Pit exit frame

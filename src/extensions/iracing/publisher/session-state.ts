@@ -275,6 +275,20 @@ export interface CarState {
   overallPositionHistory: number[];
   /** Stint lap times (seconds) — accumulated since the start of the current stint. */
   stintLapTimes: number[];
+
+  // ---- Pit lifecycle fields (#198 PR-B) ----
+  /** SessionTime when the car entered pit road (PIT_ENTRY edge). Null when off pit road. */
+  pitEntrySessionTime: number | null;
+  /** Race-condition stop type determined at PIT_ENTRY. */
+  pitStopType: 'green' | 'sc' | 'red' | 'unknown' | null;
+  /** SessionTime when the car first stopped in the pit stall (trackSurface 2). */
+  stallArrivalSessionTime: number | null;
+  /** FuelLevel (litres) when the car arrived in the stall (player car only). */
+  stallFuelOnEntry: number;
+
+  // ---- Incident tracking (#201 PR-E) ----
+  /** SessionTime of the most recent INCIDENT emission for this car (-Infinity = never). */
+  lastIncidentSessionTime: number | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -395,6 +409,17 @@ export interface SessionState {
   }>;
   /** sessionTime of the most recent SAFETY_CAR_IMMINENT emission (-Infinity = never). */
   lastSafetyCarImminentEmittedAt: number;
+
+  // ---- #196 fixes ----
+  /** True once RACE_GREEN has been emitted for this session.
+   *  Detectors use this to suppress pre-green state-based emissions
+   *  (STOPPED_ON_TRACK, LAPPED_TRAFFIC_AHEAD, BEING_LAPPED, SAFETY_CAR_IMMINENT). */
+  raceGreenFired: boolean;
+  /** Per-pair count of consecutive frames that a previously-latched traffic pair
+   *  has been above the exit-hysteresis threshold. Keyed like trafficAnnouncements. */
+  trafficExitFrames: Map<string, number>;
+  /** Whether RACE_CHECKERED has been emitted this session (prevents 53x flood). */
+  checkeredFired: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +460,11 @@ function makeDefaultCarState(): CarState {
     classPositionHistory: [],
     overallPositionHistory: [],
     stintLapTimes: [],
+    pitEntrySessionTime: null,
+    pitStopType: null,
+    stallArrivalSessionTime: null,
+    stallFuelOnEntry: 0,
+    lastIncidentSessionTime: undefined,
   };
 }
 
@@ -478,6 +508,9 @@ export function createSessionState(raceSessionId: string, sessionUniqueId: numbe
     lastEngineWarnings: 0,
     recentStoppedOnTrackEvents: [],
     lastSafetyCarImminentEmittedAt: -Infinity,
+    raceGreenFired: false,
+    trafficExitFrames: new Map(),
+    checkeredFired: false,
   };
 }
 
@@ -497,16 +530,25 @@ export function battleKey(carA: number, carB: number): string {
 }
 
 /**
- * Returns a PublisherCarRef for the given carIdx, resolved from the session roster.
- * Returns `undefined` when the car is not yet in the roster so that callers
- * can skip emitting events without class context.
+ * Returns a `PublisherCarRef` for the given carIdx.
+ *
+ * If the roster entry is missing (e.g. the SDK's session YAML hasn't been
+ * parsed yet), a minimal ref carrying only `carIdx` is returned.  Consumers
+ * that need richer identity (name, class) should check whether `driverName`
+ * is present and decide whether to defer the event.  Callers can rely on
+ * this function **never** returning `undefined`, which eliminates the large
+ * number of `if (!carRef) continue` guards that were suppressing events
+ * before the roster was populated (#196 PR-C).
  */
 export function carRefFromRoster(
   state: SessionState,
   carIdx: number,
-): PublisherCarRef | undefined {
+): PublisherCarRef {
   const ref = state.knownRoster.get(carIdx);
-  if (!ref) return undefined;
+  if (!ref) {
+    // Roster not yet populated — return a minimal stub so events are not lost.
+    return { carIdx, carNumber: '', driverName: '', teamName: '', carClassShortName: '', carClassId: 0 };
+  }
   return {
     carIdx,
     carNumber:         ref.carNumber,

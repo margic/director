@@ -21,6 +21,7 @@ const CTX = { rigId: 'rig-01', raceSessionId: 'session-abc' };
 function makeState() {
   const s = createSessionState('session-abc', 1);
   seedRoster(s, ALL_CAR_INDICES);
+  s.raceGreenFired = true;
   return s;
 }
 
@@ -582,7 +583,8 @@ describe('BATTLE_CLOSING', () => {
     f1.sessionTime = 101;
     f1.carIdxF2Time[1] = 1.5;
     const e1 = detect(base, f1, state);
-    expect(e1.filter(e => e.type === 'BATTLE_CLOSING')).toHaveLength(1);
+    // Dual-perspective: both chaser and leader receive BATTLE_CLOSING
+    expect(e1.filter(e => e.type === 'BATTLE_CLOSING')).toHaveLength(2);
 
     const f2 = cloneFrame(f1);
     f2.sessionTime = 102;
@@ -663,17 +665,25 @@ describe('LAPPED_TRAFFIC_AHEAD', () => {
     const state = prime(base);
     detect(base, cloneFrame(base), state);  // first fire, latches la:0-1 / bl:0-1
 
-    // Car 0 moves to 50% of the lap — physGap 0.5 × 90 s = 45 s >> 2 s threshold.
-    const wide = cloneFrame(base);
-    wide.carIdxLapDistPct[0] = 0.5;
-    detect(base, wide, state);
-    expect(state.trafficAnnouncements.has('la:0-1')).toBe(false); // latch cleared
+    // Car 0 moves to 50% of the lap — physGap 0.5 × 90 s = 45 s >> exit threshold.
+    // Hysteresis requires TRAFFIC_EXIT_MIN_FRAMES (2) frames above the exit threshold.
+    const wide1 = cloneFrame(base);
+    wide1.carIdxLapDistPct[0] = 0.5;
+    detect(base, wide1, state);
+    // After 1 frame: latch still held (hysteresis)
+    expect(state.trafficAnnouncements.has('la:0-1')).toBe(true);
+
+    const wide2 = cloneFrame(wide1);
+    wide2.carIdxLapDistPct[0] = 0.5;
+    detect(wide1, wide2, state);
+    // After 2 frames: latch released
+    expect(state.trafficAnnouncements.has('la:0-1')).toBe(false);
     expect(state.trafficAnnouncements.has('bl:0-1')).toBe(false);
 
     // Car 0 moves back close to car 1 (1% of lap ≈ 0.9 s gap).
-    const close = cloneFrame(wide);
+    const close = cloneFrame(wide2);
     close.carIdxLapDistPct[0] = 0.01;
-    const events = detect(wide, close, state);
+    const events = detect(wide2, close, state);
     expect(events.find(e => e.type === 'LAPPED_TRAFFIC_AHEAD')).toBeDefined();
   });
 });

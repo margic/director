@@ -21,6 +21,7 @@ let ctx:   SafetyCarImminentContext;
 beforeEach(() => {
   state = createSessionState('rs-1', 1);
   seedRoster(state, ALL_CAR_INDICES);
+  state.raceGreenFired = true;
   ctx = {
     rigId:           'rig-01',
     raceSessionId:   'rs-1',
