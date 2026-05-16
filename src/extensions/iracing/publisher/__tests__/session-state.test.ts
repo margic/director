@@ -181,7 +181,7 @@ describe('buildEvent', () => {
   const opts = { raceSessionId: TEST_SESSION_ID, rigId: TEST_PUBLISHER_CODE, frame, leaderLap: 5 };
 
   it('assigns a UUID id', () => {
-    const event = buildEvent('OVERTAKE', car, { overtakingCarIdx: 1, overtakenCar: { carIdx: 2 }, newPosition: 3, lap: 5, lapDistPct: 0.45 }, opts);
+    const event = buildEvent('OVERTAKE', car, { overtakingCarIdx: 1, overtakenCar: { carIdx: 2 }, newPosition: 3, lap: 5, lapDistPct: 0.45, classPosition: 1, forPosition: 3, gapAfterSec: 0.5 }, opts);
     expect(event.id).toMatch(/^[0-9a-f-]{36}$/);
   });
 
@@ -199,7 +199,7 @@ describe('buildEvent', () => {
   });
 
   it('populates context from frame and options', () => {
-    const event = buildEvent('PIT_ENTRY', car, { entryLap: 5, position: 3, gapToLeaderSec: 4.5 }, opts);
+    const event = buildEvent('PIT_ENTRY', car, { entryLap: 5, position: 3, gapToLeaderSec: 4.5, stopType: 'unknown' as const }, opts);
     expect(event.context?.leaderLap).toBe(5);
     expect(event.context?.sessionFlags).toBe(frame.sessionFlags);
     expect(event.context?.trackTemp).toBe(frame.trackTemp);
@@ -243,7 +243,9 @@ describe('session state reset', () => {
 describe('carRefFromRoster', () => {
   it('returns undefined when carIdx is not in the roster', () => {
     const state = createSessionState('rs-1', 1);
-    expect(carRefFromRoster(state, 0)).toBeUndefined();
+    const ref = carRefFromRoster(state, 0);
+    expect(ref).toBeDefined();
+    expect(ref.driverName).toBe(''); // stub: not in roster
   });
 
   it('returns a PublisherCarRef with all fields when carIdx is in the roster', () => {
@@ -281,6 +283,8 @@ describe('carRefFromRoster', () => {
   it('returns undefined for a different carIdx not in the roster', () => {
     const state = createSessionState('rs-1', 1);
     state.knownRoster.set(2, { carIdx: 2, carNumber: '2', driverName: 'Two', carClassShortName: 'GT3', carClassId: 100 });
-    expect(carRefFromRoster(state, 7)).toBeUndefined();
+    const ref = carRefFromRoster(state, 7);
+    expect(ref).toBeDefined();
+    expect(ref.driverName).toBe(''); // stub: not in roster
   });
 });

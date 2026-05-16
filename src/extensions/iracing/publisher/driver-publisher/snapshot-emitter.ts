@@ -85,8 +85,8 @@ export function buildSnapshot(
   ctx: SnapshotEmitContext,
   reason: 'cadence' | 'forced',
 ): PublisherEvent | null {
+  if (!state.knownRoster.has(ctx.playerCarIdx)) return null;
   const carRef = carRefFromRoster(state, ctx.playerCarIdx);
-  if (!carRef) return null;
 
   const payload = buildSnapshotPayload(frame, state, driverState, ctx, reason);
 

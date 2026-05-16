@@ -246,6 +246,7 @@ describe('RACE_CHECKERED — via flag bit (state unchanged)', () => {
   it('does NOT emit duplicate RACE_CHECKERED once state is already Checkered', () => {
     const state = makeState();
     state.lastSessionState = SessionStateEnum.Checkered; // already fired
+    state.checkeredFired = true;
     const prev = makeFrame({ sessionState: SessionStateEnum.Checkered, sessionFlags: FlagBits.Checkered });
     const curr = makeFrame({ sessionState: SessionStateEnum.Checkered, sessionFlags: FlagBits.Checkered });
     const events = detect(prev, curr, state);

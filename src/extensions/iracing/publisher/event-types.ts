@@ -113,7 +113,9 @@ export type PublisherEventType =
   | 'OVERALL_POSITION_GAIN'
   // §5 Pit & strategy
   | 'PIT_ENTRY'
+  | 'PIT_STATIONARY'
   | 'PIT_STOP_BEGIN'
+  | 'PIT_STOP_COMPLETED'
   | 'PIT_STOP_END'
   | 'PIT_EXIT'
   | 'FUEL_LEVEL_CHANGE'
@@ -137,7 +139,10 @@ export type PublisherEventType =
   /** Composite — player climbs ≥2 positions within 60s after an incident (#181). */
   | 'RECOVERY_DRIVE'
   /** Session-publisher — ≥3 STOPPED_ON_TRACK in 30s OR ≥2 in same sector (#181). */
-  | 'SAFETY_CAR_IMMINENT'  // §7 Identity & roster (edge-authoritative)
+  | 'SAFETY_CAR_IMMINENT'
+  /** Session-wide incident — off-track, contact, or loss-of-control for any car (#196). */
+  | 'INCIDENT'
+  // §7 Identity & roster (edge-authoritative)
   | 'IDENTITY_RESOLVED'
   | 'IDENTITY_OVERRIDE_CHANGED'
   | 'DRIVER_SWAP_INITIATED'
@@ -244,9 +249,13 @@ export interface EventPayloadMap {
   // §5 Pit & strategy
   /** iRacing source: CarIdxOnPitRoad false→true */
   PIT_ENTRY: PitEntryPayload;
-  /** iRacing source: CarIdxTrackSurface == 2 (in pit stall) */
+  /** iRacing source: CarIdxTrackSurface == 2 (car stationary in stall) */
+  PIT_STATIONARY: PitStationaryPayload;
+  /** iRacing source: CarIdxTrackSurface == 2 (in pit stall) — player-car detail */
   PIT_STOP_BEGIN: PitStopBeginPayload;
-  /** iRacing source: leaving stall */
+  /** iRacing source: car leaves stall after service */
+  PIT_STOP_COMPLETED: PitStopCompletedPayload;
+  /** iRacing source: leaving stall — player-car detail */
   PIT_STOP_END: PitStopEndPayload;
   /** iRacing source: CarIdxOnPitRoad true→false */
   PIT_EXIT: PitExitPayload;
@@ -282,6 +291,8 @@ export interface EventPayloadMap {
   RECOVERY_DRIVE: RecoveryDrivePayload;
   /** Session-publisher (#181) — cluster of stopped cars predicting yellow. */
   SAFETY_CAR_IMMINENT: SafetyCarImminentPayload;
+  /** Session-wide incident — off-track, contact, or loss-of-control (#196). */
+  INCIDENT: IncidentPayload;
 
   // §7 Identity
   IDENTITY_RESOLVED: IdentityResolvedPayload;
@@ -375,6 +386,12 @@ export interface LapCompletedPayload {
   classPosition: number;
   /** iRacing source: CarIdxF2Time — gap to leader in seconds */
   gapToLeaderSec: number;
+  /** Seconds to the car immediately ahead in running order (same lap only). Omitted for cross-lap neighbours. */
+  intervalAheadSec?: number;
+  /** Seconds to the car immediately behind in running order (same lap only). */
+  intervalBehindSec?: number;
+  carAhead?: PublisherCarRef;
+  carBehind?: PublisherCarRef;
 }
 
 export interface PersonalBestLapPayload {
@@ -425,6 +442,12 @@ export interface OvertakePayload {
   lap: number;
   /** Fraction of lap where pass occurred — iRacing: CarIdxLapDistPct */
   lapDistPct: number;
+  /** Class position of the overtaking car after the pass. */
+  classPosition: number;
+  /** Overall position being contested (== newPosition). */
+  forPosition: number;
+  /** Gap to the new car immediately ahead after the pass (CarIdxF2Time). */
+  gapAfterSec: number;
 }
 
 export interface PositionChangePayload {
@@ -442,6 +465,10 @@ export interface BattlePayload {
   gapSec: number;
   closingRateSecPerLap: number;
   status: 'ENGAGED' | 'CLOSING' | 'BROKEN';
+  /** Perspective: 'engager' when envelope.car === chaser; 'engaged' when envelope.car === leader. */
+  role: 'engager' | 'engaged';
+  /** Overall position being contested (position of the leader car). */
+  forPosition: number;
 }
 
 export interface TrafficPayload {
@@ -450,11 +477,20 @@ export interface TrafficPayload {
   lappedCar?: PublisherCarRef;
   /** Self-describing ref for the lapping car — populated on BEING_LAPPED only. */
   lappingCar?: PublisherCarRef;
+  /** Edge discriminator. 'entered' on initial proximity; 'exited' on hysteresis release. */
+  state?: 'entered' | 'exited';
+  /** 'edge' for the rising/falling edge, 'refresh' for periodic re-emission. Consumers
+   *  can safely ignore events with kind === 'refresh' if RU cost is a concern. */
+  kind?: 'edge' | 'refresh';
 }
 
 export interface StoppedOnTrackPayload {
   lapDistPct: number;
   stoppedDurationSec: number;
+  /** Edge discriminator. 'entered' when the car first stops; 'exited' when it starts moving. */
+  state?: 'entered' | 'exited';
+  /** 'edge' for the transition, 'refresh' for a periodic reminder while still stopped. */
+  kind?: 'edge' | 'refresh';
 }
 
 // §5 Pit & strategy
@@ -463,6 +499,14 @@ export interface PitEntryPayload {
   entryLap: number;
   position: number;
   gapToLeaderSec: number;
+  /** Gap to the car immediately ahead at the moment of pit entry. */
+  gapToCarAheadSec?: number;
+  /** Gap from the car immediately behind at the moment of pit entry. */
+  gapToCarBehindSec?: number;
+  carAhead?: PublisherCarRef;
+  carBehind?: PublisherCarRef;
+  /** Race condition at entry (from SessionFlags). */
+  stopType: 'green' | 'sc' | 'red' | 'unknown';
 }
 
 export interface PitStopBeginPayload {
@@ -477,10 +521,36 @@ export interface PitStopEndPayload {
   fuelLevelDelta: number;
 }
 
+/** PIT_STATIONARY — car is stationary in the pit stall (trackSurface === 2). */
+export interface PitStationaryPayload {
+  /** SessionTime when the car arrived in the stall. */
+  arrivalSessionTime: number;
+  /** FuelLevel at stall arrival (player car only — 0 for other cars). */
+  fuelLevelOnEntry: number;
+}
+
+/** PIT_STOP_COMPLETED — car is leaving the pit stall after service. */
+export interface PitStopCompletedPayload {
+  /** Milliseconds the car was stationary in the stall. */
+  stationaryMs: number;
+  /** Race condition at entry. */
+  stopType: 'green' | 'sc' | 'red' | 'unknown';
+  /** Fuel added in litres (player car only — 0 for other cars). */
+  fuelAdded: number;
+  /** Whether tires were changed (player car only — false for other cars). */
+  tiresChanged: boolean;
+  /** CarIdxPosition at stall exit. */
+  exitPosition: number;
+  /** Gap (seconds) to the car immediately ahead at stall exit. */
+  deltaVsCarAheadSec?: number;
+}
+
 export interface PitExitPayload {
   exitLap: number;
   newPosition: number;
   positionsLost: number;
+  /** Gap (seconds) to the car that was immediately ahead at pit entry. */
+  deltaVsPreviousNeighbourSec?: number;
 }
 
 export interface FuelLevelChangePayload {
@@ -524,6 +594,31 @@ export interface IncidentLimitWarningPayload {
   thresholdPercent: number;
   currentCount: number;
   incidentLimit: number;
+}
+
+/**
+ * INCIDENT — session-wide incident for any car (#196).
+ *
+ * Emitted by the session-publisher incident detector on:
+ *   - any car going off-track (trackSurface === -1 edge)
+ *   - kinematic discontinuity consistent with loss-of-control / spin
+ *   - two-car proximity contact (both show kinematic discontinuity)
+ *
+ * For the player car, also emitted as a companion to INCIDENT_POINT
+ * with severity derived from the incident-point delta.
+ */
+export interface IncidentPayload {
+  severity: 'light' | 'moderate' | 'severe';
+  type: 'OFF_TRACK' | 'CONTACT' | 'LOSS_OF_CONTROL' | 'SPIN';
+  lap: number;
+  /** Fraction along the lap (0.0–1.0). */
+  lapDistPct: number;
+  /** Approximate track sector (0–2) derived from lapDistPct. */
+  sector: 0 | 1 | 2;
+  /** iRacing CarIdxTrackSurface enum value at the trigger frame. */
+  trackSurface: number;
+  /** Other car involved when type === 'CONTACT'. */
+  otherCar?: PublisherCarRef;
 }
 
 // §7 Identity & roster
@@ -575,6 +670,9 @@ export const HIGH_PRIORITY_EVENTS = new Set<PublisherEventType>([
   'FLAG_RED',
   'FLAG_YELLOW_FULL_COURSE',
   'INCIDENT_LIMIT_WARNING',
+  'INCIDENT',
+  'PIT_ENTRY',
+  'PIT_EXIT',
 ]);
 
 // ---------------------------------------------------------------------------

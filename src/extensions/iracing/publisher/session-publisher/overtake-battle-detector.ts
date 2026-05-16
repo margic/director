@@ -42,6 +42,10 @@ const FALLBACK_LAP_TIME_SEC = 90;
 /** Gap (seconds of CarIdxF2Time) below which a chaser is treated as "at"
  * another car for lapped-traffic purposes. Roughly 100m at 50 m/s (~180 kph). */
 const TRAFFIC_PROXIMITY_GAP_SEC = 2.0;
+/** Exit threshold: latch is only released once the pair is this far apart (#196 hysteresis). */
+const TRAFFIC_EXIT_GAP_SEC = 3.5;
+/** Consecutive frames above TRAFFIC_EXIT_GAP_SEC before releasing the traffic latch. */
+const TRAFFIC_EXIT_MIN_FRAMES = 2;
 /** Consecutive session seconds without lapDistPct movement required before
  * STOPPED_ON_TRACK fires. */
 const STOPPED_ON_TRACK_MIN_DURATION_SEC = 2.0;
@@ -132,12 +136,16 @@ export function detectOvertakeAndBattle(
     const overtakenCar  = carRefFromRoster(state, displaced);
     if (!overtakeCar || !overtakenCar) continue;
 
+    const currClassPos = curr.carIdxClassPosition[i];
     const overtakePayload = {
       overtakingCarIdx: i,
       overtakenCar,
       newPosition:      currPos,
       lap:              curr.carIdxLapCompleted[i],
       lapDistPct:       curr.carIdxLapDistPct[i],
+      classPosition:    currClassPos,
+      forPosition:      currPos,
+      gapAfterSec:      Math.max(0, curr.carIdxF2Time[i]),
     };
 
     events.push(buildEvent('OVERTAKE', overtakeCar, overtakePayload, opts));
@@ -148,10 +156,7 @@ export function detectOvertakeAndBattle(
     }
 
     // Tier 2 (#97): OVERTAKE_FOR_CLASS — chaser just took the class lead.
-    // We emit this in addition to OVERTAKE_FOR_LEAD so a "lead for overall and
-    // class" pass produces all three (OVERTAKE, OVERTAKE_FOR_LEAD, OVERTAKE_FOR_CLASS).
     const prevClassPos = prev.carIdxClassPosition[i];
-    const currClassPos = curr.carIdxClassPosition[i];
     if (currClassPos === 1 && prevClassPos > 1) {
       events.push(buildEvent('OVERTAKE_FOR_CLASS', overtakeCar, overtakePayload, opts));
     }
@@ -205,18 +210,23 @@ export function detectOvertakeAndBattle(
         const engagedCar = carRefFromRoster(state, i);
         const leaderCarRef = carRefFromRoster(state, leaderIdx);
         if (engagedCar && leaderCarRef) {
-          events.push(buildEvent(
-            'BATTLE_ENGAGED',
-            engagedCar,
-            {
-              chaserCar:             engagedCar,
-              leaderCar:             leaderCarRef,
-              gapSec:                gap,
-              closingRateSecPerLap:  closingRate,
-              status:                STATUS_ENGAGED,
-            },
-            opts,
-          ));
+          const leaderPos = curr.carIdxPosition[leaderIdx];
+          const engagedPayload = {
+            chaserCar:            engagedCar,
+            leaderCar:            leaderCarRef,
+            gapSec:               gap,
+            closingRateSecPerLap: closingRate,
+            status:               STATUS_ENGAGED,
+            role:                 'engager' as const,
+            forPosition:          leaderPos,
+          };
+          // Engager perspective (chaser is the envelope car)
+          events.push(buildEvent('BATTLE_ENGAGED', engagedCar, engagedPayload, opts));
+          // Engaged perspective (leader is the envelope car)
+          events.push(buildEvent('BATTLE_ENGAGED', leaderCarRef, {
+            ...engagedPayload,
+            role: 'engaged' as const,
+          }, opts));
         }
       } else {
         // Already ENGAGED — keep stats fresh, reset broken counter
@@ -242,18 +252,21 @@ export function detectOvertakeAndBattle(
           const closingCar = carRefFromRoster(state, i);
           const closingLeaderRef = carRefFromRoster(state, leaderIdx);
           if (closingCar && closingLeaderRef) {
-            events.push(buildEvent(
-              'BATTLE_CLOSING',
-              closingCar,
-              {
-                chaserCar:             closingCar,
-                leaderCar:             closingLeaderRef,
-                gapSec:                gap,
-                closingRateSecPerLap:  closingRatePerLap,
-                status:                'CLOSING',
-              },
-              opts,
-            ));
+            const closingLeaderPos = curr.carIdxPosition[leaderIdx];
+            const closingPayload = {
+              chaserCar:            closingCar,
+              leaderCar:            closingLeaderRef,
+              gapSec:               gap,
+              closingRateSecPerLap: closingRatePerLap,
+              status:               'CLOSING' as const,
+              role:                 'engager' as const,
+              forPosition:          closingLeaderPos,
+            };
+            events.push(buildEvent('BATTLE_CLOSING', closingCar, closingPayload, opts));
+            events.push(buildEvent('BATTLE_CLOSING', closingLeaderRef, {
+              ...closingPayload,
+              role: 'engaged' as const,
+            }, opts));
             battle.closingAnnounced     = true;
             battle.closingRateSecPerLap = closingRatePerLap;
           }
@@ -275,18 +288,21 @@ export function detectOvertakeAndBattle(
         const brokenChaser  = carRefFromRoster(state, battle.chaserCarIdx);
         const brokenLeader  = carRefFromRoster(state, battle.leaderCarIdx);
         if (brokenCar && brokenChaser && brokenLeader) {
-          events.push(buildEvent(
-            'BATTLE_BROKEN',
-            brokenCar,
-            {
-              chaserCar:             brokenChaser,
-              leaderCar:             brokenLeader,
-              gapSec:                gap,
-              closingRateSecPerLap:  battle.closingRateSecPerLap,
-              status:                'BROKEN',
-            },
-            opts,
-          ));
+          const brokenLeaderPos = curr.carIdxPosition[battle.leaderCarIdx];
+          const brokenPayload = {
+            chaserCar:            brokenChaser,
+            leaderCar:            brokenLeader,
+            gapSec:               gap,
+            closingRateSecPerLap: battle.closingRateSecPerLap,
+            status:               'BROKEN' as const,
+            role:                 'engager' as const,
+            forPosition:          brokenLeaderPos,
+          };
+          events.push(buildEvent('BATTLE_BROKEN', brokenChaser, brokenPayload, opts));
+          events.push(buildEvent('BATTLE_BROKEN', brokenLeader, {
+            ...brokenPayload,
+            role: 'engaged' as const,
+          }, opts));
         }
         state.activeBattles.delete(key);
       }
@@ -311,156 +327,237 @@ export function detectOvertakeAndBattle(
   //   BEING_LAPPED         — from the lapped car's perspective (fewer laps)
   //
   // Latched per pair via state.trafficAnnouncements using prefixed keys:
-  //   'la:<pairKey>'  — LAPPED_TRAFFIC_AHEAD announced
-  //   'bl:<pairKey>'  — BEING_LAPPED announced
-  // Both are cleared when the cars move more than TRAFFIC_PROXIMITY_GAP_SEC
-  // apart physically.
-  // -------------------------------------------------------------------------
-  const seenTrafficPairs = new Set<string>();
-
-  for (let i = 0; i < CAR_COUNT; i++) {
-    if (curr.carIdxPosition[i] <= 0) continue;
-    if (curr.carIdxOnPitRoad[i] !== 0) continue;
-    const lapI = curr.carIdxLapCompleted[i];
-    const pctI = curr.carIdxLapDistPct[i];
-
-    for (let j = i + 1; j < CAR_COUNT; j++) {
-      if (curr.carIdxPosition[j] <= 0) continue;
-      if (curr.carIdxOnPitRoad[j] !== 0) continue;
-      const lapJ = curr.carIdxLapCompleted[j];
-
-      // Only interested in cars on different laps.
-      if (lapI === lapJ) continue;
-
-      const pctJ = curr.carIdxLapDistPct[j];
-
-      // Physical track gap as a fraction of the lap, normalised to [−0.5, 0.5]
-      // so that the start/finish line wrap-around is handled correctly.
-      let physDiff = pctI - pctJ;
-      if (physDiff >  0.5) physDiff -= 1.0;
-      if (physDiff < -0.5) physDiff += 1.0;
-
-      // Convert fractional gap to approximate seconds using the last known
-      // lap time (fall back to FALLBACK_LAP_TIME_SEC when unavailable).
-      const lapRef =
-        curr.carIdxLastLapTime[i] > 0 ? curr.carIdxLastLapTime[i] :
-        curr.carIdxLastLapTime[j] > 0 ? curr.carIdxLastLapTime[j] :
-        FALLBACK_LAP_TIME_SEC;
-      const gapSec = Math.abs(physDiff) * lapRef;
-
-      if (gapSec > TRAFFIC_PROXIMITY_GAP_SEC) continue;
-
-      // Determine which car is lapping (more completed laps) and which is
-      // being lapped (fewer completed laps).
-      const lapperIdx = lapI > lapJ ? i : j;
-      const lappedIdx  = lapI > lapJ ? j : i;
-
-      const pairKey = battleKey(lapperIdx, lappedIdx);
-      const laKey   = `la:${pairKey}`;
-      const blKey   = `bl:${pairKey}`;
-      seenTrafficPairs.add(laKey);
-      seenTrafficPairs.add(blKey);
-
-      // Approximate distance in metres at a nominal 50 m/s racing pace.
-      const approxDistanceMeters = Math.round(gapSec * 50);
-
-      // LAPPED_TRAFFIC_AHEAD — fired from the lapper's perspective.
-      if (!state.trafficAnnouncements.has(laKey)) {
-        const lapperCar   = carRefFromRoster(state, lapperIdx);
-        const lappedCar   = carRefFromRoster(state, lappedIdx);
-        if (lapperCar && lappedCar) {
-          events.push(buildEvent(
-            'LAPPED_TRAFFIC_AHEAD',
-            lapperCar,
-            {
-              lappedCar,
-              distanceMeters: approxDistanceMeters,
-            },
-            opts,
-          ));
-          state.trafficAnnouncements.set(laKey, 'LAPPED_AHEAD');
-        }
-      }
-
-      // BEING_LAPPED — fired from the lapped car's perspective.
-      if (!state.trafficAnnouncements.has(blKey)) {
-        const lappedCar   = carRefFromRoster(state, lappedIdx);
-        const lappingCar  = carRefFromRoster(state, lapperIdx);
-        if (lappedCar && lappingCar) {
-          events.push(buildEvent(
-            'BEING_LAPPED',
-            lappedCar,
-            {
-              lappingCar,
-              distanceMeters: approxDistanceMeters,
-            },
-            opts,
-          ));
-          state.trafficAnnouncements.set(blKey, 'BEING_LAPPED');
-        }
-      }
-    }
-  }
-
-  // Clear traffic announcements for pairs that are no longer physically close.
-  for (const key of Array.from(state.trafficAnnouncements.keys())) {
-    if (!seenTrafficPairs.has(key)) {
-      state.trafficAnnouncements.delete(key);
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Step 5: STOPPED_ON_TRACK (#97)
+  //   'la:<pairKey>'  — LAPPED_TRAFFIC_AHEAD announced (entered)
+  //   'bl:<pairKey>'  — BEING_LAPPED announced (entered)
   //
-  // A car is considered stopped when its lapDistPct has not changed by more
-  // than STOPPED_MOVEMENT_EPSILON AND it is off pit road. Once that state has
-  // persisted for STOPPED_ON_TRACK_MIN_DURATION_SEC, fire the event once.
+  // #196 hysteresis: latches are only released after TRAFFIC_EXIT_MIN_FRAMES
+  // consecutive frames above TRAFFIC_EXIT_GAP_SEC (not TRAFFIC_PROXIMITY_GAP_SEC).
+  // A 'exited' event is emitted when the latch releases.
+  //
+  // #196 pre-green guard: Step 4 and Step 5 are skipped before RACE_GREEN.
   // -------------------------------------------------------------------------
-  for (let i = 0; i < CAR_COUNT; i++) {
-    const cs = getOrCreateCarState(state, i);
-    const onPit = curr.carIdxOnPitRoad[i] !== 0;
-    const currPos = curr.carIdxPosition[i];
+  if (state.raceGreenFired) {
+    const seenTrafficPairs = new Set<string>();
 
-    if (onPit || currPos <= 0) {
-      cs.stoppedStartSessionTime = null;
-      cs.isStoppedOnTrack = false;
-      continue;
-    }
+    for (let i = 0; i < CAR_COUNT; i++) {
+      if (curr.carIdxPosition[i] <= 0) continue;
+      if (curr.carIdxOnPitRoad[i] !== 0) continue;
+      const lapI = curr.carIdxLapCompleted[i];
+      const pctI = curr.carIdxLapDistPct[i];
 
-    const prevPct = prev.carIdxLapDistPct[i];
-    const currPct = curr.carIdxLapDistPct[i];
-    const moved   = Math.abs(currPct - prevPct) > STOPPED_MOVEMENT_EPSILON;
+      for (let j = i + 1; j < CAR_COUNT; j++) {
+        if (curr.carIdxPosition[j] <= 0) continue;
+        if (curr.carIdxOnPitRoad[j] !== 0) continue;
+        const lapJ = curr.carIdxLapCompleted[j];
 
-    if (moved) {
-      cs.stoppedStartSessionTime = null;
-      cs.isStoppedOnTrack = false;
-      continue;
-    }
+        // Only interested in cars on different laps.
+        if (lapI === lapJ) continue;
 
-    if (cs.stoppedStartSessionTime === null) {
-      // The car was not moving between prev and curr, so the stop began at
-      // prev.sessionTime at the latest. Seed from prev so the duration check
-      // below includes the window we've just observed.
-      cs.stoppedStartSessionTime = prev.sessionTime;
-    }
+        const pctJ = curr.carIdxLapDistPct[j];
 
-    const stoppedFor = curr.sessionTime - cs.stoppedStartSessionTime;
-    if (stoppedFor >= STOPPED_ON_TRACK_MIN_DURATION_SEC && !cs.isStoppedOnTrack) {
-      const stoppedCar = carRefFromRoster(state, i);
-      if (stoppedCar) {
-        cs.isStoppedOnTrack = true;
-        events.push(buildEvent(
-          'STOPPED_ON_TRACK',
-          stoppedCar,
-          {
-            lapDistPct:         currPct,
-            stoppedDurationSec: stoppedFor,
-          },
-          opts,
-        ));
+        // Physical track gap as a fraction of the lap, normalised to [−0.5, 0.5]
+        // so that the start/finish line wrap-around is handled correctly.
+        let physDiff = pctI - pctJ;
+        if (physDiff >  0.5) physDiff -= 1.0;
+        if (physDiff < -0.5) physDiff += 1.0;
+
+        // Convert fractional gap to approximate seconds using the last known
+        // lap time (fall back to FALLBACK_LAP_TIME_SEC when unavailable).
+        const lapRef =
+          curr.carIdxLastLapTime[i] > 0 ? curr.carIdxLastLapTime[i] :
+          curr.carIdxLastLapTime[j] > 0 ? curr.carIdxLastLapTime[j] :
+          FALLBACK_LAP_TIME_SEC;
+        const gapSec = Math.abs(physDiff) * lapRef;
+
+        // Determine which car is lapping (more completed laps) and which is
+        // being lapped (fewer completed laps).
+        const lapperIdx = lapI > lapJ ? i : j;
+        const lappedIdx  = lapI > lapJ ? j : i;
+
+        const pairKey = battleKey(lapperIdx, lappedIdx);
+        const laKey   = `la:${pairKey}`;
+        const blKey   = `bl:${pairKey}`;
+
+        // Approximate distance in metres at a nominal 50 m/s racing pace.
+        const approxDistanceMeters = Math.round(gapSec * 50);
+
+        if (gapSec <= TRAFFIC_PROXIMITY_GAP_SEC) {
+          seenTrafficPairs.add(laKey);
+          seenTrafficPairs.add(blKey);
+          // Reset any exit-hysteresis counter since the pair is within range again.
+          state.trafficExitFrames.delete(laKey);
+          state.trafficExitFrames.delete(blKey);
+
+          // LAPPED_TRAFFIC_AHEAD — fired from the lapper's perspective.
+          if (!state.trafficAnnouncements.has(laKey)) {
+            const lapperCar = carRefFromRoster(state, lapperIdx);
+            const lappedCar = carRefFromRoster(state, lappedIdx);
+            if (lapperCar && lappedCar) {
+              events.push(buildEvent(
+                'LAPPED_TRAFFIC_AHEAD',
+                lapperCar,
+                { lappedCar, distanceMeters: approxDistanceMeters, state: 'entered', kind: 'edge' },
+                opts,
+              ));
+              state.trafficAnnouncements.set(laKey, 'LAPPED_AHEAD');
+            }
+          }
+
+          // BEING_LAPPED — fired from the lapped car's perspective.
+          if (!state.trafficAnnouncements.has(blKey)) {
+            const lappedCar  = carRefFromRoster(state, lappedIdx);
+            const lappingCar = carRefFromRoster(state, lapperIdx);
+            if (lappedCar && lappingCar) {
+              events.push(buildEvent(
+                'BEING_LAPPED',
+                lappedCar,
+                { lappingCar, distanceMeters: approxDistanceMeters, state: 'entered', kind: 'edge' },
+                opts,
+              ));
+              state.trafficAnnouncements.set(blKey, 'BEING_LAPPED');
+            }
+          }
+        }
+        // If gapSec > TRAFFIC_EXIT_GAP_SEC the hysteresis cleanup below handles exit.
       }
     }
-  }
+
+    // -----------------------------------------------------------------------
+    // Hysteresis-based exit: release latches that have been above the exit
+    // threshold for TRAFFIC_EXIT_MIN_FRAMES consecutive frames.
+    // -----------------------------------------------------------------------
+    for (const [key] of Array.from(state.trafficAnnouncements.entries())) {
+      if (seenTrafficPairs.has(key)) continue; // still within enter range — keep
+
+      const n = (state.trafficExitFrames.get(key) ?? 0) + 1;
+      if (n >= TRAFFIC_EXIT_MIN_FRAMES) {
+        // Emit an 'exited' edge event before releasing the latch.
+        const isLa = key.startsWith('la:');
+        const pairKeyRaw = key.slice(3);
+        const [aStr, bStr] = pairKeyRaw.split('-');
+        const lapperIdx2 = isLa ? parseInt(aStr, 10) : parseInt(bStr, 10);
+        const lappedIdx2 = isLa ? parseInt(bStr, 10) : parseInt(aStr, 10);
+
+        if (isLa) {
+          const lapperCar = carRefFromRoster(state, lapperIdx2);
+          const lappedCar = carRefFromRoster(state, lappedIdx2);
+          if (lapperCar && lappedCar) {
+            events.push(buildEvent(
+              'LAPPED_TRAFFIC_AHEAD',
+              lapperCar,
+              { lappedCar, distanceMeters: 0, state: 'exited', kind: 'edge' },
+              opts,
+            ));
+          }
+        } else {
+          const lappedCar  = carRefFromRoster(state, lappedIdx2);
+          const lappingCar = carRefFromRoster(state, lapperIdx2);
+          if (lappedCar && lappingCar) {
+            events.push(buildEvent(
+              'BEING_LAPPED',
+              lappedCar,
+              { lappingCar, distanceMeters: 0, state: 'exited', kind: 'edge' },
+              opts,
+            ));
+          }
+        }
+
+        state.trafficAnnouncements.delete(key);
+        state.trafficExitFrames.delete(key);
+      } else {
+        state.trafficExitFrames.set(key, n);
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // Step 5: STOPPED_ON_TRACK (#97)
+    //
+    // A car is considered stopped when its lapDistPct has not changed by more
+    // than STOPPED_MOVEMENT_EPSILON AND it is off pit road. Once that state has
+    // persisted for STOPPED_ON_TRACK_MIN_DURATION_SEC, fire once on entry and
+    // once on exit. Pre-green guard: only runs after raceGreenFired.
+    // -------------------------------------------------------------------------
+    for (let i = 0; i < CAR_COUNT; i++) {
+      const cs = getOrCreateCarState(state, i);
+      const onPit = curr.carIdxOnPitRoad[i] !== 0;
+      const currPos = curr.carIdxPosition[i];
+
+      if (onPit || currPos <= 0) {
+        if (cs.isStoppedOnTrack) {
+          // Car entered pit road — emit exit
+          const stoppedCar = carRefFromRoster(state, i);
+          if (stoppedCar) {
+            events.push(buildEvent(
+              'STOPPED_ON_TRACK',
+              stoppedCar,
+              {
+                lapDistPct:         cs.lapDistPct,
+                stoppedDurationSec: cs.stoppedStartSessionTime !== null
+                  ? curr.sessionTime - cs.stoppedStartSessionTime : 0,
+                state: 'exited',
+                kind:  'edge',
+              },
+              opts,
+            ));
+          }
+        }
+        cs.stoppedStartSessionTime = null;
+        cs.isStoppedOnTrack = false;
+        continue;
+      }
+
+      const prevPct = prev.carIdxLapDistPct[i];
+      const currPct = curr.carIdxLapDistPct[i];
+      const moved   = Math.abs(currPct - prevPct) > STOPPED_MOVEMENT_EPSILON;
+
+      if (moved) {
+        if (cs.isStoppedOnTrack) {
+          // Car started moving — emit exited edge
+          const stoppedCar = carRefFromRoster(state, i);
+          if (stoppedCar) {
+            events.push(buildEvent(
+              'STOPPED_ON_TRACK',
+              stoppedCar,
+              {
+                lapDistPct:         currPct,
+                stoppedDurationSec: cs.stoppedStartSessionTime !== null
+                  ? curr.sessionTime - cs.stoppedStartSessionTime : 0,
+                state: 'exited',
+                kind:  'edge',
+              },
+              opts,
+            ));
+          }
+          cs.isStoppedOnTrack = false;
+        }
+        cs.stoppedStartSessionTime = null;
+        continue;
+      }
+
+      if (cs.stoppedStartSessionTime === null) {
+        cs.stoppedStartSessionTime = prev.sessionTime;
+      }
+
+      const stoppedFor = curr.sessionTime - cs.stoppedStartSessionTime;
+      if (stoppedFor >= STOPPED_ON_TRACK_MIN_DURATION_SEC && !cs.isStoppedOnTrack) {
+        const stoppedCar = carRefFromRoster(state, i);
+        if (stoppedCar) {
+          cs.isStoppedOnTrack = true;
+          events.push(buildEvent(
+            'STOPPED_ON_TRACK',
+            stoppedCar,
+            {
+              lapDistPct:         currPct,
+              stoppedDurationSec: stoppedFor,
+              state: 'entered',
+              kind:  'edge',
+            },
+            opts,
+          ));
+        }
+      }
+    }
+  } // end if (state.raceGreenFired)
 
   // -------------------------------------------------------------------------
   // Step 4: Update carState positions for next call
