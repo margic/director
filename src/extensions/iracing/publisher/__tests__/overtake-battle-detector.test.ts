@@ -88,6 +88,42 @@ describe('OVERTAKE', () => {
     expect((ev.payload as any).newPosition).toBe(1);
   });
 
+  it('OVERTAKE payload includes overtakingCar PublisherCarRef symmetric with overtakenCar (#209)', () => {
+    // The default test roster seeds carNumber=String(carIdx) and
+    // driverName='Driver <carIdx>'. We assert that overtakingCar mirrors the
+    // roster ref for the overtaker so consumers can resolve the driver/car
+    // class without an external lookup.
+    const base  = makeFrame({ cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }] });
+    const state = prime(base);
+    const next  = cloneFrame(base);
+    next.carIdxPosition[0] = 2;
+    next.carIdxPosition[1] = 1;
+    const events = detect(base, next, state);
+    const ev = events.find(e => e.type === 'OVERTAKE')!;
+    const payload = ev.payload as any;
+
+    // The new field must be present and self-describing.
+    expect(payload.overtakingCar).toBeDefined();
+    expect(payload.overtakingCar.carIdx).toBe(1);
+    expect(payload.overtakingCar.carNumber).toBe('1');
+    expect(payload.overtakingCar.driverName).toBe('Driver 1');
+    expect(payload.overtakingCar.carClassShortName).toBe('GT3');
+    expect(payload.overtakingCar.carClassId).toBe(100);
+
+    // Symmetry: overtakingCar mirrors envelope.car (both refer to the same car).
+    expect(payload.overtakingCar.carIdx).toBe(ev.car.carIdx);
+    expect(payload.overtakingCar.carNumber).toBe(ev.car.carNumber);
+    expect(payload.overtakingCar.driverName).toBe(ev.car.driverName);
+
+    // Symmetry: overtakenCar resolved from the roster too.
+    expect(payload.overtakenCar.carIdx).toBe(0);
+    expect(payload.overtakenCar.carNumber).toBe('0');
+    expect(payload.overtakenCar.driverName).toBe('Driver 0');
+
+    // Backward compatibility: legacy overtakingCarIdx still present.
+    expect(payload.overtakingCarIdx).toBe(1);
+  });
+
   it('OVERTAKE payload includes overtakenCar PublisherCarRef (DIR-4)', () => {
     const base  = makeFrame({ cars: [{ carIdx: 0, position: 1 }, { carIdx: 1, position: 2 }] });
     const state = prime(base);
