@@ -217,7 +217,6 @@ app.on('ready', () => {
     // scene names, and driver numbers instead of guessing or using stale data.
     const camPayload = eventBus.getLastEventPayload('iracing.cameraGroupsChanged');
     const driverPayload = eventBus.getLastEventPayload('iracing.driversChanged');
-    const obsPayload = eventBus.getLastEventPayload('obs.scenes');
 
     const cameraGroups: { groupNum: number; groupName: string }[] =
       (camPayload?.groups ?? []).map((g: any) => ({ groupNum: g.groupNum, groupName: g.groupName }));
@@ -225,7 +224,13 @@ app.on('ready', () => {
     const drivers: { carNumber: string; userName: string; carName: string }[] =
       (driverPayload?.drivers ?? []).map((d: any) => ({ carNumber: d.carNumber, userName: d.userName, carName: d.carName }));
 
-    const scenes: string[] = obsPayload?.scenes ?? [];
+    // #192: use extensionHost.getObsScenes() — populated by the obs.scenes event cache
+    // maintained in the extension host. Warn when OBS is connected but scenes are empty
+    // so regressions are visible in logs without needing to inspect the check-in payload.
+    const scenes: string[] = extensionHost.getObsScenes();
+    if (scenes.length === 0 && connections['director-obs']?.connected) {
+      console.warn('[Capabilities] OBS is connected but scene list is empty — check-in will report no scenes. Verify OBS scene fetch succeeded.');
+    }
 
     // #112: only include broadcast intents — exclude operational/query
     // #163: group by extensionId into extensions[] (replaces flat intents[])
