@@ -415,6 +415,7 @@ export class PublisherOrchestrator {
       playerCarIdx:        meta.playerCarIdx,
       estimatedStintLaps:  meta.estimatedStintLaps,
       carNumberByCarIdx:   meta.carNumberByCarIdx,
+      carClassByCarIdx:    meta.carClassByCarIdx,
       iracingUserName:     meta.iracingUserName,
       identityDisplayName: meta.identityDisplayName,
     });

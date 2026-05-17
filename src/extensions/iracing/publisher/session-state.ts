@@ -582,6 +582,36 @@ export interface EventBuilderOptions {
   leaderLap?: number;
 }
 
+/**
+ * Estimates the on-track time gap between two cars using their normalized lap
+ * progress (lapCompleted + lapDistPct) and a reference lap time.
+ *
+ * This is the class-aware alternative to CarIdxF2Time. In multi-class races
+ * F2Time reflects the gap to the physically nearest car ahead regardless of
+ * class, so prototype traffic constantly corrupts GTD/GT3 battle detection.
+ * By computing the gap from lap-distance fractions we always get the true
+ * same-class inter-car interval.
+ *
+ * Returns 999 when the gap is invalid (chaser is ahead, cars are more than
+ * 2 laps apart, or no usable lap-time reference is available).
+ */
+export function estimateSameClassGap(
+  frame: TelemetryFrame,
+  chaserIdx: number,
+  leaderIdx: number,
+): number {
+  const leaderProg = frame.carIdxLapCompleted[leaderIdx] + frame.carIdxLapDistPct[leaderIdx];
+  const chaserProg = frame.carIdxLapCompleted[chaserIdx] + frame.carIdxLapDistPct[chaserIdx];
+  const diff = leaderProg - chaserProg;
+  if (diff < 0 || diff > 2) return 999;
+  // Use the leader's last lap time as the lap-time reference; fall back to a
+  // reasonable default when the lap hasn't been completed yet.
+  const refLapTime = frame.carIdxLastLapTime[leaderIdx] > 0
+    ? frame.carIdxLastLapTime[leaderIdx]
+    : 90;
+  return diff * refLapTime;
+}
+
 export function buildEvent<T extends PublisherEventType>(
   type: T,
   car: CarRefInput,

@@ -45,6 +45,8 @@ interface SessionInfoResult {
   trackName: string;
   sessionLaps: number;
   sessions: { sessionNum: number; sessionType: string }[];
+  /** iRacing CarIdx for the player's own car (DriverInfo.DriverCarIdx). */
+  playerCarIdx: number;
 }
 
 // --- Telemetry Types ---
@@ -165,6 +167,13 @@ let telemetryInterval: NodeJS.Timeout | null = null;
 let cachedTrackName = '';
 let cachedSessionLaps = 0;
 let cachedSessions: { sessionNum: number; sessionType: string }[] = [];
+let cachedPlayerCarIdx = -1;
+
+// Tracks the PlayerCarIdx telemetry value across poll ticks so we can detect
+// when the driver enters/leaves a car or the session changes to a new car.
+// -1 means "not yet seen or reset". Distinct from cachedPlayerCarIdx, which
+// comes from the session YAML and may lag behind.
+let lastKnownPlayerCarIdx = -1;
 
 // Publisher orchestrator (issue #106) — instantiated at activate(), drives the
 // detector + transport pipeline. Null when the extension is inactive.
@@ -429,6 +438,8 @@ function closeSharedMemory(director: ExtensionAPI) {
     cachedDrivers = [];
     cachedTrackName = '';
     cachedSessionLaps = 0;
+    cachedPlayerCarIdx = -1;
+    lastKnownPlayerCarIdx = -1;
     director.log('info', 'iRacing shared memory unmapped');
 }
 
@@ -533,9 +544,15 @@ function readSessionInfo(director: ExtensionAPI): SessionInfoResult | null {
             }
         }
 
+        // --- Player car index ---
+        // DriverInfo.DriverCarIdx is the CarIdx for the player's own car.
+        // This is essential for the driver publisher pipeline — without it
+        // every detector short-circuits and no driver events are emitted.
+        const playerCarIdx: number = parsed?.DriverInfo?.DriverCarIdx ?? -1;
+
         lastSessionInfoUpdate = header.sessionInfoUpdate;
-        director.log('info', `Parsed session info (update #${header.sessionInfoUpdate}): ${cameraGroups.length} cameras, ${drivers.length} drivers, track="${trackName}", sessions=[${sessions.map(s => s.sessionType).join(',')}]`);
-        return { cameraGroups, drivers, trackName, sessionLaps, sessions };
+        director.log('info', `Parsed session info (update #${header.sessionInfoUpdate}): ${cameraGroups.length} cameras, ${drivers.length} drivers, track="${trackName}", sessions=[${sessions.map(s => s.sessionType).join(',')}], playerCarIdx=${playerCarIdx}`);
+        return { cameraGroups, drivers, trackName, sessionLaps, sessions, playerCarIdx };
     } catch (error: any) {
         director.log('error', `Failed to parse session info YAML: ${error.message}`);
         return null;
@@ -900,6 +917,21 @@ function pollTelemetry(director: ExtensionAPI) {
         if (varHeaders.size === 0) return;
     }
 
+    // Monitor PlayerCarIdx on every tick so we react immediately when the
+    // driver enters their car (late-join or post-session-change). The YAML-based
+    // DriverInfo.DriverCarIdx can lag; this telemetry scalar is authoritative.
+    if (publisherOrchestrator) {
+        const buf = getLatestBuffer();
+        const playerCarIdxArr = buf ? readVarInt('PlayerCarIdx', buf.offset) : null;
+        const playerCarIdx = playerCarIdxArr?.[0] ?? -1;
+        if (playerCarIdx >= 0 && playerCarIdx !== lastKnownPlayerCarIdx) {
+            director.log('info', `PlayerCarIdx changed: ${lastKnownPlayerCarIdx} → ${playerCarIdx}`);
+            lastKnownPlayerCarIdx = playerCarIdx;
+            cachedPlayerCarIdx = playerCarIdx;
+            publisherOrchestrator.setSessionMetadata({ playerCarIdx });
+        }
+    }
+
     const state = buildRaceState(director);
     if (state) {
         director.emitEvent('iracing.raceStateChanged', state);
@@ -981,6 +1013,7 @@ function pollSessionData(director: ExtensionAPI) {
             cachedTrackName = result.trackName;
             cachedSessionLaps = result.sessionLaps;
             cachedSessions = result.sessions;
+            cachedPlayerCarIdx = result.playerCarIdx;
             director.emitEvent('iracing.cameraGroupsChanged', { groups: result.cameraGroups });
             director.emitEvent('iracing.driversChanged', { drivers: result.drivers });
             // #108: keep publisher roster in sync whenever SessionInfo YAML changes
@@ -995,6 +1028,30 @@ function pollSessionData(director: ExtensionAPI) {
                     carClassId:        d.carClassId,
                 })),
             );
+
+            // Push derived per-car maps so all publisher detectors can resolve
+            // car numbers and class identities correctly. These are only available
+            // from the session YAML, never from telemetry scalars.
+            if (publisherOrchestrator) {
+                const carNumberByCarIdx = new Map<number, string>(
+                    result.drivers.map(d => [d.carIdx, d.carNumber]),
+                );
+                const carClassByCarIdx = new Map<number, number>(
+                    result.drivers.map(d => [d.carIdx, d.carClassId]),
+                );
+                const carClassShortNames = new Map<number, string>(
+                    result.drivers
+                        .filter(d => d.carClassName)
+                        .map(d => [d.carClassId, d.carClassName]),
+                );
+                publisherOrchestrator.setSessionMetadata({
+                    playerCarIdx:     cachedPlayerCarIdx >= 0 ? cachedPlayerCarIdx : undefined,
+                    carNumberByCarIdx,
+                    carClassByCarIdx,
+                    carClassShortNames,
+                    estimatedStintLaps: cachedSessionLaps > 0 ? cachedSessionLaps : undefined,
+                });
+            }
         }
 
         // Always resolve the current session type from telemetry SessionNum so
@@ -1006,7 +1063,18 @@ function pollSessionData(director: ExtensionAPI) {
             const entry = cachedSessions.find(s => s.sessionNum === sessionNum);
             const sessionType = entry?.sessionType ?? '';
             if (sessionType) {
-                publisherOrchestrator.setSessionMetadata({ sessionType });
+                // Include identity settings so the driver publisher can resolve
+                // the player's display name for identity events.
+                const directorRef = directorAPI;
+                publisherOrchestrator.setSessionMetadata({
+                    sessionType,
+                    iracingUserName:     directorRef
+                        ? String(directorRef.settings['iracing.userName'] ?? '').trim() || undefined
+                        : undefined,
+                    identityDisplayName: directorRef
+                        ? String(directorRef.settings['publisher.driver.displayName'] ?? '').trim() || undefined
+                        : undefined,
+                });
             }
         }
     }
