@@ -11,7 +11,7 @@
  */
 
 import type { TelemetryFrame, SessionState } from '../session-state';
-import { buildEvent, carRefFromRoster, getOrCreateCarState } from '../session-state';
+import { buildEvent, carRefFromRoster, getOrCreateCarState, estimateSameClassGap } from '../session-state';
 import type { PublisherEvent } from '../event-types';
 
 export const GAP_TREND_GAP_THRESHOLD_SEC = 3.0;
@@ -25,6 +25,12 @@ export interface GapTrendContext {
   raceSessionId: string;
   /** Required — driver-pipeline detectors are scoped to the player car only. */
   playerCarIdx: number;
+  /**
+   * Per-car class id map (carIdx → CarClassID). When provided, gap-ahead is
+   * computed from same-class lapDistPct rather than CarIdxF2Time, avoiding
+   * cross-class prototype-traffic interference in multi-class sessions.
+   */
+  carClassByCarIdx?: Map<number, number>;
 }
 
 export function detectGapTrend(
@@ -48,7 +54,9 @@ export function detectGapTrend(
   const opts = { raceSessionId: ctx.raceSessionId, rigId: ctx.rigId, frame: curr };
 
   // ---- Ahead ----
-  const gapAhead = curr.carIdxF2Time[ctx.playerCarIdx];
+  // Prefer same-class gap (lapDistPct-based) when class data is available to
+  // avoid CarIdxF2Time pollution from prototype traffic in multi-class sessions.
+  const [gapAhead, sameClassAheadIdx] = findSameClassAheadGap(curr, ctx.playerCarIdx, state, ctx.carClassByCarIdx);
   if (
     gapAhead > 0
     && gapAhead < GAP_TREND_GAP_THRESHOLD_SEC
@@ -64,7 +72,8 @@ export function detectGapTrend(
         curr.sessionTime - state.lastGapTrendEmittedAt.ahead >= GAP_TREND_COOLDOWN_SEC
         || state.lastGapTrendDirection.ahead !== direction;
       if (cooldownOk) {
-        const targetCarIdx = findCarAhead(curr, ctx.playerCarIdx);
+        // Use same-class car ahead if found, otherwise fall back to overall position.
+        const targetCarIdx = sameClassAheadIdx >= 0 ? sameClassAheadIdx : findCarAhead(curr, ctx.playerCarIdx);
         const playerRef = carRefFromRoster(state, ctx.playerCarIdx);
         const targetRef = targetCarIdx >= 0 ? carRefFromRoster(state, targetCarIdx) : undefined;
         if (playerRef && targetRef) {
@@ -118,6 +127,35 @@ export function detectGapTrend(
   }
 
   return events;
+}
+
+/**
+ * Returns [gapSec, leaderCarIdx] for the same-class car immediately ahead of
+ * the player (by class position). Falls back to F2Time and overall-position
+ * car-ahead when class data is unavailable.
+ */
+function findSameClassAheadGap(
+  curr: TelemetryFrame,
+  playerCarIdx: number,
+  state: SessionState,
+  carClassByCarIdx?: Map<number, number>,
+): [number, number] {
+  if (carClassByCarIdx && carClassByCarIdx.size > 0) {
+    const playerClassId  = carClassByCarIdx.get(playerCarIdx);
+    const playerClassPos = curr.carIdxClassPosition[playerCarIdx];
+    if (playerClassId !== undefined && playerClassPos > 1) {
+      for (const [cIdx] of state.knownRoster) {
+        if (carClassByCarIdx.get(cIdx) === playerClassId
+            && curr.carIdxClassPosition[cIdx] === playerClassPos - 1) {
+          const gap = estimateSameClassGap(curr, playerCarIdx, cIdx);
+          return gap < 999 ? [gap, cIdx] : [-1, -1];
+        }
+      }
+    }
+    return [-1, -1]; // player is class leader
+  }
+  // Fallback: F2Time
+  return [curr.carIdxF2Time[playerCarIdx], -1];
 }
 
 function findCarAhead(frame: TelemetryFrame, playerCarIdx: number): number {

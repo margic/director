@@ -56,13 +56,17 @@ describe('RaceStateAggregator (#151 / #152)', () => {
 
   it('forms classGroups for same-class cars within 1.0s', () => {
     const state = createSessionState('s1', 1);
-    // Two GT3 cars 0.6s apart, plus a third GT3 4s back (excluded).
+    // Three GT3 cars. Cars 0 and 1 are ~0.6s apart (in group), car 2 is ~4s
+    // behind car 1 (out of group). Gaps are expressed as lapDistPct differences
+    // since computeClassGroups now uses estimateSameClassGap (lapDistPct-based)
+    // instead of CarIdxF2Time to avoid cross-class prototype pollution.
+    // With lastLapTime=90s: 0.6s → Δpct≈0.00667; 4.0s → Δpct≈0.0444.
     seedRoster(state, [0, 1, 2], { carClassId: 100, carClassShortName: 'GT3' });
     const frame = makeFrame({
       cars: [
-        { carIdx: 0, position: 1, classPosition: 1, f2Time: 0 },
-        { carIdx: 1, position: 2, classPosition: 2, f2Time: 0.6 },
-        { carIdx: 2, position: 3, classPosition: 3, f2Time: 4.0 },
+        { carIdx: 0, position: 1, classPosition: 1, lapsCompleted: 5, lapDistPct: 0.5,     lastLapTime: 90 },
+        { carIdx: 1, position: 2, classPosition: 2, lapsCompleted: 5, lapDistPct: 0.4933,  lastLapTime: 90 },
+        { carIdx: 2, position: 3, classPosition: 3, lapsCompleted: 5, lapDistPct: 0.4489 },
       ],
     });
     aggregateRaceState(null, frame, state, { playerCarIdx: 0 });

@@ -11,7 +11,7 @@
  */
 
 import type { TelemetryFrame, SessionState, CarState } from '../session-state';
-import { getOrCreateCarState } from '../session-state';
+import { getOrCreateCarState, estimateSameClassGap } from '../session-state';
 
 /** Maximum samples kept in a rolling gap window. */
 export const GAP_WINDOW_SIZE = 5;
@@ -62,22 +62,65 @@ export function aggregateRaceState(
     if (carIdx < 0 || carIdx >= carCount) continue;
     const cs = getOrCreateCarState(state, carIdx);
 
-    // Gap to car ahead — CarIdxF2Time. iRacing reports 0 for the leader.
-    const gapAhead = curr.carIdxF2Time[carIdx];
-    if (Number.isFinite(gapAhead) && gapAhead > 0) {
-      pushWindow(cs.recentGapToAhead, gapAhead);
-      cs.closingRateToAhead = computeClosingRate(cs.recentGapToAhead);
+    // Gap to car ahead — use same-class lapDistPct gap for the player car
+    // (to avoid cross-class F2Time pollution in multi-class sessions); use
+    // F2Time for all other cars since their gap windows are only consumed
+    // by classGroups, which is now also class-aware.
+    if (carIdx === playerCarIdx && ctx.carClassByCarIdx) {
+      const playerClassId  = ctx.carClassByCarIdx.get(playerCarIdx);
+      const playerClassPos = curr.carIdxClassPosition[playerCarIdx];
+      if (playerClassId !== undefined && playerClassPos > 1) {
+        // Find same-class car at class position - 1.
+        for (const [cIdx] of state.knownRoster) {
+          if (ctx.carClassByCarIdx.get(cIdx) === playerClassId
+              && curr.carIdxClassPosition[cIdx] === playerClassPos - 1) {
+            const scGap = estimateSameClassGap(curr, playerCarIdx, cIdx);
+            if (scGap < 999) {
+              pushWindow(cs.recentGapToAhead, scGap);
+              cs.closingRateToAhead = computeClosingRate(cs.recentGapToAhead);
+            }
+            break;
+          }
+        }
+      }
+    } else {
+      const gapAhead = curr.carIdxF2Time[carIdx];
+      if (Number.isFinite(gapAhead) && gapAhead > 0) {
+        pushWindow(cs.recentGapToAhead, gapAhead);
+        cs.closingRateToAhead = computeClosingRate(cs.recentGapToAhead);
+      }
     }
 
-    // Gap-to-car-behind for the player only (we don't have CarIdxF2Time
-    // for "behind us" — derive from the car-behind's gapToCarAhead).
+    // Gap-to-car-behind for the player only.
+    // Same-class: find same-class car at classPos + 1; fall back to F2Time
+    // of the overall-position car behind when class data is unavailable.
     if (carIdx === playerCarIdx) {
-      const carBehindIdx = findCarBehind(curr, playerPosition);
-      if (carBehindIdx >= 0) {
-        const gapBehind = curr.carIdxF2Time[carBehindIdx];
-        if (Number.isFinite(gapBehind) && gapBehind > 0) {
-          pushWindow(cs.recentGapToBehind, gapBehind);
-          cs.closingRateToBehind = computeClosingRate(cs.recentGapToBehind);
+      const playerClassId  = ctx.carClassByCarIdx?.get(playerCarIdx);
+      const playerClassPos = curr.carIdxClassPosition[playerCarIdx];
+      let foundBehindGap   = false;
+      if (playerClassId !== undefined && playerClassPos > 0) {
+        for (const [cIdx] of state.knownRoster) {
+          if (ctx.carClassByCarIdx!.get(cIdx) === playerClassId
+              && curr.carIdxClassPosition[cIdx] === playerClassPos + 1) {
+            const scGapBehind = estimateSameClassGap(curr, cIdx, playerCarIdx);
+            if (scGapBehind < 999) {
+              pushWindow(cs.recentGapToBehind, scGapBehind);
+              cs.closingRateToBehind = computeClosingRate(cs.recentGapToBehind);
+              foundBehindGap = true;
+            }
+            break;
+          }
+        }
+      }
+      if (!foundBehindGap) {
+        // Fallback: overall-position car behind via F2Time (single-class or no class data).
+        const carBehindIdx = findCarBehind(curr, playerPosition);
+        if (carBehindIdx >= 0) {
+          const gapBehind = curr.carIdxF2Time[carBehindIdx];
+          if (Number.isFinite(gapBehind) && gapBehind > 0) {
+            pushWindow(cs.recentGapToBehind, gapBehind);
+            cs.closingRateToBehind = computeClosingRate(cs.recentGapToBehind);
+          }
         }
       }
     }
@@ -198,16 +241,18 @@ function computeClassGroups(
   carClassByCarIdx?: Map<number, number>,
 ): Map<number, number[][]> {
   const groups = new Map<number, number[][]>();
-  // Build per-class lists of [carIdx, classPosition, gapToAhead] tuples.
-  const byClass = new Map<number, Array<{ carIdx: number; classPos: number; gap: number }>>();
+  // Build per-class lists sorted by class position.  We no longer store gap
+  // here — gaps are computed on-the-fly from lapDistPct in the grouping step
+  // so we avoid the cross-class F2Time pollution that previously caused
+  // prototype traffic to masquerade as same-class battle proximity.
+  const byClass = new Map<number, Array<{ carIdx: number; classPos: number }>>();
   for (const [carIdx, ref] of state.knownRoster) {
     const classId = ref.carClassId ?? carClassByCarIdx?.get(carIdx);
     if (classId === undefined) continue;
     const classPos = frame.carIdxClassPosition[carIdx];
     if (classPos <= 0) continue;
-    const gap = frame.carIdxF2Time[carIdx] ?? 0;
     if (!byClass.has(classId)) byClass.set(classId, []);
-    byClass.get(classId)!.push({ carIdx, classPos, gap });
+    byClass.get(classId)!.push({ carIdx, classPos });
   }
 
   for (const [classId, entries] of byClass) {
@@ -219,10 +264,13 @@ function computeClassGroups(
         current.push(entries[i].carIdx);
         continue;
       }
-      // gap value on this entry is gap-to-car-ahead in OVERALL order; for a
-      // class-grouping heuristic we treat any same-class car within
-      // CLASS_GROUP_GAP_SEC of its class-predecessor as part of the group.
-      if (entries[i].gap > 0 && entries[i].gap < CLASS_GROUP_GAP_SEC) {
+      // Same-class gap via lap-distance progress: avoids cross-class F2Time
+      // where a prototype physically between two GTD cars would produce a
+      // small gap reading that doesn't represent a real GTD battle.
+      const leaderIdx = entries[i - 1].carIdx;
+      const chaserIdx = entries[i].carIdx;
+      const gap = estimateSameClassGap(frame, chaserIdx, leaderIdx);
+      if (gap < CLASS_GROUP_GAP_SEC) {
         current.push(entries[i].carIdx);
       } else {
         if (current.length > 1) classGroups.push(current);

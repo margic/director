@@ -77,6 +77,7 @@ export class DriverPublisherOrchestrator {
   private playerCarIdx: number | undefined = undefined;
   private estimatedStintLaps = 0;
   private carNumberByCarIdx: Map<number, string> = new Map();
+  private carClassByCarIdx: Map<number, number> = new Map();
   private identityDisplayName = '';
   private iracingUserName = '';
 
@@ -170,6 +171,7 @@ export class DriverPublisherOrchestrator {
         playerCarIdx,
         estimatedStintLaps: this.estimatedStintLaps,
         playerFuelPerLap: this.driverState?.fuelPerLap ?? 0,
+        carClassByCarIdx: this.carClassByCarIdx.size > 0 ? this.carClassByCarIdx : undefined,
       });
 
       // Derived-metrics aggregator (#182) — also runs BEFORE detectors so the
@@ -224,7 +226,11 @@ export class DriverPublisherOrchestrator {
     }));
 
     // Race-narrative detectors (#153–#156) — all gated on playerCarIdx.
-    events.push(...detectGapTrend(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
+    events.push(...detectGapTrend(this.prevFrame, frame, this.state, {
+      ...ctx,
+      playerCarIdx,
+      carClassByCarIdx: this.carClassByCarIdx.size > 0 ? this.carClassByCarIdx : undefined,
+    }));
     events.push(...detectClassPositionChange(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
     events.push(...detectOverallPositionChange(this.prevFrame, frame, this.state, { ...ctx, playerCarIdx }));
     events.push(...detectPlayerStopped(this.prevFrame, frame, this.state, this.driverState!, { ...ctx, playerCarIdx }));
@@ -286,12 +292,14 @@ export class DriverPublisherOrchestrator {
     playerCarIdx?: number;
     estimatedStintLaps?: number;
     carNumberByCarIdx?: Map<number, string>;
+    carClassByCarIdx?: Map<number, number>;
     iracingUserName?: string;
     identityDisplayName?: string;
   }): void {
     if (meta.playerCarIdx !== undefined)         this.playerCarIdx = meta.playerCarIdx;
     if (meta.estimatedStintLaps !== undefined)   this.estimatedStintLaps = meta.estimatedStintLaps;
     if (meta.carNumberByCarIdx)                  this.carNumberByCarIdx = meta.carNumberByCarIdx;
+    if (meta.carClassByCarIdx)                   this.carClassByCarIdx = meta.carClassByCarIdx;
     if (meta.iracingUserName !== undefined)      this.iracingUserName = meta.iracingUserName;
     if (meta.identityDisplayName !== undefined)  this.identityDisplayName = meta.identityDisplayName;
   }

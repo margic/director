@@ -132,7 +132,10 @@ export class SessionPublisherOrchestrator {
     events.push(...detectSessionLifecycle(this.prevFrame, frame, this.state, ctx));
     events.push(...detectFlags(this.prevFrame, frame, this.state, ctx));
     events.push(...detectLapCompleted(this.prevFrame, frame, this.state, ctx));
-    events.push(...detectOvertakeAndBattle(this.prevFrame, frame, this.state, ctx));
+    events.push(...detectOvertakeAndBattle(this.prevFrame, frame, this.state, {
+      ...ctx,
+      carClassByCarIdx: this.carClassByCarIdx.size > 0 ? this.carClassByCarIdx : undefined,
+    }));
     events.push(...detectPitLifecycle(this.prevFrame, frame, this.state, {
       ...ctx,
       playerCarIdx: this.playerCarIdx ?? -1,

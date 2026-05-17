@@ -23,7 +23,7 @@
  */
 
 import type { TelemetryFrame, SessionState, BattleState } from '../session-state';
-import { getOrCreateCarState, battleKey, carRefFromRoster } from '../session-state';
+import { getOrCreateCarState, battleKey, carRefFromRoster, estimateSameClassGap } from '../session-state';
 import type { PublisherEvent } from '../event-types';
 import { buildEvent } from '../session-state';
 
@@ -59,6 +59,13 @@ const STATUS_ENGAGED  = 'ENGAGED' as const;
 export interface OvertakeBattleDetectorContext {
   rigId: string;
   raceSessionId: string;
+  /**
+   * Per-car class id map (carIdx → CarClassID).
+   * When provided, the battle state machine uses same-class car-ahead pairing
+   * and lapDistPct-based gap estimation instead of CarIdxF2Time, which is
+   * polluted by cross-class prototype traffic in multi-class sessions.
+   */
+  carClassByCarIdx?: Map<number, number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +102,21 @@ export function detectOvertakeAndBattle(
     const cp = curr.carIdxPosition[i];
     if (pp > 0) prevPosMap.set(pp, i);
     if (cp > 0) currPosMap.set(cp, i);
+  }
+
+  // Per-class position maps: classId → (classPos → carIdx).
+  // Used by the battle state machine so that only same-class rivals are
+  // matched — prototype traffic never creates false battle pairs with GTD cars.
+  const currClassPosMaps = new Map<number, Map<number, number>>();
+  if (ctx.carClassByCarIdx && ctx.carClassByCarIdx.size > 0) {
+    for (let i = 0; i < CAR_COUNT; i++) {
+      const classId = ctx.carClassByCarIdx.get(i);
+      if (classId === undefined) continue;
+      const classPos = curr.carIdxClassPosition[i];
+      if (classPos <= 0) continue;
+      if (!currClassPosMaps.has(classId)) currClassPosMaps.set(classId, new Map());
+      currClassPosMaps.get(classId)!.set(classPos, i);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -203,15 +225,42 @@ export function detectOvertakeAndBattle(
 
   for (let i = 0; i < CAR_COUNT; i++) {
     const currPos = curr.carIdxPosition[i];
-    if (currPos <= 1) continue;                        // car is leading (no one ahead)
+    if (currPos <= 0) continue;                        // car not active
     if (curr.carIdxOnPitRoad[i] !== 0) continue;      // skip pit-road cars
 
-    const leaderIdx = currPosMap.get(currPos - 1);
-    if (leaderIdx === undefined) continue;
-    if (curr.carIdxOnPitRoad[leaderIdx] !== 0) continue;
+    // ---- Determine the same-class rival immediately ahead ----
+    // Prefer class-position-based lookup: this ensures we only form battle
+    // pairs between cars in the same class, preventing cross-class F2Time
+    // pollution in multi-class (IMSA/LMPC) sessions where prototypes
+    // physically pass through GTD groups and spike the F2Time signal.
+    const chaserClassId  = ctx.carClassByCarIdx?.get(i);
+    const chaserClassPos = curr.carIdxClassPosition[i];
+    let leaderIdx: number;
+    let gap: number;
 
-    const gap = curr.carIdxF2Time[i];
-    if (gap < 0) continue;                             // iRacing returns -1 when invalid
+    if (chaserClassId !== undefined && currClassPosMaps.size > 0) {
+      if (chaserClassPos <= 1) continue;               // class leader, nobody same-class ahead
+      const classMap = currClassPosMaps.get(chaserClassId);
+      const found    = classMap?.get(chaserClassPos - 1);
+      if (found === undefined) continue;               // no same-class car at classPos-1
+      leaderIdx = found;
+      // Compute same-class gap from lap-distance progress.  CarIdxF2Time is
+      // NOT used here: in multi-class it reflects the nearest car physically
+      // ahead regardless of class — the same reason Step 4 avoids it.
+      gap = estimateSameClassGap(curr, i, leaderIdx);
+      if (gap >= 999) continue;                        // invalid (chaser ahead or >2 laps)
+    } else {
+      // No class data available (single-class or early boot before YAML).
+      // Fall back to overall-position adjacency + F2Time.
+      if (currPos <= 1) continue;                      // overall leader
+      const found = currPosMap.get(currPos - 1);
+      if (found === undefined) continue;
+      leaderIdx = found;
+      gap = curr.carIdxF2Time[i];
+      if (gap < 0) continue;                           // iRacing returns -1 when invalid
+    }
+
+    if (curr.carIdxOnPitRoad[leaderIdx] !== 0) continue;
 
     const key     = battleKey(i, leaderIdx);
     const battle  = state.activeBattles.get(key);
