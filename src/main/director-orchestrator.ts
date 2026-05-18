@@ -82,6 +82,12 @@ export class DirectorOrchestrator extends EventEmitter {
   private lastIRacingState: any = null;
   /** Last known iRacing sessionType — used to detect SESSION_TYPE_CHANGE and re-check-in (#206). */
   private lastKnownSessionType: string = '';
+  /**
+   * True once we have had at least one successful check-in for the current selected session.
+   * Used to distinguish TTL-expiry state resets (should auto re-checkin) from the initial
+   * session-select state (no checkin yet — should not auto re-checkin). Issue #216.
+   */
+  private checkinWasActive = false;
   /** Synthesizes higher-order narrative events from raw race state history. */
   private readonly raceAnalyzer = new RaceAnalyzer();
 
@@ -134,13 +140,27 @@ export class DirectorOrchestrator extends EventEmitter {
         this.raceAnalyzer.update(data.payload);
 
         // Re-check-in when the iRacing session type changes (e.g. Practice → Race).
-        // Only trigger when both old and new types are known and the Director has an
-        // active check-in, to avoid spurious re-checks on first connect (#206).
-        if (newSessionType && prevSessionType && newSessionType !== prevSessionType && this.sessionManager.getCheckinId()) {
-          console.log(`[DirectorOrchestrator] Session type changed ${prevSessionType} → ${newSessionType}. Re-checking-in.`);
-          this.sessionManager.refreshCheckin().catch(err => {
-            console.warn('[DirectorOrchestrator] Re-check-in on session type change failed:', err);
-          });
+        // Issue #216: distinguish Race start (needs full POST to update roster and
+        // re-trigger the Planner) from other transitions (PATCH refresh is sufficient).
+        if (newSessionType && prevSessionType && newSessionType !== prevSessionType) {
+          const isRaceStart = newSessionType === 'Race';
+          const hasSelectedSession = this.sessionManager.getSelectedSession() !== null;
+          const isActiveMode = this.mode === 'auto' || this.mode === 'manual';
+
+          if (isRaceStart && hasSelectedSession && isActiveMode) {
+            // Race sub-session starting — POST a fresh checkin so Race Control gets
+            // the updated car-number roster and re-runs the Planner for Race sequences.
+            console.log(`[DirectorOrchestrator] Race sub-session starting (${prevSessionType} → Race) — full POST re-checkin (#216).`);
+            this.sessionManager.checkinSession({ forceCheckin: true }).catch(err => {
+              console.warn('[DirectorOrchestrator] Re-checkin on Race start failed:', err);
+            });
+          } else if (this.sessionManager.getCheckinId()) {
+            // Non-Race transition (e.g. Practice → Qualifying) — PATCH refresh is sufficient.
+            console.log(`[DirectorOrchestrator] Session type changed ${prevSessionType} → ${newSessionType}. Refreshing check-in.`);
+            this.sessionManager.refreshCheckin().catch(err => {
+              console.warn('[DirectorOrchestrator] Check-in refresh on session type change failed:', err);
+            });
+          }
         }
         if (newSessionType) this.lastKnownSessionType = newSessionType;
       });
@@ -327,6 +347,7 @@ export class DirectorOrchestrator extends EventEmitter {
       // Uses executeInternalDirective (not executeIntent) so this lifecycle
       // call is never exposed as a broadcast capability to the RC AI planner.
       if (sessionState === 'checked-in') {
+        this.checkinWasActive = true; // Record that we've had an active checkin (#216).
         this.extensionHost.executeInternalDirective('iracing.publisher.bindSession', {
           raceSessionId: selectedSession.raceSessionId,
         });
@@ -347,12 +368,25 @@ export class DirectorOrchestrator extends EventEmitter {
           if (checkinId) {
             this.cloudPoller.updateCheckin(checkinId, ttl);
           }
+        } else if (sessionState === 'selected' && this.checkinWasActive && !this.sessionManager.getCheckinId()) {
+          // The checkin TTL expired and SessionManager reset to 'selected' while we
+          // are still in an active director mode. Re-establish the checkin automatically
+          // so sequences keep flowing after a sub-session transition. Issue #216.
+          const smState = this.sessionManager.getState();
+          if (smState.checkinStatus !== 'checking-in') {
+            console.log('[DirectorOrchestrator] Checkin TTL expired in active mode — re-checking in automatically (#216).');
+            this.checkinWasActive = false; // Reset to prevent re-entry before the new checkin lands.
+            this.sessionManager.checkinSession({ forceCheckin: true }).catch(err => {
+              console.warn('[DirectorOrchestrator] Auto re-checkin after TTL expiry failed:', err);
+            });
+          }
         }
         // Emit state change so renderer sees updated checkin status
         this.emitStateChanged();
       }
     } else if (sessionState === 'none' || sessionState === 'discovered') {
       // Session cleared
+      this.checkinWasActive = false; // Reset guard — session explicitly cleared.
       if (this.mode !== 'stopped') {
         console.log('[DirectorOrchestrator] Session cleared. Transitioning to stopped mode');
         await this.setMode('stopped');
@@ -519,6 +553,7 @@ export class DirectorOrchestrator extends EventEmitter {
    */
   private async handleSessionEnded(): Promise<void> {
     console.log('[DirectorOrchestrator] Session ended (410 Gone). Wrapping and stopping.');
+    this.checkinWasActive = false; // Session ended — don't auto re-checkin.
     await this.sessionManager.wrapSession('session-ended').catch(() => {});
     await this.sessionManager.clearSession();
     await this.setMode('stopped');
@@ -546,6 +581,7 @@ export class DirectorOrchestrator extends EventEmitter {
    * @deprecated Use sessionManager.wrapSession() directly via session:wrap IPC.
    */
   async wrapSession(reason?: string): Promise<DirectorOrchestratorState> {
+    this.checkinWasActive = false; // Operator-initiated wrap — don't auto re-checkin (#216).
     // Stop the loop if in auto mode
     if (this.mode === 'auto') {
       await this.setMode('manual');

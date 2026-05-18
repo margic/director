@@ -303,13 +303,15 @@ export class CloudPoller {
             contextTimestamp: new Date().toISOString(),
           };
 
-      // Skip POST if iRacing has no car data yet — the spec requires a non-empty drivers array.
-      // This happens during session load before the driver roster is populated.
-      // Pre-fetch calls bypass this check (skipCarCheck=true) since a sequence is already
-      // executing which confirms cars were present when it was dispatched.
+      // Issue #216: Do NOT skip the POST when carCount=0. During iRacing sub-session
+      // transitions (Practice → Qualify → Race) all car positions drop to 0 while the
+      // new roster loads. Previously, skipping the POST meant the server never received
+      // a heartbeat, causing the checkin TTL (120 s) to expire before the Race went
+      // green. Every POST to /sequences/next refreshes the TTL regardless of car count;
+      // the server will return 204 during transition, which is harmless.
+      // Pre-fetch calls already bypass this log (skipCarCheck=true).
       if (raceContext.carCount === 0 && !opts?.skipCarCheck) {
-        console.log('[CloudPoller] Skipping sequence request — no car data yet (carCount=0), will retry.');
-        return this.idleRetryMs;
+        console.log('[CloudPoller] carCount=0 (sub-session transition in progress) — sending heartbeat POST to maintain checkin TTL.');
       }
 
       const requestBody: NextSequenceRequest = {
