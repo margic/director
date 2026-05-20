@@ -609,7 +609,6 @@ export class DirectorOrchestrator extends EventEmitter {
     const connectingEvents = [
       'obs.connectionStateChanged',
       'iracing.connectionStateChanged',
-      'youtube.status',
     ];
 
     connectingEvents.forEach(eventName => {
@@ -622,11 +621,19 @@ export class DirectorOrchestrator extends EventEmitter {
       });
     });
 
-    // Generic capability-change event (e.g. new OBS scene, camera group update).
-    // Always a meaningful change — issue a full re-checkin regardless of direction.
-    this.eventBus.on('extension.capabilitiesChanged', async (data: { extensionId: string; payload: any }) => {
-      console.log(`[DirectorOrchestrator] Capabilities changed: ${data.extensionId} — issuing full re-checkin (#218)`);
-      await this.triggerCapabilityRecheckin();
+    // Events that represent any meaningful capability state change — always re-checkin.
+    // youtube.status uses { monitoring } not { connected }, so it is treated like a
+    // generic capability change rather than a connect/disconnect event.
+    const alwaysRecheckinEvents = [
+      'extension.capabilitiesChanged',
+      'youtube.status',
+    ];
+
+    alwaysRecheckinEvents.forEach(eventName => {
+      this.eventBus!.on(eventName, async (data: { extensionId: string; payload: any }) => {
+        console.log(`[DirectorOrchestrator] Capability event: ${eventName} from ${data.extensionId} — issuing full re-checkin (#218)`);
+        await this.triggerCapabilityRecheckin();
+      });
     });
   }
 

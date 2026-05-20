@@ -402,8 +402,8 @@ describe('DirectorOrchestrator', () => {
       // Wait for async refresh
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      // Should have called SessionManager.refreshCheckin
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      // Should have called SessionManager.checkinSession (full POST — re-triggers Planner)
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should not refresh check-in if not currently checked in', async () => {
@@ -435,8 +435,8 @@ describe('DirectorOrchestrator', () => {
         checkinTtlSeconds: 120,
       });
 
-      // Mock refreshCheckin to fail
-      mockSessionManager.refreshCheckin.mockRejectedValue(new Error('Network error'));
+      // Mock checkinSession to fail
+      mockSessionManager.checkinSession.mockRejectedValue(new Error('Network error'));
 
       // Simulate connection event
       mockEventBus.emit('iracing.connectionStateChanged', {
@@ -447,7 +447,7 @@ describe('DirectorOrchestrator', () => {
       // Wait for async operations — should not throw
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should refresh check-in when extension capabilities change', async () => {
@@ -471,7 +471,7 @@ describe('DirectorOrchestrator', () => {
 
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should refresh check-in when extension is disabled', async () => {
@@ -494,7 +494,7 @@ describe('DirectorOrchestrator', () => {
 
       await new Promise(resolve => setTimeout(resolve, 10));
 
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should not refresh on capability change if not checked in', async () => {
