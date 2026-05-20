@@ -76,6 +76,7 @@ describe('DirectorOrchestrator', () => {
       checkinSession: vi.fn().mockResolvedValue({}),
       wrapSession: vi.fn().mockResolvedValue({}),
       refreshCheckin: vi.fn().mockResolvedValue({}),
+      getCapabilities: vi.fn(() => ({ extensions: [], connections: {} })),
       getCheckinId: vi.fn(() => null),
       getCheckinTtlSeconds: vi.fn(() => 120),
       getSessionConfig: vi.fn(() => null),
