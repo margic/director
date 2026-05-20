@@ -593,31 +593,66 @@ export class DirectorOrchestrator extends EventEmitter {
   /**
    * Listen for extension connection state changes and trigger re-check-in.
    * This ensures Race Control gets updated capabilities when extensions connect/disconnect.
+   *
+   * Issue #218: Only issue a full POST re-checkin (which re-triggers the AI Planner)
+   * when an extension transitions to connected=true, or when capabilities genuinely
+   * improve (e.g. new OBS scenes via extension.capabilitiesChanged).
+   * Disconnect events are intentionally ignored here — a degraded snapshot mid-session
+   * would cause the Planner to regenerate templates without the now-offline extension,
+   * which is not useful. The PATCH heartbeat keeps capabilities in sync regardless.
    */
   private listenForConnectionEvents(): void {
     if (!this.eventBus) return;
 
-    // Handle all connection state change events
-    const connectionEvents = [
+    // Events that carry a boolean `connected` field in their payload.
+    // Only fire a re-checkin when the transition is false → true.
+    const connectingEvents = [
       'obs.connectionStateChanged',
       'iracing.connectionStateChanged',
-      'youtube.status',
-      'extension.capabilitiesChanged',
     ];
 
-    connectionEvents.forEach(eventName => {
+    connectingEvents.forEach(eventName => {
       this.eventBus!.on(eventName, async (data: { extensionId: string; payload: any }) => {
-        console.log(`[DirectorOrchestrator] Connection event: ${eventName} from ${data.extensionId}`);
+        const isNowConnected: boolean = data.payload?.connected === true;
+        if (!isNowConnected) return; // Ignore disconnects — don't degrade the Planner snapshot.
 
-        // Only refresh if we're currently checked in (delegate to SessionManager)
-        const smState = this.sessionManager.getState();
-        if (smState.checkinId && smState.checkinStatus === 'standby') {
-          console.log('[DirectorOrchestrator] Refreshing check-in due to connection state change');
-          await this.sessionManager.refreshCheckin().catch(error => {
-            console.error('[DirectorOrchestrator] Capability refresh failed:', error);
-          });
-        }
+        console.log(`[DirectorOrchestrator] Extension connected: ${eventName} from ${data.extensionId} — issuing full re-checkin (#218)`);
+        await this.triggerCapabilityRecheckin();
       });
+    });
+
+    // Events that represent any meaningful capability state change — always re-checkin.
+    // youtube.status uses { monitoring } not { connected }, so it is treated like a
+    // generic capability change rather than a connect/disconnect event.
+    const alwaysRecheckinEvents = [
+      'extension.capabilitiesChanged',
+      'youtube.status',
+    ];
+
+    alwaysRecheckinEvents.forEach(eventName => {
+      this.eventBus!.on(eventName, async (data: { extensionId: string; payload: any }) => {
+        console.log(`[DirectorOrchestrator] Capability event: ${eventName} from ${data.extensionId} — issuing full re-checkin (#218)`);
+        await this.triggerCapabilityRecheckin();
+      });
+    });
+  }
+
+  /**
+   * Issue a full POST re-checkin when extension capabilities improve.
+   * Uses checkinSession() (not refreshCheckin/PATCH) so the AI Planner
+   * is re-triggered with the updated capability snapshot. (#218)
+   *
+   * Does nothing if no session is currently checked in.
+   * Allows awaitIdentityResolved() to run (no forceCheckin) so that
+   * a freshly-connected iRacing process has time to expose stable roster data.
+   */
+  private async triggerCapabilityRecheckin(): Promise<void> {
+    const smState = this.sessionManager.getState();
+    if (!smState.checkinId || smState.checkinStatus !== 'standby') return;
+
+    console.log('[DirectorOrchestrator] Full re-checkin triggered by capability change (#218)');
+    await this.sessionManager.checkinSession().catch(error => {
+      console.error('[DirectorOrchestrator] Capability re-checkin failed:', error);
     });
   }
 
