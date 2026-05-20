@@ -81,6 +81,14 @@ export class SessionManager extends EventEmitter {
   }
 
   /**
+   * Build and return the current capabilities snapshot.
+   * Used by DirectorOrchestrator to compare against the last check-in (#220).
+   */
+  getCapabilities(): DirectorCapabilities {
+    return this.buildCapabilities?.() ?? { extensions: [], connections: {} };
+  }
+
+  /**
    * Set the local sequences getter (provided by main.ts after library is ready).
    */
   setLocalSequencesGetter(getter: () => Promise<import('./director-types').PortableSequence[]>): void {

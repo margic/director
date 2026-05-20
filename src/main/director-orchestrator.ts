@@ -90,6 +90,11 @@ export class DirectorOrchestrator extends EventEmitter {
   private checkinWasActive = false;
   /** Synthesizes higher-order narrative events from raw race state history. */
   private readonly raceAnalyzer = new RaceAnalyzer();
+  /**
+   * JSON snapshot of the capabilities used in the last capability-triggered re-check-in.
+   * Used to skip spurious re-check-ins when nothing has actually changed (#220).
+   */
+  private lastCapabilitiesJson: string = '';
 
   constructor(
     private authService: AuthService,
@@ -554,6 +559,7 @@ export class DirectorOrchestrator extends EventEmitter {
   private async handleSessionEnded(): Promise<void> {
     console.log('[DirectorOrchestrator] Session ended (410 Gone). Wrapping and stopping.');
     this.checkinWasActive = false; // Session ended — don't auto re-checkin.
+    this.lastCapabilitiesJson = ''; // Reset so next session's first capability event always fires (#220).
     await this.sessionManager.wrapSession('session-ended').catch(() => {});
     await this.sessionManager.clearSession();
     await this.setMode('stopped');
@@ -582,6 +588,7 @@ export class DirectorOrchestrator extends EventEmitter {
    */
   async wrapSession(reason?: string): Promise<DirectorOrchestratorState> {
     this.checkinWasActive = false; // Operator-initiated wrap — don't auto re-checkin (#216).
+    this.lastCapabilitiesJson = ''; // Reset so next session's first capability event always fires (#220).
     // Stop the loop if in auto mode
     if (this.mode === 'auto') {
       await this.setMode('manual');
@@ -642,6 +649,10 @@ export class DirectorOrchestrator extends EventEmitter {
    * Uses checkinSession() (not refreshCheckin/PATCH) so the AI Planner
    * is re-triggered with the updated capability snapshot. (#218)
    *
+   * Guards against spurious re-check-ins by serialising the current capabilities
+   * snapshot and comparing it to the last one actually sent. If the content is
+   * byte-for-byte identical the call is suppressed (#220).
+   *
    * Does nothing if no session is currently checked in.
    * Allows awaitIdentityResolved() to run (no forceCheckin) so that
    * a freshly-connected iRacing process has time to expose stable roster data.
@@ -649,6 +660,17 @@ export class DirectorOrchestrator extends EventEmitter {
   private async triggerCapabilityRecheckin(): Promise<void> {
     const smState = this.sessionManager.getState();
     if (!smState.checkinId || smState.checkinStatus !== 'standby') return;
+
+    // Deep-equality guard: only fire when the capabilities snapshot has actually
+    // changed. A fresh capabilities object is built on every poll cycle, so a
+    // reference check would always be true — we must compare serialised content.
+    const currentCapabilities = this.sessionManager.getCapabilities();
+    const currentJson = JSON.stringify(currentCapabilities);
+    if (currentJson === this.lastCapabilitiesJson) {
+      console.log('[DirectorOrchestrator] Skipping re-checkin — capabilities snapshot unchanged (#220)');
+      return;
+    }
+    this.lastCapabilitiesJson = currentJson;
 
     console.log('[DirectorOrchestrator] Full re-checkin triggered by capability change (#218)');
     await this.sessionManager.checkinSession().catch(error => {
