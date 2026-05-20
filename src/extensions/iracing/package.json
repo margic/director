@@ -4,14 +4,14 @@
   "main": "index.js",
   "displayName": "iRacing Broadcast Controller",
   "description": "Controls iRacing Cameras and Replay state via Broadcast Messages.",
-  "aiContext": "The iRacing extension controls Race Director cameras and instant replay playback.\n- broadcast.showLiveCam: switches the broadcast camera to follow a specific car. carNum is the car number string (e.g. \"64\"). camGroup is the numeric iRacing camera group ID from the CAMERA GROUPS list (TV1=11, TV2=12, Chase=20, Blimp=18, PitLane=16). Best combined with obs.switchScene to the Race Director OBS scene first.\n- broadcast.replayFromTo: plays an instant replay segment between startFrame and endFrame iRacing replay frame numbers. Use for post-incident reviews only — never use during live racing sequences.\n- broadcast.setReplaySpeed: sets replay playback multiplier (e.g. 0.5 = half speed, 2 = double speed). Always follow with a system.wait step.\n- broadcast.setReplayPosition: jumps to a specific replay frame number.\n- broadcast.setReplayState: sets replay mode. state values: 0 = play, 1 = pause. Use to freeze on a key moment.",
+  "aiContext": "The iRacing extension controls Race Director cameras and instant replay playback.\n- broadcast.showLiveCam: switches the broadcast camera to follow a specific car. carNum is the car number string (e.g. \"64\"). camGroup must be a numeric groupNum from the CAMERA GROUPS list provided in the check-in cameraGroups field. Best combined with obs.switchScene to the Race Director OBS scene first.\n- broadcast.replayFromTo: plays an instant replay segment between startFrame and endFrame iRacing replay frame numbers. Use for post-incident reviews only — never use during live racing sequences.\n- broadcast.setReplaySpeed: sets replay playback multiplier (e.g. 0.5 = half speed, 2 = double speed). Always follow with a system.wait step.\n- broadcast.setReplayPosition: jumps to a specific replay frame number.\n- broadcast.setReplayState: sets replay mode. state values: 0 = play, 1 = pause. Use to freeze on a key moment.",
   "contributes": {
     "intents": [
       {
         "intent": "broadcast.showLiveCam",
         "title": "Show Live Camera",
         "category": "broadcast",
-        "description": "Switches the iRacing broadcast camera to follow a specific car. carNum is the car number string (e.g. '64'). camGroup is the numeric iRacing camera group ID from the CAMERA GROUPS list (TV1=11, TV2=12, Chase=20, Blimp=18, PitLane=16). Best combined with obs.switchScene to the Race Director OBS scene first.",
+        "description": "Switches the iRacing broadcast camera to follow a specific car. carNum is the car number string (e.g. '64'). camGroup must be a numeric groupNum from the CAMERA GROUPS list provided in the check-in cameraGroups field. Best combined with obs.switchScene to the Race Director OBS scene first.",
         "schema": {
           "type": "object",
           "properties": {

@@ -113,6 +113,7 @@ describe('Session Check-In Acceptance Criteria', () => {
       checkinSession: vi.fn().mockResolvedValue({}),
       wrapSession: vi.fn().mockResolvedValue({}),
       refreshCheckin: vi.fn().mockResolvedValue({}),
+      getCapabilities: vi.fn(() => ({ extensions: [], connections: {} })),
       getCheckinId: vi.fn(() => sessionManagerState.checkinId),
       getCheckinTtlSeconds: vi.fn(() => sessionManagerState.checkinTtlSeconds),
       getSessionConfig: vi.fn(() => sessionManagerState.sessionConfig),
@@ -418,8 +419,9 @@ describe('Session Check-In Acceptance Criteria', () => {
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Should have called checkinSession (full POST) for each event
-      expect(mockSessionManager.checkinSession.mock.calls.length).toBeGreaterThanOrEqual(3);
+      // With deep-equality guarding (#220), identical capabilities across all three
+      // events means only the first event triggers a re-checkin.
+      expect(mockSessionManager.checkinSession.mock.calls.length).toBe(1);
     });
   });
 
