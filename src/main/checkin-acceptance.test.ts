@@ -326,7 +326,7 @@ describe('Session Check-In Acceptance Criteria', () => {
 
       await new Promise(resolve => setTimeout(resolve, 50));
 
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should refresh check-in via SessionManager when iRacing connects', async () => {
@@ -340,7 +340,7 @@ describe('Session Check-In Acceptance Criteria', () => {
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should refresh check-in via SessionManager when YouTube status changes', async () => {
@@ -354,7 +354,7 @@ describe('Session Check-In Acceptance Criteria', () => {
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should refresh check-in when extension capabilities change (enable)', async () => {
@@ -368,7 +368,7 @@ describe('Session Check-In Acceptance Criteria', () => {
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should refresh check-in when extension capabilities change (disable)', async () => {
@@ -382,7 +382,7 @@ describe('Session Check-In Acceptance Criteria', () => {
       });
 
       await new Promise(resolve => setTimeout(resolve, 50));
-      expect(mockSessionManager.refreshCheckin).toHaveBeenCalled();
+      expect(mockSessionManager.checkinSession).toHaveBeenCalled();
     });
 
     it('should NOT refresh if not currently checked in', async () => {
@@ -418,8 +418,8 @@ describe('Session Check-In Acceptance Criteria', () => {
 
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Should have called refreshCheckin for each event
-      expect(mockSessionManager.refreshCheckin.mock.calls.length).toBeGreaterThanOrEqual(3);
+      // Should have called checkinSession (full POST) for each event
+      expect(mockSessionManager.checkinSession.mock.calls.length).toBeGreaterThanOrEqual(3);
     });
   });
 
