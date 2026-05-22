@@ -503,7 +503,12 @@ export class SessionManager extends EventEmitter {
           warningCount: String(this.checkinWarnings.length),
         });
 
-        this.setState('checked-in');
+        // Always emit stateChanged on a successful check-in — even when the state
+        // string is already 'checked-in' (re-checkin after SESSION_TYPE_CHANGE, issue
+        // #225). setState() deduplicates on the string value, so it would silently
+        // suppress the event and leave listeners (e.g. CloudPoller) with the old ID.
+        this.state = 'checked-in';
+        this.emitStateChanged();
         return this.getState();
       }
 

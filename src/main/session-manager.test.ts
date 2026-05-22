@@ -491,4 +491,88 @@ describe('SessionManager', () => {
       expect(posted).toBe(true);
     });
   });
+
+  // Issue #225: stale checkin ID not propagated to poll loop after SESSION_TYPE_CHANGE
+  // -----------------------------------------------------------------------
+  describe('checkinSession re-checkin propagation (#225)', () => {
+    const session: RaceSession = {
+      raceSessionId: 'sess-225',
+      name: 'Re-checkin Test',
+      centerId: 'test-center',
+    };
+
+    const checkinResponseFor = (id: string) => ({
+      status: 'standby',
+      checkinId: id,
+      checkinTtlSeconds: 120,
+      sessionConfig: {
+        raceSessionId: 'sess-225',
+        name: '',
+        status: '',
+        simulator: 'iRacing',
+        drivers: [],
+        obsScenes: [],
+      },
+      warnings: [],
+    });
+
+    beforeEach(async () => {
+      // Discover session, select it, and perform initial check-in
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => [session],
+          headers: new Headers(),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => checkinResponseFor('old-id'),
+          headers: new Headers(),
+        });
+
+      await sessionManager.discover();
+      sessionManager.selectSession('sess-225');
+      await sessionManager.checkinSession({ forceCheckin: true });
+
+      expect(sessionManager.getState().checkinId).toBe('old-id');
+      expect(sessionManager.getState().state).toBe('checked-in');
+    });
+
+    it('emits stateChanged with new checkin ID when re-checking in from already-checked-in state', async () => {
+      const stateChangedSpy = vi.fn();
+      sessionManager.on('stateChanged', stateChangedSpy);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => checkinResponseFor('new-id'),
+        headers: new Headers(),
+      });
+
+      await sessionManager.checkinSession({ forceCheckin: true });
+
+      expect(sessionManager.getState().checkinId).toBe('new-id');
+
+      // stateChanged must have fired so the orchestrator can call
+      // cloudPoller.updateCheckin(newId, ttl) — this was the bug (#225).
+      const lastCall = stateChangedSpy.mock.calls[stateChangedSpy.mock.calls.length - 1][0];
+      expect(lastCall.state).toBe('checked-in');
+      expect(lastCall.checkinId).toBe('new-id');
+    });
+
+    it('updates the stored checkin ID after a successful re-checkin', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => checkinResponseFor('re-id'),
+        headers: new Headers(),
+      });
+
+      await sessionManager.checkinSession({ forceCheckin: true });
+
+      expect(sessionManager.getCheckinId()).toBe('re-id');
+    });
+  });
 });

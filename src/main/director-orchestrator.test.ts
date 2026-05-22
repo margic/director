@@ -55,6 +55,7 @@ describe('DirectorOrchestrator', () => {
       getObsScenes: vi.fn(() => []),
       getCameraGroups: vi.fn(() => []),
       getDrivers: vi.fn(() => []),
+      executeInternalDirective: vi.fn(),
     };
 
     mockSessionManager = Object.assign(new EventEmitter(), {
@@ -666,6 +667,66 @@ describe('DirectorOrchestrator', () => {
       // Should not throw
       await new Promise(resolve => setTimeout(resolve, 20));
       expect(mockSessionManager.refreshCheckin).toHaveBeenCalledTimes(1);
+    });
+
+    it('should update CloudPoller with new checkin ID after SESSION_TYPE_CHANGE → Race re-checkin (#225)', async () => {
+      // CloudPoller needs a non-crashing fetch
+      global.fetch = vi.fn().mockResolvedValue({
+        status: 204,
+        ok: false,
+        headers: { get: () => null },
+      });
+
+      const session = { raceSessionId: 'session-225', name: 'Test Session' };
+      mockSessionManager.getSelectedSession.mockReturnValue(session);
+      mockSessionManager.getCheckinId.mockReturnValue('old-checkin-id');
+      mockSessionManager.getCheckinTtlSeconds.mockReturnValue(120);
+      mockSessionManager.getState.mockReturnValue({
+        state: 'checked-in',
+        sessions: [],
+        selectedSession: session,
+        checkinStatus: 'standby',
+        checkinId: 'old-checkin-id',
+        sessionConfig: null,
+        checkinWarnings: [],
+        checkinTtlSeconds: 120,
+      });
+
+      // Start CloudPoller in auto mode — it will be created with old-checkin-id
+      await orchestrator.setMode('auto');
+      const cloudPoller = (orchestrator as any).cloudPoller;
+      expect(cloudPoller).not.toBeNull();
+      expect(cloudPoller.options.checkinId).toBe('old-checkin-id');
+
+      // Establish baseline sessionType (Practice)
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Practice', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 10));
+
+      // Mock checkinSession to simulate a successful re-checkin with a new ID,
+      // emitting stateChanged the same way the real SessionManager would.
+      mockSessionManager.checkinSession.mockImplementationOnce(async () => {
+        mockSessionManager.getCheckinId.mockReturnValue('new-checkin-id');
+        mockSessionManager.getCheckinTtlSeconds.mockReturnValue(180);
+        mockSessionManager.emit('stateChanged', {
+          state: 'checked-in',
+          selectedSession: session,
+          checkinStatus: 'standby',
+          checkinId: 'new-checkin-id',
+          checkinTtlSeconds: 180,
+        });
+        return {};
+      });
+
+      // SESSION_TYPE_CHANGE → Race triggers checkinSession({ forceCheckin: true })
+      mockEventBus.emit('iracing.raceStateChanged', {
+        payload: { sessionFlags: 0, sessionType: 'Race', cars: [] },
+      });
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // CloudPoller must now be using the new checkin ID
+      expect(cloudPoller.options.checkinId).toBe('new-checkin-id');
     });
   });
 });
