@@ -4,6 +4,16 @@ import { safeStorage } from 'electron';
 import { randomUUID } from 'crypto';
 
 /**
+ * Per-camera-group curation entry stored under `iracing.cameraGroupCurations` (issue #223).
+ * Allows operators to attach a free-text description to each iRacing camera group so
+ * the AI Planner can choose an appropriate group for the current race context.
+ */
+export interface IracingCameraGroupCuration {
+  groupNum: number;
+  description: string;
+}
+
+/**
  * Per-scene curation entry stored under `obs.sceneCurations[host]` (issue #203).
  * `included = true` means the scene is exposed to Race Control with its `description`.
  * New scenes default to `included: false`. Stale scenes are removed.
@@ -34,6 +44,11 @@ interface AppConfig {
   };
   iracing: {
     enabled: boolean;
+    /**
+     * Operator-curated camera group descriptions (issue #223).
+     * Each entry maps a groupNum to a free-text description for the AI Planner.
+     */
+    cameraGroupCurations?: IracingCameraGroupCuration[];
   };
   discord: {
     enabled: boolean;
@@ -73,7 +88,10 @@ const schema = {
   iracing: {
     type: 'object',
     properties: {
-      enabled: { type: 'boolean', default: true }
+      enabled: { type: 'boolean', default: true },
+      // cameraGroupCurations: IracingCameraGroupCuration[] — issue #223.
+      // Schema kept loose (array); per-entry shape is enforced in main.ts.
+      cameraGroupCurations: { type: 'array', default: [] },
     },
     default: {}
   },

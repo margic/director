@@ -59,4 +59,14 @@ describe('resolveCameraGroup', () => {
   it('handles "0" as a valid numeric string', () => {
     expect(resolveCameraGroup('0', sampleGroups)).toBe(0);
   });
+
+  it('passes through a numeric camGroup directly without name-lookup', () => {
+    expect(resolveCameraGroup(11, sampleGroups)).toBe(11);
+    expect(resolveCameraGroup(9, sampleGroups)).toBe(9);
+    expect(resolveCameraGroup(99, sampleGroups)).toBe(99); // unknown number still passes through
+  });
+
+  it('passes through camGroup: 0 as-is — does NOT treat 0 as undefined/missing', () => {
+    expect(resolveCameraGroup(0, sampleGroups)).toBe(0);
+  });
 });

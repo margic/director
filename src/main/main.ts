@@ -218,8 +218,12 @@ app.on('ready', () => {
     const camPayload = eventBus.getLastEventPayload('iracing.cameraGroupsChanged');
     const driverPayload = eventBus.getLastEventPayload('iracing.driversChanged');
 
-    const cameraGroups: { groupNum: number; groupName: string }[] =
-      (camPayload?.groups ?? []).map((g: any) => ({ groupNum: g.groupNum, groupName: g.groupName }));
+    const cameraGroupCurations = (configService.get('iracing').cameraGroupCurations ?? []) as import('./config-service').IracingCameraGroupCuration[];
+    const cameraGroups: import('./director-types').CameraGroup[] =
+      (camPayload?.groups ?? []).map((g: any) => {
+        const curation = cameraGroupCurations.find(c => c.groupNum === g.groupNum);
+        return { groupNum: g.groupNum, groupName: g.groupName, ...(curation ? { description: curation.description } : {}) };
+      });
 
     const drivers: { carNumber: string; userName: string; carName: string }[] =
       (driverPayload?.drivers ?? []).map((d: any) => ({ carNumber: d.carNumber, userName: d.userName, carName: d.carName }));

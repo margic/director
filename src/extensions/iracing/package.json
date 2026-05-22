@@ -16,10 +16,10 @@
           "type": "object",
           "properties": {
             "carNum": { "type": "string" },
-            "camGroup": { "type": "string" },
+            "camGroup": { "type": "integer", "description": "Numeric groupNum from the CAMERA GROUPS list provided in the check-in cameraGroups field." },
             "camNum": { "type": "string" }
           },
-          "required": ["carNum"]
+          "required": ["carNum", "camGroup"]
         }
       },
       {
