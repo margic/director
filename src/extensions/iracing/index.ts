@@ -195,7 +195,7 @@ export async function activate(director: ExtensionAPI) {
     initNativeFunctions(director);
 
     // Register Intents
-    director.registerIntentHandler('broadcast.showLiveCam', async (payload: { carNum: string, camGroup?: string, camNum?: string }) => {
+    director.registerIntentHandler('broadcast.showLiveCam', async (payload: { carNum: string, camGroup?: number, camNum?: string }) => {
         handleShowLiveCam(payload);
     });
 
@@ -1080,7 +1080,7 @@ function pollSessionData(director: ExtensionAPI) {
     }
 }
 
-function handleShowLiveCam(payload: { carNum: string, camGroup?: string, camNum?: string }) {
+function handleShowLiveCam(payload: { carNum: string, camGroup?: number, camNum?: string }) {
     if (!directorAPI) return;
     const group = resolveCameraGroup(payload.camGroup, cachedCameraGroups);
     const carVal = parseInt(payload.carNum);
