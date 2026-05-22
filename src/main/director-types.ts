@@ -264,6 +264,8 @@ export interface DirectorExtensionCapabilities {
 export interface CameraGroup {
   groupNum: number;
   groupName: string;
+  /** Operator-authored description for AI Planner curation (issue #223). */
+  description?: string;
 }
 
 /**
